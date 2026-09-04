@@ -1,29 +1,30 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
+using SharpClaw.ModuleSDK;
 
-namespace SharpClaw.TestFixtures.ExternalModule;
+namespace SharpClaw.TestFixtures.ExternalRegistration;
 
-public sealed class InProcessStorageFixtureModule : ISharpClawModule
+public sealed class InProcessStorageFixtureRegistration : ISharpClawModule
 {
-    public const string ModuleId = "synthetic_inprocess_storage";
+    public const string SourceId = "synthetic_inprocess_storage";
     public const string ToolPrefixValue = "sis";
     public const string StorageName = "records";
 
-    public ModuleIdentity Identity { get; } = new(ModuleId, "Synthetic in-process storage", ToolPrefixValue);
+    public ModuleIdentity Identity { get; } = new(SourceId, "Synthetic in-process storage", ToolPrefixValue);
 
-    public void Configure(ISharpClawModuleBuilder module)
+    public void ConfigureServices(IServiceCollection services)
     {
-        module.Services.AddSingleton<InProcessStorageToolHandler>();
-        module.Storage.Add(new ModuleStorageContractDescriptor(
-            ModuleId,
+        services.AddSingleton<InProcessStorageToolHandler>();
+        services.AddStorage(new ScopedStorageContractDescriptor(
+            SourceId,
             StorageName,
             [
-                new(ModuleStorageOperations.List),
-                new(ModuleStorageOperations.Upsert),
+                new(ScopedStorageOperations.List),
+                new(ScopedStorageOperations.Upsert),
             ],
-            Indexes: [new("name", ModuleStorageIndexValueKind.String)]));
-        module.Tools.Add<InProcessStorageToolHandler>(
+            Indexes: [new("name", ScopedStorageIndexValueKind.String)]));
+        services.AddTool<InProcessStorageToolHandler>(
             new ToolDescriptor("synthetic_inprocess_storage", "Synthetic storage tool.", ToolSchemas.EmptyObject));
     }
 }

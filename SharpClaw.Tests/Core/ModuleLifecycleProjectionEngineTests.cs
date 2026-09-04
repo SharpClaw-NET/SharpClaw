@@ -1,20 +1,20 @@
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Core;
 
 [TestFixture]
-public sealed class ModuleLifecycleProjectionEngineTests
+public sealed class RegistrationLifecycleProjectionEngineTests
 {
     [Test]
     public void ProjectState_UsesManifestVersionAndExternalRegistrationRules()
     {
-        var engine = new ModuleLifecycleProjectionEngine();
+        var engine = new RegistrationLifecycleProjectionEngine();
         var createdAt = DateTimeOffset.Parse("2026-07-02T10:00:00Z");
         var updatedAt = DateTimeOffset.Parse("2026-07-02T11:00:00Z");
 
-        var response = engine.ProjectState(new ModuleLifecycleStateFacts(
-            ModuleId: "sample",
+        var response = engine.ProjectState(new RegistrationLifecycleStateFacts(
+            SourceId: "sample",
             DisplayName: "Sample",
             ToolPrefix: "sam",
             IsExternal: true,
@@ -25,9 +25,9 @@ public sealed class ModuleLifecycleProjectionEngineTests
             UpdatedAt: updatedAt,
             ManifestVersion: "1.0.0"));
 
-        typeof(ModuleLifecycleProjectionEngine).Assembly.GetName().Name
+        typeof(RegistrationLifecycleProjectionEngine).Assembly.GetName().Name
             .Should().Be("SharpClaw.Core");
-        typeof(ModuleStateResponse).Assembly.GetName().Name
+        typeof(RegistrationStateResponse).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
         response.Enabled.Should().BeTrue();
         response.Registered.Should().BeTrue();
@@ -37,12 +37,12 @@ public sealed class ModuleLifecycleProjectionEngineTests
     }
 
     [Test]
-    public void ProjectState_UsesPersistedStateForBundledModules()
+    public void ProjectState_UsesPersistedStateForBundledRegistrations()
     {
-        var engine = new ModuleLifecycleProjectionEngine();
+        var engine = new RegistrationLifecycleProjectionEngine();
 
-        var response = engine.ProjectState(new ModuleLifecycleStateFacts(
-            ModuleId: "bundled",
+        var response = engine.ProjectState(new RegistrationLifecycleStateFacts(
+            SourceId: "bundled",
             DisplayName: "Bundled",
             ToolPrefix: "bun",
             IsExternal: false,
@@ -61,11 +61,11 @@ public sealed class ModuleLifecycleProjectionEngineTests
     [Test]
     public void ProjectDetail_ProjectsCountsContractsAndSatisfiedRequirements()
     {
-        var engine = new ModuleLifecycleProjectionEngine();
+        var engine = new RegistrationLifecycleProjectionEngine();
 
-        var detail = engine.ProjectDetail(new ModuleLifecycleDetailFacts(
-            State: new ModuleLifecycleStateFacts(
-                ModuleId: "detail",
+        var detail = engine.ProjectDetail(new RegistrationLifecycleDetailFacts(
+            State: new RegistrationLifecycleStateFacts(
+                SourceId: "detail",
                 DisplayName: "Detail",
                 ToolPrefix: "det",
                 IsExternal: false,
@@ -85,12 +85,12 @@ public sealed class ModuleLifecycleProjectionEngineTests
             ExportedContractNames: ["module.export", "protocol.export", "module.export"],
             RequiredContracts:
             [
-                new ModuleLifecycleRequirementFacts("module.required", Optional: false, IsSatisfied: true),
-                new ModuleLifecycleRequirementFacts("protocol.optional", Optional: true, IsSatisfied: false),
-                new ModuleLifecycleRequirementFacts("module.required", Optional: false, IsSatisfied: true)
+                new RegistrationLifecycleRequirementFacts("module.required", Optional: false, IsSatisfied: true),
+                new RegistrationLifecycleRequirementFacts("protocol.optional", Optional: true, IsSatisfied: false),
+                new RegistrationLifecycleRequirementFacts("module.required", Optional: false, IsSatisfied: true)
             ]));
 
-        typeof(ModuleDetailResponse).Assembly.GetName().Name
+        typeof(PackageDetailResponse).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
         detail.ExecutionTimeoutSeconds.Should().Be(60);
         detail.ToolCount.Should().Be(3);
@@ -109,7 +109,7 @@ public sealed class ModuleLifecycleProjectionEngineTests
     [Test]
     public void ProjectDetail_PreservesExplicitTimeoutFacts()
     {
-        var engine = new ModuleLifecycleProjectionEngine();
+        var engine = new RegistrationLifecycleProjectionEngine();
 
         var zero = engine.ProjectDetail(CreateDetailFacts(timeout: 0));
         var negative = engine.ProjectDetail(CreateDetailFacts(timeout: -5));
@@ -121,11 +121,11 @@ public sealed class ModuleLifecycleProjectionEngineTests
     [Test]
     public void ProjectDetail_FailsRequirementsWhenNonOptionalRequirementIsMissing()
     {
-        var engine = new ModuleLifecycleProjectionEngine();
+        var engine = new RegistrationLifecycleProjectionEngine();
 
-        var detail = engine.ProjectDetail(new ModuleLifecycleDetailFacts(
-            State: new ModuleLifecycleStateFacts(
-                ModuleId: "detail",
+        var detail = engine.ProjectDetail(new RegistrationLifecycleDetailFacts(
+            State: new RegistrationLifecycleStateFacts(
+                SourceId: "detail",
                 DisplayName: "Detail",
                 ToolPrefix: "det",
                 IsExternal: false,
@@ -145,17 +145,17 @@ public sealed class ModuleLifecycleProjectionEngineTests
             ExportedContractNames: [],
             RequiredContracts:
             [
-                new ModuleLifecycleRequirementFacts("required.missing", Optional: false, IsSatisfied: false)
+                new RegistrationLifecycleRequirementFacts("required.missing", Optional: false, IsSatisfied: false)
             ]));
 
         detail.ExecutionTimeoutSeconds.Should().Be(30);
         detail.AllRequirementsSatisfied.Should().BeFalse();
     }
 
-    private static ModuleLifecycleDetailFacts CreateDetailFacts(int timeout) =>
+    private static RegistrationLifecycleDetailFacts CreateDetailFacts(int timeout) =>
         new(
-            State: new ModuleLifecycleStateFacts(
-                ModuleId: "timeout",
+            State: new RegistrationLifecycleStateFacts(
+                SourceId: "timeout",
                 DisplayName: "Timeout",
                 ToolPrefix: "tim",
                 IsExternal: false,

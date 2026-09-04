@@ -14,7 +14,7 @@ namespace SharpClaw.Tests.TestHarness;
 public sealed class TestHarnessProviderRegistrationTests
 {
     [Test]
-    public async Task DynamicModuleRegisteredProvidersAppearInPickerService()
+    public async Task DynamicRegistrationRegisteredProvidersAppearInPickerService()
     {
         await using var host = ChatHarnessHost.Create();
 
@@ -30,13 +30,13 @@ public sealed class TestHarnessProviderRegistrationTests
     }
 
     [Test]
-    public async Task DisabledProviderModuleIsNotSelectable()
+    public async Task DisabledProviderRegistrationIsNotSelectable()
     {
         await using var host = ChatHarnessHost.Create();
-        var registry = host.Services.GetRequiredService<ModuleRegistry>();
+        var registry = host.Services.GetRequiredService<RegistrationCatalog>();
         var factory = host.Services.GetRequiredService<ProviderApiClientFactory>();
 
-        registry.Unregister(TestHarnessConstants.ModuleId);
+        registry.Unregister(TestHarnessConstants.SourceId);
 
         factory.IsAvailable(TestHarnessConstants.PlainProviderKey).Should().BeFalse();
         host.Services.GetRequiredService<ProviderService>()

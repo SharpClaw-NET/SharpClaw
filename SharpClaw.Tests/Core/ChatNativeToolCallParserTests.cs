@@ -2,7 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Modules;
@@ -23,18 +23,18 @@ public sealed class ChatNativeToolCallParserTests
                 "run",
                 $$"""{"resource_id":"{{resourceId}}","value":5}"""),
             CreateRegistry(),
-            new ModuleToolExecutionPlanner());
+            new RegistrationToolExecutionPlanner());
 
         plan.Should().NotBeNull();
         plan!.CallId.Should().Be("call-1");
         plan.ActionKey.Should().Be("run");
-        plan.ModuleId.Should().Be("test_module");
+        plan.SourceId.Should().Be("test_registration");
         plan.ToolName.Should().Be("run");
         plan.DirectResourceId.Should().Be(resourceId);
         plan.RequiresResourceExtractor.Should().BeFalse();
 
         using var envelope = JsonDocument.Parse(plan.ScriptJson);
-        envelope.RootElement.GetProperty("module").GetString().Should().Be("test_module");
+        envelope.RootElement.GetProperty("module").GetString().Should().Be("test_registration");
         envelope.RootElement.GetProperty("tool").GetString().Should().Be("run");
         envelope.RootElement.GetProperty("params").GetProperty("value").GetInt32().Should().Be(5);
     }
@@ -46,7 +46,7 @@ public sealed class ChatNativeToolCallParserTests
         var plan = parser.BuildParsePlan(
             new ChatToolCall("call-1", "run", """{"name":"alpha"}"""),
             CreateRegistry(),
-            new ModuleToolExecutionPlanner());
+            new RegistrationToolExecutionPlanner());
 
         plan.Should().NotBeNull();
         plan!.DirectResourceId.Should().BeNull();
@@ -61,7 +61,7 @@ public sealed class ChatNativeToolCallParserTests
         var plan = parser.BuildParsePlan(
             new ChatToolCall("call-1", "run", """{"resourceId":5}"""),
             CreateRegistry(),
-            new ModuleToolExecutionPlanner());
+            new RegistrationToolExecutionPlanner());
 
         plan.Should().NotBeNull();
         plan!.DirectResourceId.Should().BeNull();
@@ -76,7 +76,7 @@ public sealed class ChatNativeToolCallParserTests
         var plan = parser.BuildParsePlan(
             new ChatToolCall("call-1", "missing", "{}"),
             CreateRegistry(),
-            new ModuleToolExecutionPlanner());
+            new RegistrationToolExecutionPlanner());
 
         plan.Should().BeNull();
         ChatNativeToolCallParser.MalformedToolCallResult.Should().Be(
@@ -95,9 +95,9 @@ public sealed class ChatNativeToolCallParserTests
                 "call-1",
                 "run",
                 "{}",
-                "test_module",
+                "test_registration",
                 "run",
-                """{"module":"test_module","tool":"run","params":{}}""",
+                """{"module":"test_registration","tool":"run","params":{}}""",
                 directId,
                 RequiresResourceExtractor: false),
             extractedId);
@@ -109,9 +109,9 @@ public sealed class ChatNativeToolCallParserTests
                 "call-2",
                 "run",
                 "{}",
-                "test_module",
+                "test_registration",
                 "run",
-                """{"module":"test_module","tool":"run","params":{}}""",
+                """{"module":"test_registration","tool":"run","params":{}}""",
                 null,
                 RequiresResourceExtractor: true),
             extractedId);
@@ -141,7 +141,7 @@ public sealed class ChatNativeToolCallParserTests
             new ChatNativeToolCallResolutionRequest(
                 new ChatToolCall("call-1", "run", """{"name":"alpha"}"""),
                 registry,
-                new ModuleToolExecutionPlanner(),
+                new RegistrationToolExecutionPlanner(),
                 async (extraction, ct) =>
                 {
                     await Task.Yield();
@@ -186,7 +186,7 @@ public sealed class ChatNativeToolCallParserTests
                     "run",
                     $$"""{"resourceId":"{{resourceId:D}}"}"""),
                 registry,
-                new ModuleToolExecutionPlanner(),
+                new RegistrationToolExecutionPlanner(),
                 (_, _) => throw new InvalidOperationException(
                     "Extractor delegate should not be called.")));
 
@@ -204,7 +204,7 @@ public sealed class ChatNativeToolCallParserTests
             new ChatNativeToolCallResolutionRequest(
                 new ChatToolCall("call-1", "missing", "{}"),
                 CreateRegistry(),
-                new ModuleToolExecutionPlanner()));
+                new RegistrationToolExecutionPlanner()));
 
         parsed.Should().BeNull();
     }
@@ -220,21 +220,21 @@ public sealed class ChatNativeToolCallParserTests
             new ParsedChatToolCall(
                 "call-1",
                 resourceId,
-                """{"module":"test_module","tool":"run","params":{}}""",
+                """{"module":"test_registration","tool":"run","params":{}}""",
                 ActionKey: "run"),
             callerAgentId);
 
         request.ActionKey.Should().Be("run");
         request.ResourceId.Should().Be(resourceId);
         request.CallerAgentId.Should().Be(callerAgentId);
-        request.ScriptJson.Should().Be("""{"module":"test_module","tool":"run","params":{}}""");
+        request.ScriptJson.Should().Be("""{"module":"test_registration","tool":"run","params":{}}""");
         request.AgentId.Should().BeNull();
     }
 
-    private static ModuleRegistry CreateRegistry()
+    private static RegistrationCatalog CreateRegistry()
     {
-        var registry = new ModuleRegistry();
-        registry.Register(new TestModule());
+        var registry = new RegistrationCatalog();
+        registry.Register(new TestRegistration());
         return registry;
     }
 
@@ -256,9 +256,9 @@ public sealed class ChatNativeToolCallParserTests
         public bool Touched { get; set; }
     }
 
-    private sealed class TestModule : ISharpClawCoreModule
+    private sealed class TestRegistration : ISharpClawCoreRegistration
     {
-        public string Id => "test_module";
+        public string Id => "test_registration";
         public string DisplayName => "Test Module";
         public string ToolPrefix => "test";
 
@@ -266,13 +266,13 @@ public sealed class ChatNativeToolCallParserTests
         {
         }
 
-        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() =>
+        public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() =>
         [
             new(
                 "run",
                 "Run",
                 Json("""{"type":"object"}"""),
-                new ModuleToolPermission(
+                new RegistrationToolPermission(
                     IsPerResource: true,
                     Check: (_, _, _, _) => Task.FromResult(
                         AgentActionResult.Approve(

@@ -2,24 +2,24 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Core;
 
 [TestFixture]
-public sealed class ModuleToolPermissionPlannerTests
+public sealed class RegistrationToolPermissionPlannerTests
 {
     [Test]
     public void BuildPlan_WhenActionKeyIsMissing_Denies()
     {
-        var planner = new ModuleToolPermissionPlanner();
+        var planner = new RegistrationToolPermissionPlanner();
 
-        var plan = planner.BuildPlan(null, null, new ModuleRegistry());
+        var plan = planner.BuildPlan(null, null, new RegistrationCatalog());
 
-        plan.Kind.Should().Be(ModuleToolPermissionPlanKind.Denied);
+        plan.Kind.Should().Be(RegistrationToolPermissionPlanKind.Denied);
         plan.DenialReason.Should().Be(
-            ModuleToolPermissionDenialReason.MissingActionKey);
+            RegistrationToolPermissionDenialReason.MissingActionKey);
         plan.DeniedResult.Should().NotBeNull();
         plan.DeniedResult!.Reason.Should().Be(
             "Module action requires an ActionKey to resolve permissions.");
@@ -28,13 +28,13 @@ public sealed class ModuleToolPermissionPlannerTests
     [Test]
     public void BuildPlan_WhenToolIsNotRegistered_Denies()
     {
-        var planner = new ModuleToolPermissionPlanner();
+        var planner = new RegistrationToolPermissionPlanner();
 
-        var plan = planner.BuildPlan("missing", null, new ModuleRegistry());
+        var plan = planner.BuildPlan("missing", null, new RegistrationCatalog());
 
-        plan.Kind.Should().Be(ModuleToolPermissionPlanKind.Denied);
+        plan.Kind.Should().Be(RegistrationToolPermissionPlanKind.Denied);
         plan.DenialReason.Should().Be(
-            ModuleToolPermissionDenialReason.ToolNotRegistered);
+            RegistrationToolPermissionDenialReason.ToolNotRegistered);
         plan.DeniedResult!.Reason.Should().Be(
             "No module registered for tool 'missing'.");
     }
@@ -43,14 +43,14 @@ public sealed class ModuleToolPermissionPlannerTests
     public void BuildPlan_WhenToolHasNoPermissionDescriptor_Denies()
     {
         var registry = CreateRegistry(null!);
-        var planner = new ModuleToolPermissionPlanner();
+        var planner = new RegistrationToolPermissionPlanner();
 
         var plan = planner.BuildPlan("run", null, registry);
 
-        plan.Kind.Should().Be(ModuleToolPermissionPlanKind.Denied);
+        plan.Kind.Should().Be(RegistrationToolPermissionPlanKind.Denied);
         plan.DenialReason.Should().Be(
-            ModuleToolPermissionDenialReason.MissingPermissionDescriptor);
-        plan.ModuleId.Should().Be("test_module");
+            RegistrationToolPermissionDenialReason.MissingPermissionDescriptor);
+        plan.SourceId.Should().Be("test_registration");
         plan.ToolName.Should().Be("run");
         plan.DeniedResult!.Reason.Should().Be(
             "Module tool 'run' has no permission descriptor.");
@@ -59,16 +59,16 @@ public sealed class ModuleToolPermissionPlannerTests
     [Test]
     public void BuildPlan_WhenPerResourceToolHasNoResourceId_Denies()
     {
-        var registry = CreateRegistry(new ModuleToolPermission(
+        var registry = CreateRegistry(new RegistrationToolPermission(
             IsPerResource: true,
             Check: DirectApprove));
-        var planner = new ModuleToolPermissionPlanner();
+        var planner = new RegistrationToolPermissionPlanner();
 
         var plan = planner.BuildPlan("run", null, registry);
 
-        plan.Kind.Should().Be(ModuleToolPermissionPlanKind.Denied);
+        plan.Kind.Should().Be(RegistrationToolPermissionPlanKind.Denied);
         plan.DenialReason.Should().Be(
-            ModuleToolPermissionDenialReason.MissingResourceId);
+            RegistrationToolPermissionDenialReason.MissingResourceId);
         plan.DeniedResult!.Reason.Should().Be(
             "ResourceId is required for module tool 'run'.");
     }
@@ -76,15 +76,15 @@ public sealed class ModuleToolPermissionPlannerTests
     [Test]
     public async Task BuildPlan_WhenDirectCheckAndDelegateAreBothSet_ChoosesDirectCheck()
     {
-        var registry = CreateRegistry(new ModuleToolPermission(
+        var registry = CreateRegistry(new RegistrationToolPermission(
             IsPerResource: false,
             Check: DirectApprove,
             DelegateTo: "DelegateShouldNotWin"));
-        var planner = new ModuleToolPermissionPlanner();
+        var planner = new RegistrationToolPermissionPlanner();
 
         var plan = planner.BuildPlan("run", null, registry);
 
-        plan.Kind.Should().Be(ModuleToolPermissionPlanKind.DirectCheck);
+        plan.Kind.Should().Be(RegistrationToolPermissionPlanKind.DirectCheck);
         plan.DirectCheck.Should().NotBeNull();
         plan.DelegateTo.Should().BeNull();
         var result = await plan.DirectCheck!(
@@ -98,15 +98,15 @@ public sealed class ModuleToolPermissionPlannerTests
     [Test]
     public void BuildPlan_WhenDelegateIsConfigured_ChoosesHostDelegate()
     {
-        var registry = CreateRegistry(new ModuleToolPermission(
+        var registry = CreateRegistry(new RegistrationToolPermission(
             IsPerResource: false,
             Check: null,
             DelegateTo: "CanRun"));
-        var planner = new ModuleToolPermissionPlanner();
+        var planner = new RegistrationToolPermissionPlanner();
 
         var plan = planner.BuildPlan("run", null, registry);
 
-        plan.Kind.Should().Be(ModuleToolPermissionPlanKind.DelegateToHost);
+        plan.Kind.Should().Be(RegistrationToolPermissionPlanKind.DelegateToHost);
         plan.DirectCheck.Should().BeNull();
         plan.DelegateTo.Should().Be("CanRun");
         plan.CreateUnrecognizedDelegateDeniedResult().Reason.Should().Be(
@@ -116,25 +116,25 @@ public sealed class ModuleToolPermissionPlannerTests
     [Test]
     public void BuildPlan_WhenNoCheckOrDelegateIsConfigured_Denies()
     {
-        var registry = CreateRegistry(new ModuleToolPermission(
+        var registry = CreateRegistry(new RegistrationToolPermission(
             IsPerResource: false,
             Check: null,
             DelegateTo: null));
-        var planner = new ModuleToolPermissionPlanner();
+        var planner = new RegistrationToolPermissionPlanner();
 
         var plan = planner.BuildPlan("run", null, registry);
 
-        plan.Kind.Should().Be(ModuleToolPermissionPlanKind.Denied);
+        plan.Kind.Should().Be(RegistrationToolPermissionPlanKind.Denied);
         plan.DenialReason.Should().Be(
-            ModuleToolPermissionDenialReason.NoPermissionCheckConfigured);
+            RegistrationToolPermissionDenialReason.NoPermissionCheckConfigured);
         plan.DeniedResult!.Reason.Should().Be(
             "Module tool 'run' has no permission check configured.");
     }
 
-    private static ModuleRegistry CreateRegistry(ModuleToolPermission permission)
+    private static RegistrationCatalog CreateRegistry(RegistrationToolPermission permission)
     {
-        var registry = new ModuleRegistry();
-        registry.Register(new TestModule(permission));
+        var registry = new RegistrationCatalog();
+        registry.Register(new TestRegistration(permission));
         return registry;
     }
 
@@ -155,10 +155,10 @@ public sealed class ModuleToolPermissionPlannerTests
         return doc.RootElement.Clone();
     }
 
-    private sealed class TestModule(ModuleToolPermission permission)
-        : ISharpClawCoreModule
+    private sealed class TestRegistration(RegistrationToolPermission permission)
+        : ISharpClawCoreRegistration
     {
-        public string Id => "test_module";
+        public string Id => "test_registration";
         public string DisplayName => "Test Module";
         public string ToolPrefix => "test";
 
@@ -166,7 +166,7 @@ public sealed class ModuleToolPermissionPlannerTests
         {
         }
 
-        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() =>
+        public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() =>
         [
             new(
                 "run",

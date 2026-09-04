@@ -15,17 +15,17 @@ public class SharpClawDbContext(
 
     IQueryable<ProviderDB> ISharpClawDataContext.Providers => Providers;
     IQueryable<ModelDB> ISharpClawDataContext.Models => Models;
-    IQueryable<ModuleStateDB> ISharpClawDataContext.ModuleStates => ModuleStates;
-    IQueryable<ModuleConfigEntryDB> ISharpClawDataContext.ModuleConfigEntries => ModuleConfigEntries;
-    IQueryable<ModuleStorageRecordDB> ISharpClawDataContext.ModuleStorageRecords => ModuleStorageRecords;
-    IQueryable<ModuleStorageIndexEntryDB> ISharpClawDataContext.ModuleStorageIndexEntries => ModuleStorageIndexEntries;
+    IQueryable<RegistrationStateDB> ISharpClawDataContext.RegistrationStates => RegistrationStates;
+    IQueryable<ConfigurationEntryDB> ISharpClawDataContext.ConfigurationEntries => ConfigurationEntries;
+    IQueryable<ScopedStorageRecordDB> ISharpClawDataContext.ScopedStorageRecords => ScopedStorageRecords;
+    IQueryable<ScopedStorageIndexEntryDB> ISharpClawDataContext.ScopedStorageIndexEntries => ScopedStorageIndexEntries;
 
     public DbSet<ProviderDB> Providers => Set<ProviderDB>();
     public DbSet<ModelDB> Models => Set<ModelDB>();
-    public DbSet<ModuleStateDB> ModuleStates => Set<ModuleStateDB>();
-    public DbSet<ModuleConfigEntryDB> ModuleConfigEntries => Set<ModuleConfigEntryDB>();
-    public DbSet<ModuleStorageRecordDB> ModuleStorageRecords => Set<ModuleStorageRecordDB>();
-    public DbSet<ModuleStorageIndexEntryDB> ModuleStorageIndexEntries => Set<ModuleStorageIndexEntryDB>();
+    public DbSet<RegistrationStateDB> RegistrationStates => Set<RegistrationStateDB>();
+    public DbSet<ConfigurationEntryDB> ConfigurationEntries => Set<ConfigurationEntryDB>();
+    public DbSet<ScopedStorageRecordDB> ScopedStorageRecords => Set<ScopedStorageRecordDB>();
+    public DbSet<ScopedStorageIndexEntryDB> ScopedStorageIndexEntries => Set<ScopedStorageIndexEntryDB>();
 
     internal Task<int> SaveChangesThroughKernelAsync(
         CancellationToken cancellationToken = default) =>
@@ -55,40 +55,40 @@ public class SharpClawDbContext(
             entity.HasIndex(model => new { model.Name, model.ProviderId }).IsUnique();
         });
 
-        modelBuilder.Entity<ModuleStateDB>(entity =>
+        modelBuilder.Entity<RegistrationStateDB>(entity =>
         {
-            entity.HasIndex(state => state.ModuleId).IsUnique();
+            entity.HasIndex(state => state.SourceId).IsUnique();
         });
 
-        modelBuilder.Entity<ModuleConfigEntryDB>(entity =>
+        modelBuilder.Entity<ConfigurationEntryDB>(entity =>
         {
-            entity.ToTable("ModuleConfig");
-            entity.HasIndex(entry => new { entry.ModuleId, entry.Key }).IsUnique();
-            entity.Property(entry => entry.ModuleId).HasMaxLength(128);
+            entity.ToTable("Configuration");
+            entity.HasIndex(entry => new { entry.SourceId, entry.Key }).IsUnique();
+            entity.Property(entry => entry.SourceId).HasMaxLength(128);
             entity.Property(entry => entry.Key).HasMaxLength(128);
             entity.Property(entry => entry.Value).HasMaxLength(4096);
         });
 
-        modelBuilder.Entity<ModuleStorageRecordDB>(entity =>
+        modelBuilder.Entity<ScopedStorageRecordDB>(entity =>
         {
-            entity.ToTable("ModuleStorageRecords");
+            entity.ToTable("ScopedStorageRecords");
             entity.HasIndex(record => new
             {
-                record.ModuleId,
+                record.SourceId,
                 record.StorageName,
                 record.RecordKey,
             }).IsUnique();
-            entity.Property(record => record.ModuleId).HasMaxLength(128);
+            entity.Property(record => record.SourceId).HasMaxLength(128);
             entity.Property(record => record.StorageName).HasMaxLength(128);
             entity.Property(record => record.RecordKey).HasMaxLength(256);
         });
 
-        modelBuilder.Entity<ModuleStorageIndexEntryDB>(entity =>
+        modelBuilder.Entity<ScopedStorageIndexEntryDB>(entity =>
         {
-            entity.ToTable("ModuleStorageIndexes");
+            entity.ToTable("ScopedStorageIndexes");
             entity.HasIndex(index => new
             {
-                index.ModuleId,
+                index.SourceId,
                 index.StorageName,
                 index.IndexName,
                 index.StringValue,
@@ -96,7 +96,7 @@ public class SharpClawDbContext(
             });
             entity.HasIndex(index => new
             {
-                index.ModuleId,
+                index.SourceId,
                 index.StorageName,
                 index.IndexName,
                 index.NumberValue,
@@ -104,7 +104,7 @@ public class SharpClawDbContext(
             });
             entity.HasIndex(index => new
             {
-                index.ModuleId,
+                index.SourceId,
                 index.StorageName,
                 index.IndexName,
                 index.DateTimeValue,
@@ -112,7 +112,7 @@ public class SharpClawDbContext(
             });
             entity.HasIndex(index => new
             {
-                index.ModuleId,
+                index.SourceId,
                 index.StorageName,
                 index.IndexName,
                 index.BoolValue,
@@ -120,11 +120,11 @@ public class SharpClawDbContext(
             });
             entity.HasIndex(index => new
             {
-                index.ModuleId,
+                index.SourceId,
                 index.StorageName,
                 index.RecordKey,
             });
-            entity.Property(index => index.ModuleId).HasMaxLength(128);
+            entity.Property(index => index.SourceId).HasMaxLength(128);
             entity.Property(index => index.StorageName).HasMaxLength(128);
             entity.Property(index => index.IndexName).HasMaxLength(128);
             entity.Property(index => index.RecordKey).HasMaxLength(256);

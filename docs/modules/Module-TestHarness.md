@@ -57,12 +57,12 @@ request, or simulates latency. This is how tests verify that a mistaken or
 malicious module tool cannot bypass host permission enforcement.
 
 The header tag `{{testharness}}` is intentionally simple. It returns a
-configured string, records the full `ModuleHeaderTagContext`, and can simulate
+configured string, records the full `RegistrationHeaderTagContext`, and can simulate
 latency or failure. A concrete chat regression test can set an agent custom
 header to `prefix {{testharness}}`, send a normal chat message, and assert that
 the provider captured `prefix tag-value` in the user message. The same test can
 turn on `Chat:DisableHeaderTagExpansion` and assert that the literal
-`{{testharness}}` is sent, or turn on `Chat:DisableModuleHeaderTags` and assert
+`{{testharness}}` is sent, or turn on `Chat:DisableRegistrationHeaderTags` and assert
 that the module resolver was not called.
 
 Cost tests use the provider plugin's `CostFeed`. The configured cost behavior

@@ -105,7 +105,7 @@ jobs:
           </configuration>
           "@ | Set-Content -LiteralPath $config -Encoding utf8
           $bundle = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\bundle"
-          "SharpClawModulePayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SharpClawRegistrationPayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Restore dependency graph
         shell: pwsh
@@ -131,11 +131,11 @@ jobs:
           - domain: Architecture Core Dependencies
             filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.CoreDependencyGuardrailTests'
           - domain: Architecture Module Dependencies
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.ModuleDependencyGuardrailTests|FullyQualifiedName~SharpClaw.Tests.Architecture.ProductionModuleNeutralityTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RegistrationDependencyGuardrailTests|FullyQualifiedName~SharpClaw.Tests.Architecture.ProductionRegistrationNeutralityTests'
           - domain: Runtime Composition
             filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.CanonicalJobsRouteBoundaryTests'
           - domain: Gateway Boundaries
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayContractsIsolationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayModuleLoaderTests|FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests|FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayModuleTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayContractsIsolationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayRegistrationLoaderTests|FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests|FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayRegistrationTests'
           - domain: Persistence Provider
             filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DatabaseProviderOptionsTests'
           - domain: Persistence Environment
@@ -196,7 +196,7 @@ jobs:
           "@ | Set-Content -LiteralPath $config -Encoding utf8
           "SHARPCLAW_NUGET_CONFIG=$config" | Out-File -FilePath $env:GITHUB_ENV -Append
           $bundle = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\bundle"
-          "SharpClawModulePayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SharpClawRegistrationPayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Restore
         shell: pwsh

@@ -24,6 +24,7 @@
   <Folder Name="/Tests/Infrastructure/">
     <Project Path="SharpClaw.DefaultModules/TestHarness.InProcess/SharpClaw.DefaultModules.TestHarness.InProcess.csproj" />
     <Project Path="SharpClaw.DefaultModules/TestHarness.OutOfProcess/SharpClaw.DefaultModules.TestHarness.OutOfProcess.csproj" />
+    <Project Path="SharpClaw.Tests/Fixtures/PermissionRestriction/SharpClaw.TestFixtures.PermissionRestriction.csproj" />
   </Folder>
   <Folder Name="/Solution Items/Build/">
     <File Path="Directory.Build.props" />
@@ -49,8 +50,8 @@
     <File Path="docs/modules/Module-EditorCommon-skill.md" />
     <File Path="docs/modules/Module-EditorCommon.md" />
     <File Path="docs/modules/Module-Enablement-Guide.md" />
-    <File Path="docs/modules/Module-ModuleDev-skill.md" />
-    <File Path="docs/modules/Module-ModuleDev.md" />
+    <File Path="docs/modules/Module-RegistrationDev-skill.md" />
+    <File Path="docs/modules/Module-RegistrationDev.md" />
     <File Path="docs/modules/Module-TestHarness.md" />
     <File Path="docs/modules/Module-VS2026Editor-skill.md" />
     <File Path="docs/modules/Module-VS2026Editor.md" />

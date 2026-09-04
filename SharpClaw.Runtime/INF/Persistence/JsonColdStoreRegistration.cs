@@ -50,7 +50,7 @@ internal static class JsonColdStoreRegistration
         store.UseEncryptionKey(encryptionKey);
     }
 
-    public static string GetModuleDirectory(JsonColdStoreStorageOptions options, Type dbContextType)
+    public static string GetRegistrationDirectory(JsonColdStoreStorageOptions options, Type dbContextType)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(dbContextType);
@@ -60,6 +60,6 @@ internal static class JsonColdStoreRegistration
             "_",
             unsafeName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
 
-        return Path.Combine(options.DataDirectory, "modules", safeName);
+        return Path.Combine(options.DataDirectory, "registrations", safeName);
     }
 }

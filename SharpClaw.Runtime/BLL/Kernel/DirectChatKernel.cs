@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 
@@ -245,7 +245,7 @@ internal sealed class ProviderKernelTransport(IProviderApiClient client) : IKern
         };
 }
 
-/// <summary>Provides one stable conversation when no feature module is loaded.</summary>
+/// <summary>Provides one stable conversation when no feature registration is loaded.</summary>
 public sealed class SingleConversationResolver(Guid conversationId) : IConversationResolver
 {
     private readonly Guid _conversationId = conversationId == Guid.Empty
@@ -293,7 +293,7 @@ internal sealed class StatelessConversationResolver : IConversationResolver
     }
 }
 
-/// <summary>Discards conversation state when the Context module is absent.</summary>
+/// <summary>Discards conversation state when the Context registration is absent.</summary>
 internal sealed class StatelessConversationStore : IConversationStore
 {
     public ValueTask<IReadOnlyList<ChatCompletionMessage>> LoadHistoryAsync(

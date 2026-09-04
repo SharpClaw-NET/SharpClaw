@@ -1,0 +1,21 @@
+<Project>
+  <Target Name="_ResolvePackagedContributionPayloadFiles">
+    <PropertyGroup>
+      <_SharpClawContributionPayloadRoot Condition="'$(SharpClawContributionPayloadRoot)' != ''">$([System.IO.Path]::GetFullPath('$(SharpClawContributionPayloadRoot)'))</_SharpClawContributionPayloadRoot>
+    </PropertyGroup>
+
+    <Error Condition="'$(_SharpClawContributionPayloadRoot)' != '' and !Exists('$(_SharpClawContributionPayloadRoot)\contributions')"
+           Text="SharpClawContributionPayloadRoot must contain a contributions directory." />
+
+    <ItemGroup>
+      <_PackagedContributionPayloadFile Remove="@(_PackagedContributionPayloadFile)" />
+      <_PackagedSidecarHostFile Remove="@(_PackagedSidecarHostFile)" />
+
+      <_PackagedContributionPayloadFile Include="$(_SharpClawContributionPayloadRoot)\contributions\**\*"
+                                        Condition="'$(_SharpClawContributionPayloadRoot)' != ''" />
+
+      <_PackagedSidecarHostFile Include="$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\SharpClaw.SidecarHost.OutOfProcess*"
+                                Condition="'$(PkgSharpClaw_SidecarHost_OutOfProcess)' != ''" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -22,7 +22,7 @@ public sealed class BaseClientFeatureOwnershipTests
         source.Should().NotContain("ClearanceOptions");
         source.Should().NotContain("MakeClearanceCombo");
         source.Should().NotContain("permissions-metadata");
-        source.Should().NotContain("ModulePermissionMetadata");
+        source.Should().NotContain("RegistrationPermissionMetadata");
     }
 
     [Test]

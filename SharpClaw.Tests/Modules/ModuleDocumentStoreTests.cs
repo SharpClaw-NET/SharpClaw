@@ -1,31 +1,31 @@
 using System.Text.Json;
 using FluentAssertions;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class ModuleDocumentStoreTests
+public sealed class ScopedDocumentStoreTests
 {
     [Test]
     public async Task UpsertManyAsync_PerformanceShape_UsesSingleBatchGatewayCall()
     {
         var gateway = new RecordingStorageGateway();
-        var store = new ModuleDocumentStore<SampleRecord>(
+        var store = new ScopedDocumentStore<SampleRecord>(
             gateway,
-            "sample_module",
+            "sample_registration",
             "jobs");
 
         var saved = await store.UpsertManyAsync(
             Enumerable.Range(0, 25)
-                .Select(i => new ModuleDocumentWrite<SampleRecord>(
+                .Select(i => new ScopedDocumentWrite<SampleRecord>(
                     $"job-{i:D2}",
                     new SampleRecord("Pending", i),
                     new { status = "Pending", priority = i })));
 
         saved.Should().Be(25);
         gateway.Calls.Should().ContainSingle();
-        gateway.Calls[0].Operation.Should().Be(ModuleStorageOperations.BatchUpsert);
+        gateway.Calls[0].Operation.Should().Be(ScopedStorageOperations.BatchUpsert);
         gateway.Calls[0].Parameters
             .GetProperty("records")
             .GetArrayLength()
@@ -37,9 +37,9 @@ public sealed class ModuleDocumentStoreTests
     public async Task QueryBuilder_SendsIndexFiltersOrderAndLimit()
     {
         var gateway = new RecordingStorageGateway();
-        var store = new ModuleDocumentStore<SampleRecord>(
+        var store = new ScopedDocumentStore<SampleRecord>(
             gateway,
-            "sample_module",
+            "sample_registration",
             "jobs");
 
         var records = await store.Query()
@@ -53,7 +53,7 @@ public sealed class ModuleDocumentStoreTests
             .Which.Should().Be(new SampleRecord("Pending", 42));
         gateway.Calls.Should().ContainSingle();
         var payload = gateway.Calls[0].Parameters;
-        gateway.Calls[0].Operation.Should().Be(ModuleStorageOperations.Query);
+        gateway.Calls[0].Operation.Should().Be(ScopedStorageOperations.Query);
         payload.GetProperty("filters").EnumerateArray()
             .Select(filter => filter.GetProperty("indexName").GetString())
             .Should()
@@ -67,9 +67,9 @@ public sealed class ModuleDocumentStoreTests
     public async Task ClaimBuilder_RequiresPatchBeforeExecution()
     {
         var gateway = new RecordingStorageGateway();
-        var store = new ModuleDocumentStore<SampleRecord>(
+        var store = new ScopedDocumentStore<SampleRecord>(
             gateway,
-            "sample_module",
+            "sample_registration",
             "jobs");
 
         var act = async () => await store.Claim()
@@ -85,9 +85,9 @@ public sealed class ModuleDocumentStoreTests
     public async Task ClaimBuilder_SendsAtomicClaimPayloadWithPatchAndIndexes()
     {
         var gateway = new RecordingStorageGateway();
-        var store = new ModuleDocumentStore<SampleRecord>(
+        var store = new ScopedDocumentStore<SampleRecord>(
             gateway,
-            "sample_module",
+            "sample_registration",
             "jobs");
 
         var records = await store.Claim()
@@ -104,7 +104,7 @@ public sealed class ModuleDocumentStoreTests
             .Which.Status.Should().Be("Running");
         gateway.Calls.Should().ContainSingle();
         var payload = gateway.Calls[0].Parameters;
-        gateway.Calls[0].Operation.Should().Be(ModuleStorageOperations.Claim);
+        gateway.Calls[0].Operation.Should().Be(ScopedStorageOperations.Claim);
         payload.GetProperty("patch").GetProperty("status").GetString().Should().Be("Running");
         payload.GetProperty("patch").GetProperty("claimedBy").GetString().Should().Be("worker-1");
         payload.GetProperty("indexes").GetProperty("status").GetString().Should().Be("Running");
@@ -113,27 +113,27 @@ public sealed class ModuleDocumentStoreTests
 
     private sealed record SampleRecord(string Status, int Priority);
 
-    private sealed class RecordingStorageGateway : IModuleStorageGateway
+    private sealed class RecordingStorageGateway : IScopedStorageGateway
     {
-        public List<(string ModuleId, string StorageName, string Operation, JsonElement Parameters)> Calls { get; } = [];
+        public List<(string SourceId, string StorageName, string Operation, JsonElement Parameters)> Calls { get; } = [];
 
-        public IReadOnlyList<ModuleStorageContractDescriptor> ListContracts() => [];
+        public IReadOnlyList<ScopedStorageContractDescriptor> ListContracts() => [];
 
         public Task<JsonElement> InvokeAsync(
-            string moduleId,
+            string SourceId,
             string storageName,
             string operation,
             JsonElement parameters,
             CancellationToken ct = default)
         {
-            Calls.Add((moduleId, storageName, operation, parameters.Clone()));
+            Calls.Add((SourceId, storageName, operation, parameters.Clone()));
             var result = operation switch
             {
-                ModuleStorageOperations.BatchUpsert => JsonSerializer.SerializeToElement(new
+                ScopedStorageOperations.BatchUpsert => JsonSerializer.SerializeToElement(new
                 {
                     saved = parameters.GetProperty("records").GetArrayLength(),
                 }),
-                ModuleStorageOperations.Claim => JsonSerializer.SerializeToElement(new
+                ScopedStorageOperations.Claim => JsonSerializer.SerializeToElement(new
                 {
                     records = new[]
                     {

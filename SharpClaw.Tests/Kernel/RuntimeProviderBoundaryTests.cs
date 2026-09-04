@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -193,7 +193,7 @@ public sealed class RuntimeProviderBoundaryTests
         RecordingProvider provider,
         IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
     {
-        var moduleId = "provider-boundary-test";
+        var SourceId = "provider-boundary-test";
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -203,11 +203,11 @@ public sealed class RuntimeProviderBoundaryTests
             .Build();
         var options = new KernelGraphCompileOptions
         {
-            ActionModuleCapabilityGrants = new Dictionary<
+            ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
             {
-                [moduleId] = RuntimeProviderActionManifest.Required.ToDictionary(
+                [SourceId] = RuntimeProviderActionManifest.Required.ToDictionary(
                     key => key.Value,
                     key => KernelActionCatalog.DescriptorFor(key).Capabilities,
                     StringComparer.Ordinal),
@@ -221,7 +221,7 @@ public sealed class RuntimeProviderBoundaryTests
                         typeof(KernelActionEnvelope),
                         typeof(object));
                     return new KernelSensitiveActionApproval(
-                        moduleId,
+                        SourceId,
                         key,
                         descriptor.Version,
                         types.ActionType.AssemblyQualifiedName!,
@@ -234,10 +234,9 @@ public sealed class RuntimeProviderBoundaryTests
                 .ToArray(),
         };
 
-        return new RuntimeKernelAdapter(
+        return RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
-            [new ProviderModule(moduleId, provider, probe)],
+            [new ProviderModule(SourceId, provider, probe)],
             workspace.Paths,
             new ProviderFactory(provider),
             options,
@@ -306,21 +305,21 @@ public sealed class RuntimeProviderBoundaryTests
     }
 
     private sealed class ProviderModule(
-        string moduleId,
+        string SourceId,
         IProviderPlugin provider,
         ProviderProbe probe) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
-            new(moduleId, "Provider boundary test", "provider-boundary");
+            new(SourceId, "Provider boundary test", "provider-boundary");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection module)
         {
-            module.Services.AddSingleton<IProviderPlugin>(provider);
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton<ProviderInterceptor>();
+            module.AddSingleton<IProviderPlugin>(provider);
+            module.AddSingleton(probe);
+            module.AddSingleton<ProviderInterceptor>();
             foreach (var action in RuntimeProviderActionManifest.Required)
             {
-                module.Hooks.For(action).Use<ProviderInterceptor>(new HookOrdering(
+                module.OnAction(action).Use<ProviderInterceptor>(new HookOrdering(
                     $"provider-boundary-{action.Value}",
                     HookPriority.Normal,
                     [],
@@ -330,7 +329,7 @@ public sealed class RuntimeProviderBoundaryTests
             }
         }
 
-        public ValueTask StartAsync(ModuleStartContext context, CancellationToken cancellationToken) =>
+        public ValueTask StartAsync(ServiceStartContext context, CancellationToken cancellationToken) =>
             ValueTask.CompletedTask;
 
         public ValueTask StopAsync(CancellationToken cancellationToken) =>

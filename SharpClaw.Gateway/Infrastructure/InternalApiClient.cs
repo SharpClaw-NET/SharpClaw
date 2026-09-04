@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -169,6 +170,44 @@ public sealed class InternalApiClient(
         return await httpClient.SendAsync(request, ct);
     }
 
+    public async Task ForwardWebSocketAsync(
+        HttpContext context,
+        string pathAndQuery,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pathAndQuery);
+
+        using var upstream = new ClientWebSocket();
+        upstream.Options.SetRequestHeader("X-Api-Key", ResolveApiKey());
+        var gatewayToken = ResolveGatewayToken();
+        if (gatewayToken is not null)
+            upstream.Options.SetRequestHeader("X-Gateway-Token", gatewayToken);
+
+        var authorization = context.Request.Headers.Authorization.ToString();
+        if (!string.IsNullOrEmpty(authorization))
+            upstream.Options.SetRequestHeader("Authorization", authorization);
+
+        foreach (var protocol in context.WebSockets.WebSocketRequestedProtocols)
+            upstream.Options.AddSubProtocol(protocol);
+
+        await upstream.ConnectAsync(CreateWebSocketUri(pathAndQuery), cancellationToken);
+        using var downstream = await context.WebSockets.AcceptWebSocketAsync(upstream.SubProtocol);
+        using var relayCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var toRuntime = RelayWebSocketAsync(downstream, upstream, relayCancellation.Token);
+        var toClient = RelayWebSocketAsync(upstream, downstream, relayCancellation.Token);
+        await Task.WhenAny(toRuntime, toClient);
+        relayCancellation.Cancel();
+
+        try
+        {
+            await Task.WhenAll(toRuntime, toClient);
+        }
+        catch (OperationCanceledException) when (relayCancellation.IsCancellationRequested)
+        {
+        }
+    }
+
     /// <summary>
     /// Clears the cached API key so the next request re-reads from disk
     /// or configuration. Call after the backend restarts with a new key.
@@ -237,6 +276,48 @@ public sealed class InternalApiClient(
         foreach (var header in original.Headers)
             clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
         return clone;
+    }
+
+    private Uri CreateWebSocketUri(string pathAndQuery)
+    {
+        var baseAddress = httpClient.BaseAddress
+            ?? throw new InvalidOperationException("The Runtime target address is not configured.");
+        var target = new Uri(baseAddress, pathAndQuery);
+        var builder = new UriBuilder(target)
+        {
+            Scheme = target.Scheme == Uri.UriSchemeHttps ? "wss" : "ws",
+        };
+        return builder.Uri;
+    }
+
+    private static async Task RelayWebSocketAsync(
+        WebSocket source,
+        WebSocket destination,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[64 * 1024];
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var result = await source.ReceiveAsync(buffer, cancellationToken);
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                if (destination.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                {
+                    await destination.CloseOutputAsync(
+                        result.CloseStatus ?? WebSocketCloseStatus.NormalClosure,
+                        result.CloseStatusDescription,
+                        cancellationToken);
+                }
+
+                return;
+            }
+
+            await destination.SendAsync(
+                buffer.AsMemory(0, result.Count),
+                result.MessageType,
+                result.EndOfMessage,
+                cancellationToken);
+        }
     }
 
     private string? ResolveGatewayToken()

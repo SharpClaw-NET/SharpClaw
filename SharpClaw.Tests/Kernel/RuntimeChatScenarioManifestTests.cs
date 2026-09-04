@@ -1,4 +1,5 @@
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
+using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host;
 
@@ -18,7 +19,8 @@ public sealed class RuntimeChatScenarioManifestTests
                 key.Value.StartsWith("chat.", StringComparison.Ordinal)
                 || key.Value.StartsWith("conversation.", StringComparison.Ordinal)));
 
-        var graph = new SharpClaw.Core.Kernel.KernelGraphBuilder().Compile();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var graph = new SharpClaw.Core.Kernel.KernelGraphBuilder().Compile(services);
         RuntimeChatScenarioManifest.RequiredActions.Should().AllSatisfy(key =>
             graph.ContainsAction(key).Should().BeTrue());
     }

@@ -1,6 +1,6 @@
 using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.Host;
 using SharpClaw.Runtime.INF.Persistence;
@@ -86,7 +86,7 @@ public sealed class CanonicalJobsStoreTests
                 new RuntimePersistenceActionRunner(new TestPersistenceActionBoundary())));
     }
 
-    private static BundledModuleStorageGateway CreateGateway(SharpClawDbContext db) =>
+    private static ScopedStorageGateway CreateGateway(SharpClawDbContext db) =>
         new(
             db,
             CanonicalJobsStorageContractProvider.Instance,
@@ -95,18 +95,18 @@ public sealed class CanonicalJobsStoreTests
                     db,
                     new TestRuntimeTransactionActionBoundary())));
 
-    private sealed class CanonicalJobsStorageContractProvider : IModuleStorageContractProvider
+    private sealed class CanonicalJobsStorageContractProvider : IStorageContractProvider
     {
         public static readonly CanonicalJobsStorageContractProvider Instance = new();
 
-        public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() =>
+        public IReadOnlyList<ScopedStorageContractDescriptor> GetStorageContracts() =>
             KernelJobsStorage.Contracts;
 
-        public ModuleStorageContractDescriptor? FindStorageContract(
-            string moduleId,
+        public ScopedStorageContractDescriptor? FindStorageContract(
+            string SourceId,
             string storageName) =>
             KernelJobsStorage.Contracts.FirstOrDefault(contract =>
-                contract.ModuleId == moduleId && contract.StorageName == storageName);
+                contract.SourceId == SourceId && contract.StorageName == storageName);
     }
 
     private sealed class TestRuntimeTransactionActionBoundary : IRuntimeTransactionActionBoundary

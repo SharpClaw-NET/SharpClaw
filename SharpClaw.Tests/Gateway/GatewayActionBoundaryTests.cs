@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Gateway.Infrastructure;
 
@@ -36,7 +36,7 @@ public sealed class GatewayActionBoundaryTests
                 "gateway.stream.close",
                 "gateway.stream.fail",
                 "gateway.stream.cancel",
-                "gateway.module.endpoint.dispatch",
+                "gateway.endpoint.dispatch",
                 "gateway.bridge.session.validate",
                 "gateway.bridge.forward");
     }
@@ -63,7 +63,7 @@ public sealed class GatewayActionBoundaryTests
             "gateway.request.authenticate",
             "gateway.request.authorize",
             "gateway.request.route",
-            "gateway.request.forward",
+            "gateway.endpoint.dispatch",
             "gateway.request.response");
         probe.RequestContexts.Should().OnlyContain(value => value.SubjectId == "user-a");
         probe.RequestContexts.Select(value => value.TraceId).Distinct().Should().ContainSingle();
@@ -85,7 +85,7 @@ public sealed class GatewayActionBoundaryTests
 
         await Task.WhenAll(middleware.InvokeAsync(first), middleware.InvokeAsync(second));
 
-        probe.RequestContexts.Should().HaveCount(12);
+        probe.RequestContexts.Should().HaveCount(10);
         probe.RequestContexts.Select(value => value.SubjectId).Distinct()
             .Should().BeEquivalentTo(["user-a", "user-b"]);
         probe.RequestContexts.Select(value => value.TraceId).Distinct().Should().HaveCount(2);
@@ -105,7 +105,7 @@ public sealed class GatewayActionBoundaryTests
         });
 
         var action = () => middleware.InvokeAsync(
-            CreateContext("GET", "/api/test", "user-a", "request-a"));
+            CreateContext("GET", "/api/chat", "user-a", "request-a"));
 
         await action.Should().ThrowAsync<KernelActionFailedException>();
         nextCalls.Should().Be(0);
@@ -125,7 +125,7 @@ public sealed class GatewayActionBoundaryTests
         });
 
         var action = () => middleware.InvokeAsync(
-            CreateContext("GET", "/api/test", "user-a", "request-a"));
+            CreateContext("GET", "/api/chat", "user-a", "request-a"));
 
         await action.Should().ThrowAsync<KernelActionCancelledException>();
         nextCalls.Should().Be(0);
@@ -195,15 +195,14 @@ public sealed class GatewayActionBoundaryTests
                 "..",
                 ".."));
         var program = File.ReadAllText(Path.Combine(sourceRoot, "SharpClaw.Gateway", "Program.cs"));
-        var moduleMapping = File.ReadAllText(Path.Combine(
+        var proxy = File.ReadAllText(Path.Combine(
             sourceRoot,
             "SharpClaw.Gateway",
-            "Modules",
-            "GatewayModuleEndpointMapping.cs"));
+            "GatewayProxyEndpoints.cs"));
 
         program.Should().Contain("UseMiddleware<GatewayActionMiddleware>()");
-        program.Should().Contain("MapGatewayModuleEndpoints()");
-        moduleMapping.Should().Contain("MapGatewayModuleEndpoints");
+        program.Should().Contain("MapGatewayProxyEndpoints()");
+        proxy.Should().Contain("/api/{**path}");
     }
 
     private static GatewayActionMiddleware CreateMiddleware(
@@ -240,8 +239,6 @@ public sealed class GatewayActionBoundaryTests
 
     private static GatewayBackgroundActionBoundary CreateBoundary(GatewayProbe probe)
     {
-        var registry = new KernelModuleRegistry();
-        registry.Add(new GatewayProbeModule(probe));
         var grants = GatewayActionManifest.Required.ToDictionary(
             static key => key.Value,
             static key => ActionInterceptionCapabilities.Inspect |
@@ -252,9 +249,11 @@ public sealed class GatewayActionBoundaryTests
             ActionInterceptionCapabilities.Cancel;
         grants["gateway.request.authorize"] |=
             ActionInterceptionCapabilities.ReplaceResult;
-        var graph = registry.Compile(options: new KernelGraphCompileOptions
+        var graph = TestServiceGraph.Compile(
+            [new GatewayProbeRegistration(probe)],
+            new KernelGraphCompileOptions
         {
-            ActionModuleCapabilityGrants = new Dictionary<
+            ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(
                 StringComparer.Ordinal)
@@ -302,20 +301,20 @@ public sealed class GatewayActionBoundaryTests
         public string? RestrictAction { get; init; }
     }
 
-    private sealed class GatewayProbeModule(GatewayProbe probe) : ISharpClawModule
+    private sealed class GatewayProbeRegistration(GatewayProbe probe) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } = new(
             "gateway-boundary-test",
             "Gateway boundary test",
             "gateway-boundary");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection extension)
         {
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton<GatewayProbeInterceptor>();
+            extension.AddSingleton(probe);
+            extension.AddSingleton<GatewayProbeInterceptor>();
             foreach (var key in GatewayActionManifest.Required)
             {
-                module.Hooks.For(key).Use<GatewayProbeInterceptor>(new HookOrdering(
+                extension.OnAction(key).Use<GatewayProbeInterceptor>(new HookOrdering(
                     $"gateway-boundary-{key.Value}",
                     HookPriority.Normal,
                     [],

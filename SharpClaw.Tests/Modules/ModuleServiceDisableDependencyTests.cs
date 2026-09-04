@@ -7,11 +7,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Modules;
-using SharpClaw.Contracts.Modules.Foreign;
+using SharpClaw.Contracts.Kernel.Foreign;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Modules;
 using Supprocom.Secrets;
@@ -19,49 +19,49 @@ using Supprocom.Secrets;
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class ModuleServiceDisableDependencyTests
+public sealed class RegistrationServiceDisableDependencyTests
 {
     [Test]
-    public void EvaluateDisableDependencies_CollectsModuleAndProtocolContracts()
+    public void EvaluateDisableDependencies_CollectsRegistrationAndProtocolContracts()
     {
-        var target = new TestModule(
-            "target_module",
+        var target = new TestRegistration(
+            "target_registration",
             "target",
             exportedContracts:
             [
-                new ModuleContractExport("module_contract", typeof(IDisposable))
+                new ContractExport("registration_contract", typeof(IDisposable))
             ],
             exportedProtocolContracts:
             [
-                new ForeignModuleProtocolContractExport(
+                new ForeignRegistrationProtocolContractExport(
                     "protocol_contract",
                     EmptySchema(),
                     [])
             ]);
-        var dependent = new TestModule(
-            "dependent_module",
+        var dependent = new TestRegistration(
+            "dependent_registration",
             "depend",
             requiredContracts:
             [
-                new ModuleContractRequirement("module_contract")
+                new ContractRequirement("registration_contract")
             ],
             requiredProtocolContracts:
             [
-                new ForeignModuleProtocolContractRequirement("protocol_contract")
+                new ForeignRegistrationProtocolContractRequirement("protocol_contract")
             ]);
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         registry.Register(target);
         registry.Register(dependent);
 
-        var decision = ModuleService.EvaluateDisableDependencies(
+        var decision = RegistrationService.EvaluateDisableDependencies(
             target.Id,
             target,
             registry);
 
         decision.CanDisable.Should().BeFalse();
-        decision.BlockerModuleId.Should().Be(dependent.Id);
+        decision.BlockerRegistrationId.Should().Be(dependent.Id);
         decision.BlockingContracts.Should().Equal(
-            "module_contract",
+            "registration_contract",
             "protocol_contract");
     }
 
@@ -69,26 +69,26 @@ public sealed class ModuleServiceDisableDependencyTests
     public async Task DisableAsync_WhenDependencyBlocks_ThrowsLegacyAppMessageBeforeMutation()
     {
         await using var db = CreateDbContext();
-        var target = new TestModule(
-            "target_module",
+        var target = new TestRegistration(
+            "target_registration",
             "target",
             exportedContracts:
             [
-                new ModuleContractExport("module_contract", typeof(IDisposable))
+                new ContractExport("registration_contract", typeof(IDisposable))
             ]);
-        var dependent = new TestModule(
-            "dependent_module",
+        var dependent = new TestRegistration(
+            "dependent_registration",
             "depend",
             requiredContracts:
             [
-                new ModuleContractRequirement("module_contract")
+                new ContractRequirement("registration_contract")
             ]);
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         registry.Register(target);
         registry.Register(dependent);
-        db.ModuleStates.Add(new ModuleStateDB
+        db.RegistrationStates.Add(new RegistrationStateDB
         {
-            ModuleId = target.Id,
+            SourceId = target.Id,
             Enabled = true,
             Version = "1.0.0"
         });
@@ -108,12 +108,12 @@ public sealed class ModuleServiceDisableDependencyTests
         await act.Should()
             .ThrowAsync<InvalidOperationException>()
             .WithMessage(
-                "Cannot disable 'target_module': module 'dependent_module' depends on contract(s) module_contract.");
+                "Cannot disable 'target_registration': module 'dependent_registration' depends on contract(s) registration_contract.");
         target.ShutdownCallCount.Should().Be(0);
-        registry.GetModule(target.Id).Should().BeSameAs(target);
-        var persisted = await db.ModuleStates
+        registry.GetRegistration(target.Id).Should().BeSameAs(target);
+        var persisted = await db.RegistrationStates
             .AsNoTracking()
-            .SingleAsync(s => s.ModuleId == target.Id);
+            .SingleAsync(s => s.SourceId == target.Id);
         persisted.Enabled.Should().BeTrue();
     }
 
@@ -121,28 +121,28 @@ public sealed class ModuleServiceDisableDependencyTests
     public async Task DisableAsync_WhenDependencyAllows_ShutsDownUnregistersAndPersistsDisabled()
     {
         await using var db = CreateDbContext();
-        var target = new TestModule(
-            "target_module",
+        var target = new TestRegistration(
+            "target_registration",
             "target",
             exportedContracts:
             [
-                new ModuleContractExport("module_contract", typeof(IDisposable))
+                new ContractExport("registration_contract", typeof(IDisposable))
             ]);
-        var optionalDependent = new TestModule(
-            "optional_module",
+        var optionalDependent = new TestRegistration(
+            "optional_registration",
             "optional",
             requiredContracts:
             [
-                new ModuleContractRequirement(
-                    "module_contract",
+                new ContractRequirement(
+                    "registration_contract",
                     Optional: true)
             ]);
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         registry.Register(target);
         registry.Register(optionalDependent);
-        db.ModuleStates.Add(new ModuleStateDB
+        db.RegistrationStates.Add(new RegistrationStateDB
         {
-            ModuleId = target.Id,
+            SourceId = target.Id,
             Enabled = true,
             Version = "1.0.0"
         });
@@ -161,11 +161,11 @@ public sealed class ModuleServiceDisableDependencyTests
 
         response.Enabled.Should().BeFalse();
         target.ShutdownCallCount.Should().Be(1);
-        registry.GetModule(target.Id).Should().BeNull();
-        registry.GetModule(optionalDependent.Id).Should().BeSameAs(optionalDependent);
-        var persisted = await db.ModuleStates
+        registry.GetRegistration(target.Id).Should().BeNull();
+        registry.GetRegistration(optionalDependent.Id).Should().BeSameAs(optionalDependent);
+        var persisted = await db.RegistrationStates
             .AsNoTracking()
-            .SingleAsync(s => s.ModuleId == target.Id);
+            .SingleAsync(s => s.SourceId == target.Id);
         persisted.Enabled.Should().BeFalse();
     }
 
@@ -173,7 +173,7 @@ public sealed class ModuleServiceDisableDependencyTests
     {
         var options = new DbContextOptionsBuilder<SharpClawDbContext>()
             .UseInMemoryDatabase(
-                "ModuleDisableDependency_" + Guid.NewGuid().ToString("N"),
+                "RegistrationDisableDependency_" + Guid.NewGuid().ToString("N"),
                 new InMemoryDatabaseRoot())
             .Options;
 
@@ -184,30 +184,30 @@ public sealed class ModuleServiceDisableDependencyTests
         new ConfigurationBuilder().Build();
 
     private static ServiceProvider CreateRootServices(
-        ModuleRegistry registry,
+        RegistrationCatalog registry,
         IConfiguration configuration) =>
         new ServiceCollection()
             .AddSingleton(configuration)
             .AddSingleton(registry)
             .BuildServiceProvider();
 
-    private static ModuleService CreateService(
+    private static RegistrationService CreateService(
         SharpClawDbContext db,
         ModuleLoader loader,
-        ModuleRegistry registry,
+        RegistrationCatalog registry,
         IServiceProvider rootServices,
         IConfiguration configuration) =>
         new(
             db,
             loader,
             registry,
-            new RuntimeModuleDbContextRegistry(),
-            new ModulePersistenceRegistrationFactory(),
-            new ModuleEventDispatcher(
+            new RuntimeRegistrationDbContextRegistry(),
+            new RegistrationPersistenceRegistrationFactory(),
+            new RegistrationEventDispatcher(
                 rootServices,
                 configuration,
-                NullLogger<ModuleEventDispatcher>.Instance),
-            NullLogger<ModuleService>.Instance,
+                NullLogger<RegistrationEventDispatcher>.Instance),
+            NullLogger<RegistrationService>.Instance,
             new ChatCache(configuration),
             new UnusedDocumentUpdater(),
             configuration);
@@ -226,33 +226,33 @@ public sealed class ModuleServiceDisableDependencyTests
         return document.RootElement.Clone();
     }
 
-    private sealed class TestModule(
+    private sealed class TestRegistration(
         string id,
         string toolPrefix,
-        IReadOnlyList<ModuleContractExport>? exportedContracts = null,
-        IReadOnlyList<ModuleContractRequirement>? requiredContracts = null,
-        IReadOnlyList<ForeignModuleProtocolContractExport>? exportedProtocolContracts = null,
-        IReadOnlyList<ForeignModuleProtocolContractRequirement>? requiredProtocolContracts = null)
-        : ISharpClawCoreModule, IForeignModuleProtocolContractExporter
+        IReadOnlyList<ContractExport>? exportedContracts = null,
+        IReadOnlyList<ContractRequirement>? requiredContracts = null,
+        IReadOnlyList<ForeignRegistrationProtocolContractExport>? exportedProtocolContracts = null,
+        IReadOnlyList<ForeignRegistrationProtocolContractRequirement>? requiredProtocolContracts = null)
+        : ISharpClawCoreRegistration, IForeignRegistrationProtocolContractExporter
     {
         public string Id => id;
         public string DisplayName => id;
         public string ToolPrefix => toolPrefix;
         public int ShutdownCallCount { get; private set; }
-        public IReadOnlyList<ModuleContractExport> ExportedContracts =>
+        public IReadOnlyList<ContractExport> ExportedContracts =>
             exportedContracts ?? [];
-        public IReadOnlyList<ModuleContractRequirement> RequiredContracts =>
+        public IReadOnlyList<ContractRequirement> RequiredContracts =>
             requiredContracts ?? [];
-        public IReadOnlyList<ForeignModuleProtocolContractExport> ExportedProtocolContracts =>
+        public IReadOnlyList<ForeignRegistrationProtocolContractExport> ExportedProtocolContracts =>
             exportedProtocolContracts ?? [];
-        public IReadOnlyList<ForeignModuleProtocolContractRequirement> RequiredProtocolContracts =>
+        public IReadOnlyList<ForeignRegistrationProtocolContractRequirement> RequiredProtocolContracts =>
             requiredProtocolContracts ?? [];
 
         public void ConfigureServices(IServiceCollection services)
         {
         }
 
-        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
+        public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() => [];
 
         public Task<string> ExecuteToolAsync(
             string toolName,
@@ -268,16 +268,16 @@ public sealed class ModuleServiceDisableDependencyTests
             return Task.CompletedTask;
         }
 
-        public IForeignModuleProtocolContractInvoker GetProtocolContractInvoker(
+        public IForeignRegistrationProtocolContractInvoker GetProtocolContractInvoker(
             string contractName) =>
             new TestProtocolInvoker(contractName);
     }
 
     private sealed class TestProtocolInvoker(string contractName)
-        : IForeignModuleProtocolContractInvoker
+        : IForeignRegistrationProtocolContractInvoker
     {
         public string ContractName => contractName;
-        public IReadOnlyList<ForeignModuleProtocolContractOperation> Operations => [];
+        public IReadOnlyList<ForeignRegistrationProtocolContractOperation> Operations => [];
 
         public Task<JsonElement> InvokeAsync(
             string operation,

@@ -1,7 +1,7 @@
 using System.Runtime.ExceptionServices;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.INF.Persistence;
 
@@ -41,10 +41,10 @@ public sealed class RuntimePersistenceBoundaryTests
                 [
                     typeof(ProviderDB),
                     typeof(ModelDB),
-                    typeof(ModuleStateDB),
-                    typeof(ModuleConfigEntryDB),
-                    typeof(ModuleStorageRecordDB),
-                    typeof(ModuleStorageIndexEntryDB),
+                    typeof(RegistrationStateDB),
+                    typeof(ConfigurationEntryDB),
+                    typeof(ScopedStorageRecordDB),
+                    typeof(ScopedStorageIndexEntryDB),
                 ]);
     }
 

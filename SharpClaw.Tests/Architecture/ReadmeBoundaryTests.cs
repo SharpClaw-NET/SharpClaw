@@ -6,7 +6,7 @@ namespace SharpClaw.Tests.Architecture;
 public sealed class ReadmeBoundaryTests
 {
     [Test]
-    public void Readme_describes_the_kernel_module_and_storage_boundaries()
+    public void Readme_describes_the_kernel_registration_and_storage_boundaries()
     {
         var root = FindSourceRoot();
         var readme = File.ReadAllText(Path.Combine(root, "README.md"));

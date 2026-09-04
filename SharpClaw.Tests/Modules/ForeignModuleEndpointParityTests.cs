@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.AgentActions;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Clients;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
@@ -18,13 +18,13 @@ using SharpClaw.Runtime.Host.Routing;
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class ForeignModuleEndpointParityTests
+public sealed class ForeignEndpointParityTests
 {
     [Test]
-    public async Task JsonRoutesMatchBetweenInProcessAndOutOfProcessDotNetModules()
+    public async Task JsonRoutesMatchBetweenInProcessAndOutOfProcessDotNetRegistrations()
     {
-        await using var inProcess = await StartAsync(ModuleHostKind.InProcess);
-        await using var outOfProcess = await StartAsync(ModuleHostKind.OutOfProcess);
+        await using var inProcess = await StartAsync(RegistrationHostKind.InProcess);
+        await using var outOfProcess = await StartAsync(RegistrationHostKind.OutOfProcess);
 
         var expected = await ReadJsonSurfaceAsync(inProcess.Api.BaseAddress);
         var actual = await ReadJsonSurfaceAsync(outOfProcess.Api.BaseAddress);
@@ -35,8 +35,8 @@ public sealed class ForeignModuleEndpointParityTests
     [Test]
     public async Task StaticAndStreamingRoutesMatchBetweenDotNetHostModes()
     {
-        await using var inProcess = await StartAsync(ModuleHostKind.InProcess);
-        await using var outOfProcess = await StartAsync(ModuleHostKind.OutOfProcess);
+        await using var inProcess = await StartAsync(RegistrationHostKind.InProcess);
+        await using var outOfProcess = await StartAsync(RegistrationHostKind.OutOfProcess);
 
         var expected = await ReadAssetSurfaceAsync(inProcess.Api.BaseAddress);
         var actual = await ReadAssetSurfaceAsync(outOfProcess.Api.BaseAddress);
@@ -47,8 +47,8 @@ public sealed class ForeignModuleEndpointParityTests
     [Test]
     public async Task WebSocketRoutesMatchBetweenDotNetHostModes()
     {
-        await using var inProcess = await StartAsync(ModuleHostKind.InProcess);
-        await using var outOfProcess = await StartAsync(ModuleHostKind.OutOfProcess);
+        await using var inProcess = await StartAsync(RegistrationHostKind.InProcess);
+        await using var outOfProcess = await StartAsync(RegistrationHostKind.OutOfProcess);
 
         var expected = await ReadWebSocketSurfaceAsync(inProcess.Api.BaseAddress);
         var actual = await ReadWebSocketSurfaceAsync(outOfProcess.Api.BaseAddress);
@@ -59,13 +59,13 @@ public sealed class ForeignModuleEndpointParityTests
     [Test]
     public async Task UnregisterMakesBothDotNetHostModesUnavailable()
     {
-        foreach (var hostKind in Enum.GetValues<ModuleHostKind>())
+        foreach (var hostKind in Enum.GetValues<RegistrationHostKind>())
         {
             await using var host = await StartAsync(hostKind);
             host.Registry.Unregister(host.Module.Id);
 
             using var client = new HttpClient { BaseAddress = host.Api.BaseAddress };
-            using var response = await client.GetAsync("/modules/sample/ping");
+            using var response = await client.GetAsync("/contributions/sample/ping");
 
             response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         }
@@ -74,8 +74,8 @@ public sealed class ForeignModuleEndpointParityTests
     [Test]
     public async Task HealthMatchesBetweenDotNetHostModes()
     {
-        await using var inProcess = await StartAsync(ModuleHostKind.InProcess);
-        await using var outOfProcess = await StartAsync(ModuleHostKind.OutOfProcess);
+        await using var inProcess = await StartAsync(RegistrationHostKind.InProcess);
+        await using var outOfProcess = await StartAsync(RegistrationHostKind.OutOfProcess);
 
         var expected = await inProcess.Module.HealthCheckAsync(CancellationToken.None);
         var actual = await outOfProcess.Module.HealthCheckAsync(CancellationToken.None);
@@ -86,7 +86,7 @@ public sealed class ForeignModuleEndpointParityTests
     private static async Task<JsonSurface> ReadJsonSurfaceAsync(Uri baseAddress)
     {
         using var client = new HttpClient { BaseAddress = baseAddress };
-        using var pingRequest = new HttpRequestMessage(HttpMethod.Get, "/modules/sample/ping?value=42");
+        using var pingRequest = new HttpRequestMessage(HttpMethod.Get, "/contributions/sample/ping?value=42");
         pingRequest.Headers.TryAddWithoutValidation("X-Test-Marker", "from-host");
         using var pingResponse = await client.SendAsync(pingRequest);
 
@@ -94,7 +94,7 @@ public sealed class ForeignModuleEndpointParityTests
             """{"hello":"world"}""",
             Encoding.UTF8,
             "application/json");
-        using var echoResponse = await client.PostAsync("/modules/sample/echo?mode=body", echoContent);
+        using var echoResponse = await client.PostAsync("/contributions/sample/echo?mode=body", echoContent);
         var ping = await ReadJsonAsync(pingResponse);
         var echo = await ReadJsonAsync(echoResponse);
 
@@ -115,8 +115,8 @@ public sealed class ForeignModuleEndpointParityTests
     private static async Task<AssetSurface> ReadAssetSurfaceAsync(Uri baseAddress)
     {
         using var client = new HttpClient { BaseAddress = baseAddress };
-        using var staticResponse = await client.GetAsync("/modules/sample/static/hello.txt");
-        using var streamResponse = await client.GetAsync("/modules/sample/stream");
+        using var staticResponse = await client.GetAsync("/contributions/sample/static/hello.txt");
+        using var streamResponse = await client.GetAsync("/contributions/sample/stream");
 
         staticResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         streamResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -130,7 +130,7 @@ public sealed class ForeignModuleEndpointParityTests
     private static async Task<string> ReadWebSocketSurfaceAsync(Uri baseAddress)
     {
         using var socket = new ClientWebSocket();
-        await socket.ConnectAsync(ToWebSocketUri(baseAddress, "/modules/sample/ws"), CancellationToken.None);
+        await socket.ConnectAsync(ToWebSocketUri(baseAddress, "/contributions/sample/ws"), CancellationToken.None);
 
         var payload = Encoding.UTF8.GetBytes("hello");
         await socket.SendAsync(
@@ -165,36 +165,36 @@ public sealed class ForeignModuleEndpointParityTests
         return document.RootElement.Clone();
     }
 
-    private static async Task<ParityHost> StartAsync(ModuleHostKind hostKind)
+    private static async Task<ParityHost> StartAsync(RegistrationHostKind hostKind)
     {
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         TestWorkspace? workspace = null;
         IAsyncDisposable? runtimeHost = null;
-        ISharpClawRuntimeModule module;
+        ISharpClawRuntimeRegistration module;
 
-        if (hostKind == ModuleHostKind.InProcess)
+        if (hostKind == RegistrationHostKind.InProcess)
         {
-            module = new InProcessParityModule();
+            module = new InProcessParityRegistration();
             registry.Register(module);
         }
         else
         {
             workspace = TestWorkspace.Create();
-            var foreignHost = await ForeignModuleHost.StartAsync(
+            var foreignHost = await ForeignRegistrationHost.StartAsync(
                 Manifest(),
                 RuntimeInfo(),
                 CreateLaunchOptions(workspace));
             runtimeHost = foreignHost;
-            module = foreignHost.Module.Should().BeAssignableTo<ISharpClawRuntimeModule>().Subject;
+            module = foreignHost.Module.Should().BeAssignableTo<ISharpClawRuntimeRegistration>().Subject;
             registry.Register(module, foreignHost);
         }
 
-        var api = await StartApiAsync(registry, hostKind == ModuleHostKind.InProcess);
+        var api = await StartApiAsync(registry, hostKind == RegistrationHostKind.InProcess);
         return new ParityHost(registry, module, api, runtimeHost, workspace);
     }
 
     private static async Task<TestApiHost> StartApiAsync(
-        ModuleRegistry registry,
+        RegistrationCatalog registry,
         bool mapInProcessEndpoints)
     {
         var port = GetFreeTcpPort();
@@ -207,29 +207,29 @@ public sealed class ForeignModuleEndpointParityTests
 
         if (mapInProcessEndpoints)
         {
-            foreach (var module in registry.GetAllModules().OfType<ISharpClawRuntimeModule>())
+            foreach (var module in registry.GetAllPackages().OfType<ISharpClawRuntimeRegistration>())
                 module.MapEndpoints(app);
         }
         else
         {
-            app.MapForeignModuleEndpoints(registry);
+            app.MapForeignEndpoints(registry);
         }
 
         await app.StartAsync();
         return new TestApiHost(app, baseAddress);
     }
 
-    private static ModuleManifest Manifest() =>
+    private static PackageManifest Manifest() =>
         new(
-            "sample_dotnet_module",
+            "sample_dotnet_registration",
             "Sample .NET Module",
             "1.0.0",
             "sdm",
             "SharpClaw.TestFixtures.ForeignSidecar.dll",
             "0.0.0");
 
-    private static ModuleManifestRuntimeInfo RuntimeInfo() =>
-        ModuleManifestRuntimeInfo.FromJson("""
+    private static PackageRuntimeInfo RuntimeInfo() =>
+        PackageRuntimeInfo.FromJson("""
         {
           "runtime": "dotnet",
           "hostMode": "sidecar",
@@ -237,16 +237,16 @@ public sealed class ForeignModuleEndpointParityTests
         }
         """);
 
-    private static ForeignModuleHostLaunchOptions CreateLaunchOptions(TestWorkspace workspace)
+    private static ForeignRegistrationHostLaunchOptions CreateLaunchOptions(TestWorkspace workspace)
     {
         var helperPath = ResolveSidecarHelperPath();
-        return new ForeignModuleHostLaunchOptions
+        return new ForeignRegistrationHostLaunchOptions
         {
             ExecutablePath = "dotnet",
             Arguments = [helperPath, "--mode", "normal"],
             WorkingDirectory = Path.GetDirectoryName(helperPath),
             ModuleDirectory = workspace.ModuleDir,
-            ModuleDataDirectory = workspace.DataDir,
+            RegistrationDataDirectory = workspace.DataDir,
             ControlAddress = new Uri($"http://127.0.0.1:{GetFreeTcpPort()}"),
             ControlToken = "run-token",
             StartupTimeout = TimeSpan.FromSeconds(5),
@@ -300,7 +300,7 @@ public sealed class ForeignModuleEndpointParityTests
         finally { listener.Stop(); }
     }
 
-    private enum ModuleHostKind
+    private enum RegistrationHostKind
     {
         InProcess,
         OutOfProcess,
@@ -333,14 +333,14 @@ public sealed class ForeignModuleEndpointParityTests
     }
 
     private sealed class ParityHost(
-        ModuleRegistry registry,
-        ISharpClawRuntimeModule module,
+        RegistrationCatalog registry,
+        ISharpClawRuntimeRegistration module,
         TestApiHost api,
         IAsyncDisposable? runtimeHost,
         TestWorkspace? workspace) : IAsyncDisposable
     {
-        public ModuleRegistry Registry => registry;
-        public ISharpClawRuntimeModule Module => module;
+        public RegistrationCatalog Registry => registry;
+        public ISharpClawRuntimeRegistration Module => module;
         public TestApiHost Api => api;
 
         public async ValueTask DisposeAsync()
@@ -386,9 +386,9 @@ public sealed class ForeignModuleEndpointParityTests
         }
     }
 
-    private sealed class InProcessParityModule : ISharpClawRuntimeModule
+    private sealed class InProcessParityRegistration : ISharpClawRuntimeRegistration
     {
-        public string Id => "sample_dotnet_module";
+        public string Id => "sample_dotnet_registration";
         public string DisplayName => "Sample .NET Module";
         public string ToolPrefix => "sdm";
 
@@ -396,7 +396,7 @@ public sealed class ForeignModuleEndpointParityTests
         {
         }
 
-        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
+        public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() => [];
 
         public Task<string> ExecuteToolAsync(
             string toolName,
@@ -406,13 +406,13 @@ public sealed class ForeignModuleEndpointParityTests
             CancellationToken ct) =>
             throw new NotSupportedException();
 
-        public Task<ModuleHealthStatus> HealthCheckAsync(CancellationToken ct) =>
-            Task.FromResult(new ModuleHealthStatus(IsHealthy: true, Message: "ready"));
+        public Task<PackageHealthStatus> HealthCheckAsync(CancellationToken ct) =>
+            Task.FromResult(new PackageHealthStatus(IsHealthy: true, Message: "ready"));
 
         public void MapEndpoints(object app)
         {
             var endpoints = (IEndpointRouteBuilder)app;
-            endpoints.MapGet("/modules/sample/ping", async context =>
+            endpoints.MapGet("/contributions/sample/ping", async context =>
             {
                 if (!await EnsureAvailableAsync(context))
                     return;
@@ -426,7 +426,7 @@ public sealed class ForeignModuleEndpointParityTests
                 });
             });
 
-            endpoints.MapPost("/modules/sample/echo", async context =>
+            endpoints.MapPost("/contributions/sample/echo", async context =>
             {
                 if (!await EnsureAvailableAsync(context))
                     return;
@@ -442,7 +442,7 @@ public sealed class ForeignModuleEndpointParityTests
                 });
             });
 
-            endpoints.MapGet("/modules/sample/static/hello.txt", async context =>
+            endpoints.MapGet("/contributions/sample/static/hello.txt", async context =>
             {
                 if (!await EnsureAvailableAsync(context))
                     return;
@@ -451,7 +451,7 @@ public sealed class ForeignModuleEndpointParityTests
                 await context.Response.WriteAsync("static-parity-asset", context.RequestAborted);
             });
 
-            endpoints.MapGet("/modules/sample/stream", async context =>
+            endpoints.MapGet("/contributions/sample/stream", async context =>
             {
                 if (!await EnsureAvailableAsync(context))
                     return;
@@ -462,7 +462,7 @@ public sealed class ForeignModuleEndpointParityTests
                     context.RequestAborted);
             });
 
-            endpoints.MapGet("/modules/sample/ws", async context =>
+            endpoints.MapGet("/contributions/sample/ws", async context =>
             {
                 if (!await EnsureAvailableAsync(context))
                     return;
@@ -505,14 +505,14 @@ public sealed class ForeignModuleEndpointParityTests
 
         private static async Task<bool> EnsureAvailableAsync(HttpContext context)
         {
-            var registry = context.RequestServices.GetRequiredService<ModuleRegistry>();
-            if (registry.GetModule("sample_dotnet_module") is not null)
+            var registry = context.RequestServices.GetRequiredService<RegistrationCatalog>();
+            if (registry.GetRegistration("sample_dotnet_registration") is not null)
                 return true;
 
             context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             await context.Response.WriteAsJsonAsync(new
             {
-                error = "Module 'sample_dotnet_module' is not available.",
+                error = "Module 'sample_dotnet_registration' is not available.",
             }, context.RequestAborted);
             return false;
         }

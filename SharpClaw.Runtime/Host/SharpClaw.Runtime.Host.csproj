@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\build\PackagedModulePayload.targets" />
+  <Import Project="..\..\build\PackagedContributionPayload.targets" />
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -12,9 +12,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SharpClaw.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
@@ -25,14 +22,14 @@
     </PackageReference>
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Supprocom.Secrets" />
-    <PackageReference Include="SharpClaw.ModuleHost.InProcess" />
+    <PackageReference Include="SharpClaw.SidecarHost.InProcess" />
+    <PackageReference Include="SharpClaw.SidecarHost.OutOfProcess" GeneratePathProperty="true" PrivateAssets="all" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\BLL\SharpClaw.Runtime.BLL.csproj" />
     <PackageReference Include="SharpClaw.Contracts" />
-    <PackageReference Include="SharpClaw.ModuleHost.OutOfProcess" GeneratePathProperty="true" PrivateAssets="all" />
     <ProjectReference Include="..\INF\SharpClaw.Runtime.INF.csproj" />
     <ProjectReference Include="..\..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
     <ProjectReference Include="..\..\SharpClaw.Migrations\Postgres\SharpClaw.Migrations.Postgres.csproj" />
@@ -40,72 +37,45 @@
     <ProjectReference Include="..\..\SharpClaw.Migrations\SQLite\SharpClaw.Migrations.SQLite.csproj" />
   </ItemGroup>
 
-  <!-- The Debug test harness stays outside the Runtime compiler graph. -->
-  <ItemGroup>
-    <ProjectReference Include="..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\SharpClaw.DefaultModules.TestHarness.OutOfProcess.csproj" Condition="'$(Configuration)' == 'Debug'">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
-  </ItemGroup>
-
-  <!-- Copy the Debug harness and the external neutral module payload. -->
-  <Target Name="_ResolveBundledModuleOutputFiles"
-          DependsOnTargets="_ResolvePackagedModulePayloadFiles">
+  <Target Name="_ResolveBundledContributionOutputFiles"
+          DependsOnTargets="_ResolvePackagedContributionPayloadFiles">
     <ItemGroup>
-      <_BundledModuleOutputFile Remove="@(_BundledModuleOutputFile)" />
-      <_BundledModuleDll Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll" Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' != ''" />
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll" Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' == ''" />
-      <_NonHostDll Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\*.dll"
-                   Exclude="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\SharpClaw.*.dll"
-                   Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' != ''" />
-      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\*.dll"
-                   Exclude="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll"
-                   Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' == ''" />
-      <_BundledModuleManifest Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\module.json" Condition="'$(Configuration)' == 'Debug'">
-        <ModuleId>sharpclaw_test_harness_out_of_process</ModuleId>
-      </_BundledModuleManifest>
-      <_BundledModuleOutputFile Include="@(_BundledModuleDll);@(_NonHostDll);@(_PackagedSidecarHostFile)" />
+      <_BundledContributionOutputFile Remove="@(_BundledContributionOutputFile)" />
+      <_BundledContributionOutputFile Include="@(_PackagedSidecarHostFile)" />
     </ItemGroup>
   </Target>
 
-  <Target Name="CopyBundledModules"
+  <Target Name="CopyBundledContributions"
           AfterTargets="Build"
-          DependsOnTargets="_ResolveBundledModuleOutputFiles">
-    <RemoveDir Directories="$(OutputPath)modules\sharpclaw_test_harness;$(OutputPath)modules\sharpclaw_test_harness_in_process" />
-    <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_PackagedModulePayloadFile)"
-          DestinationFiles="@(_PackagedModulePayloadFile-&gt;'$(OutputPath)modules\%(RecursiveDir)%(Filename)%(Extension)')"
+          DependsOnTargets="_ResolveBundledContributionOutputFiles">
+    <Copy SourceFiles="@(_BundledContributionOutputFile)"
+          DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedContributionPayloadFile)"
+          DestinationFiles="@(_PackagedContributionPayloadFile->'$(OutputPath)contributions\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"
-          Condition="'@(_PackagedModulePayloadFile)' != ''" />
-    <Copy SourceFiles="@(_BundledModuleManifest)"
-          DestinationFiles="@(_BundledModuleManifest->'$(OutputPath)modules\%(ModuleId)\module.json')"
-          SkipUnchangedFiles="true"
-          Condition="'@(_BundledModuleManifest)' != ''" />
+          Condition="'@(_PackagedContributionPayloadFile)' != ''" />
   </Target>
 
-  <Target Name="CopyBundledModulesToPublish"
+  <Target Name="CopyBundledContributionsToPublish"
           AfterTargets="Publish"
-          DependsOnTargets="_ResolveBundledModuleOutputFiles">
-    <RemoveDir Directories="$(PublishDir)modules\sharpclaw_test_harness;$(PublishDir)modules\sharpclaw_test_harness_in_process" />
-    <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_PackagedModulePayloadFile)"
-          DestinationFiles="@(_PackagedModulePayloadFile-&gt;'$(PublishDir)modules\%(RecursiveDir)%(Filename)%(Extension)')"
+          DependsOnTargets="_ResolveBundledContributionOutputFiles">
+    <Copy SourceFiles="@(_BundledContributionOutputFile)"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedContributionPayloadFile)"
+          DestinationFiles="@(_PackagedContributionPayloadFile->'$(PublishDir)contributions\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"
-          Condition="'@(_PackagedModulePayloadFile)' != ''" />
-    <Copy SourceFiles="@(_BundledModuleManifest)"
-          DestinationFiles="@(_BundledModuleManifest->'$(PublishDir)modules\%(ModuleId)\module.json')"
-          SkipUnchangedFiles="true"
-          Condition="'@(_BundledModuleManifest)' != ''" />
+          Condition="'@(_PackagedContributionPayloadFile)' != ''" />
   </Target>
 
-  <Target Name="CleanBundledModules" AfterTargets="Clean">
+  <Target Name="CleanBundledContributions" AfterTargets="Clean">
     <ItemGroup>
-      <_CopiedBundledModuleDll Include="$(OutputPath)SharpClaw.Modules.*.dll;$(OutputPath)SharpClaw.DefaultModules.*.dll" />
-      <_CopiedOutOfProcessModuleHostFile Include="$(OutputPath)SharpClaw.ModuleHost.OutOfProcess.*" />
-      <_CopiedBundledModuleManifest Include="$(OutputPath)modules\**\*" />
+      <_CopiedSidecarHostFile Include="$(OutputPath)SharpClaw.SidecarHost.OutOfProcess.*" />
+      <_CopiedContributionFile Include="$(OutputPath)contributions\**\*" />
     </ItemGroup>
-    <Delete Files="@(_CopiedBundledModuleDll)" Condition="'@(_CopiedBundledModuleDll)' != ''" />
-    <Delete Files="@(_CopiedOutOfProcessModuleHostFile)" Condition="'@(_CopiedOutOfProcessModuleHostFile)' != ''" />
-    <Delete Files="@(_CopiedBundledModuleManifest)" Condition="'@(_CopiedBundledModuleManifest)' != ''" />
+    <Delete Files="@(_CopiedSidecarHostFile)" Condition="'@(_CopiedSidecarHostFile)' != ''" />
+    <Delete Files="@(_CopiedContributionFile)" Condition="'@(_CopiedContributionFile)' != ''" />
   </Target>
 
 </Project>

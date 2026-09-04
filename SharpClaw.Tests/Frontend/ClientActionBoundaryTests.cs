@@ -3,7 +3,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Presentation;
 using SharpClaw.Services;
@@ -443,13 +443,13 @@ public sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Production_dispatcher_composes_the_authoritative_client_module()
+    public async Task Production_dispatcher_composes_the_authoritative_client_registration()
     {
         var source = new ClientActionContextSource();
         var dispatcher = ClientActionDispatcher.CreateProduction(source);
 
-        dispatcher.Graph.Modules.Modules.Should().ContainSingle();
-        dispatcher.Graph.Modules.Modules[0].Identity.Id.Should().Be("sharpclaw.client");
+        dispatcher.Graph.GetService(typeof(IEnumerable<ActionHookBinding>))
+            .Should().NotBeNull();
 
         var result = await dispatcher.RunCommandAsync(
             new ClientCommandInvocation("production", "CLIENT", "production", Guid.NewGuid()),
@@ -975,8 +975,8 @@ public sealed class ClientActionBoundaryTests
             Path.Combine("Services", "ClientSessionService.cs"),
             Path.Combine("Services", "FirstSetupMarker.cs"),
             Path.Combine("Services", "CoreEnvGuard.cs"),
-            Path.Combine("Services", "ModuleStateCache.cs"),
-            Path.Combine("Services", "ModuleFrontendStateService.cs"),
+            Path.Combine("Services", "RegistrationStateCache.cs"),
+            Path.Combine("Services", "FrontendStateService.cs"),
         })
         {
             File.Exists(Path.Combine(clientRoot, path)).Should().BeFalse(path);
@@ -989,7 +989,7 @@ public sealed class ClientActionBoundaryTests
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Presentation", "SettingsContributionBuilders.cs"))
             .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Services", "ModuleFrontendContributionRegistry.cs"))
+        File.Exists(Path.Combine(clientRoot, "Services", "FrontendContributionRegistry.cs"))
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Presentation", "MainModel.cs"))
             .Should().BeFalse();
@@ -1022,22 +1022,42 @@ public sealed class ClientActionBoundaryTests
         ClientActionContextSource? contextSource = null,
         IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
     {
-        const string moduleId = "k05-client-test";
+        const string SourceId = "k05-client-test";
         var grants = ClientActionCatalog.All.ToDictionary(
             action => action.Value,
             action => KernelActionCatalog.DescriptorFor(action).Capabilities,
             StringComparer.Ordinal);
-        var hostServices = new ServiceCollection().BuildServiceProvider();
+        var services = new ServiceCollection();
+        services.AddSingleton(probe);
+        services.AddSingleton<ClientInterceptor>();
+        foreach (var action in ClientActionCatalog.All)
+        {
+            services.AddSingleton(new ActionHookBinding(
+                SourceId,
+                BehaviorTargetKind.Exact,
+                action,
+                null,
+                typeof(ClientInterceptor),
+                false,
+                new HookOrdering(
+                    $"k05-client-{action.Value}",
+                    HookPriority.Normal,
+                    [],
+                    [],
+                    TimeSpan.FromSeconds(5),
+                    HookFailurePolicy.FailAction),
+                typeof(ClientInterceptor).AssemblyQualifiedName!));
+        }
+
         return new ClientActionDispatcher(
-            [new ClientModule(probe)],
-            hostServices,
+            services,
             new KernelGraphCompileOptions
             {
-                ActionModuleCapabilityGrants = new Dictionary<
+                ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
                     IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
                 {
-                    [moduleId] = grants,
+                    [SourceId] = grants,
                 },
             },
             contextSource,
@@ -1126,7 +1146,7 @@ public sealed class ClientActionBoundaryTests
         string CallerSubjectId,
         IReadOnlyList<string> FeatureNames);
 
-    private sealed class ProductionContextSink : ClientActionModuleSet.IClientActionContextSink
+    private sealed class ProductionContextSink : ClientActionServiceSet.IClientActionContextSink
     {
         public ConcurrentQueue<ClientObservation> Observations { get; } = new();
 
@@ -1264,34 +1284,6 @@ public sealed class ClientActionBoundaryTests
 
             return await control.ProceedAsync(cancellationToken);
         }
-    }
-
-    private sealed class ClientModule(ClientProbe probe) : ISharpClawModule
-    {
-        public ModuleIdentity Identity { get; } =
-            new("k05-client-test", "K05 client test", "k05");
-
-        public void Configure(ISharpClawModuleBuilder module)
-        {
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton<ClientInterceptor>();
-            foreach (var action in ClientActionCatalog.All)
-            {
-                module.Hooks.For(action).Use<ClientInterceptor>(new HookOrdering(
-                    $"k05-client-{action.Value}",
-                    HookPriority.Normal,
-                    [],
-                    [],
-                    TimeSpan.FromSeconds(5),
-                    HookFailurePolicy.FailAction));
-            }
-        }
-
-        public ValueTask StartAsync(ModuleStartContext context, CancellationToken cancellationToken) =>
-            ValueTask.CompletedTask;
-
-        public ValueTask StopAsync(CancellationToken cancellationToken) =>
-            ValueTask.CompletedTask;
     }
 
     private static string CreateTempDirectory()

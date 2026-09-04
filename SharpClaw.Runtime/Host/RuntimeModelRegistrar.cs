@@ -1,12 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Runtime.Host;
 
-/// <summary>Registers provider and model rows for module-owned runtime state.</summary>
+/// <summary>Registers provider and model rows for registration-owned runtime state.</summary>
 internal sealed class RuntimeModelRegistrar(IServiceScopeFactory scopeFactory) : IModelRegistrar
 {
     public async Task<Guid> EnsureProviderAsync(

@@ -4,19 +4,19 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Contracts.Modules;
-using SharpClaw.Contracts.Modules.Foreign;
+using SharpClaw.Contracts.Kernel;
+using SharpClaw.Contracts.Kernel.Foreign;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Shared.Security;
-using SharpClaw.TestFixtures.ExternalModule;
+using SharpClaw.TestFixtures.ExternalRegistration;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class InProcessModuleSecretReaderTests
+public sealed class InProcessRegistrationSecretReaderTests
 {
     [Test]
     public async Task GetProviderApiKeyAsync_ReturnsDecryptedProviderKey()
@@ -28,7 +28,7 @@ public sealed class InProcessModuleSecretReaderTests
             providerKey: "elevenlabs",
             apiKey: "xi-secret");
 
-        var reader = services.GetRequiredService<IInProcessModuleSecretReader>();
+        var reader = services.GetRequiredService<IInProcessSecretReader>();
 
         var apiKey = await reader.GetProviderApiKeyAsync(provider.ProviderKey);
 
@@ -46,7 +46,7 @@ public sealed class InProcessModuleSecretReaderTests
             apiKey: "xi-model-secret");
         var model = await SeedModelAsync(services, provider);
 
-        var reader = services.GetRequiredService<IInProcessModuleSecretReader>();
+        var reader = services.GetRequiredService<IInProcessSecretReader>();
 
         var apiKey = await reader.GetModelProviderApiKeyAsync(model.Id);
 
@@ -63,7 +63,7 @@ public sealed class InProcessModuleSecretReaderTests
             providerKey: "unset",
             apiKey: null);
         var model = await SeedModelAsync(services, provider);
-        var reader = services.GetRequiredService<IInProcessModuleSecretReader>();
+        var reader = services.GetRequiredService<IInProcessSecretReader>();
 
         (await reader.GetProviderApiKeyAsync("missing")).Should().BeNull();
         (await reader.GetProviderApiKeyAsync(provider.ProviderKey)).Should().BeNull();
@@ -75,7 +75,7 @@ public sealed class InProcessModuleSecretReaderTests
     public async Task GetProviderApiKeyAsync_RejectsBlankProviderKey()
     {
         await using var services = CreateServices(out _);
-        var reader = services.GetRequiredService<IInProcessModuleSecretReader>();
+        var reader = services.GetRequiredService<IInProcessSecretReader>();
 
         var act = async () => await reader.GetProviderApiKeyAsync(" ");
 
@@ -85,66 +85,66 @@ public sealed class InProcessModuleSecretReaderTests
     }
 
     [Test]
-    public async Task InProcessModuleScope_CanResolveSecretReader()
+    public async Task InProcessRegistrationScope_CanResolveSecretReader()
     {
         using var services = CreateServices(out _);
-        var moduleDir = CreateInProcessFixtureDirectory();
-        var assemblyPath = typeof(InProcessPerformanceFixtureModule).Assembly.Location;
-        var manifest = new ModuleManifest(
-            InProcessPerformanceFixtureModule.ModuleId,
+        var registrationDir = CreateInProcessFixtureDirectory();
+        var assemblyPath = typeof(InProcessPerformanceFixtureRegistration).Assembly.Location;
+        var manifest = new PackageManifest(
+            InProcessPerformanceFixtureRegistration.SourceId,
             "Synthetic In-Process Performance",
             "1.0.0",
-            InProcessPerformanceFixtureModule.ToolPrefixValue,
+            InProcessPerformanceFixtureRegistration.ToolPrefixValue,
             Path.GetFileName(assemblyPath),
             "0.0.0");
-        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson($$"""
+        var runtimeInfo = PackageRuntimeInfo.FromJson($$"""
         {
           "runtime": "dotnet",
           "hostMode": "in-process",
           "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
-          "moduleType": "{{typeof(InProcessPerformanceFixtureModule).FullName}}"
+          "entryType": "{{typeof(InProcessPerformanceFixtureRegistration).FullName}}"
         }
         """);
 
-        await using var host = InProcessModuleHost.Load(
-            moduleDir,
-            moduleDir,
+        await using var host = InProcessRegistrationHost.Load(
+            registrationDir,
+            registrationDir,
             manifest,
             runtimeInfo,
             services);
         using var scope = host.CreateScope();
 
         scope.ServiceProvider
-            .GetRequiredService<IInProcessModuleSecretReader>()
+            .GetRequiredService<IInProcessSecretReader>()
             .Should()
-            .BeSameAs(services.GetRequiredService<IInProcessModuleSecretReader>());
+            .BeSameAs(services.GetRequiredService<IInProcessSecretReader>());
     }
 
     [Test]
-    public async Task InProcessModuleScope_CanResolveModelRegistrar()
+    public async Task InProcessRegistrationScope_CanResolveModelRegistrar()
     {
         using var services = CreateServices(out _);
-        var moduleDir = CreateInProcessFixtureDirectory();
-        var assemblyPath = typeof(InProcessPerformanceFixtureModule).Assembly.Location;
-        var manifest = new ModuleManifest(
-            InProcessPerformanceFixtureModule.ModuleId,
+        var registrationDir = CreateInProcessFixtureDirectory();
+        var assemblyPath = typeof(InProcessPerformanceFixtureRegistration).Assembly.Location;
+        var manifest = new PackageManifest(
+            InProcessPerformanceFixtureRegistration.SourceId,
             "Synthetic In-Process Performance",
             "1.0.0",
-            InProcessPerformanceFixtureModule.ToolPrefixValue,
+            InProcessPerformanceFixtureRegistration.ToolPrefixValue,
             Path.GetFileName(assemblyPath),
             "0.0.0");
-        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson($$"""
+        var runtimeInfo = PackageRuntimeInfo.FromJson($$"""
         {
           "runtime": "dotnet",
           "hostMode": "in-process",
           "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
-          "moduleType": "{{typeof(InProcessPerformanceFixtureModule).FullName}}"
+          "entryType": "{{typeof(InProcessPerformanceFixtureRegistration).FullName}}"
         }
         """);
 
-        await using var host = InProcessModuleHost.Load(
-            moduleDir,
-            moduleDir,
+        await using var host = InProcessRegistrationHost.Load(
+            registrationDir,
+            registrationDir,
             manifest,
             runtimeInfo,
             services);
@@ -186,9 +186,9 @@ public sealed class InProcessModuleSecretReaderTests
     }
 
     [Test]
-    public void ForeignModuleProtocol_DoesNotExposeSecretReadRoute()
+    public void ForeignRegistrationProtocol_DoesNotExposeSecretReadRoute()
     {
-        var protocolConstants = typeof(ForeignModuleHostCapabilityProtocol)
+        var protocolConstants = typeof(ForeignRegistrationHostCapabilityProtocol)
             .GetFields(BindingFlags.Public | BindingFlags.Static)
             .Where(field => field.FieldType == typeof(string))
             .Select(field => (string)field.GetValue(null)!)
@@ -203,7 +203,7 @@ public sealed class InProcessModuleSecretReaderTests
     [Test]
     public void ContractsAssemblyIdentity_MatchesPublishedSecretReaderPackageIdentity()
     {
-        var assemblyName = typeof(IInProcessModuleSecretReader).Assembly.GetName();
+        var assemblyName = typeof(IInProcessSecretReader).Assembly.GetName();
 
         assemblyName.Name.Should().Be("SharpClaw.Contracts");
         assemblyName.Version.Should().Be(new Version(0, 5, 0, 0));
@@ -225,7 +225,7 @@ public sealed class InProcessModuleSecretReaderTests
         services.AddSingleton(encryptionOptions);
         services.AddDbContext<SharpClawDbContext>(options =>
             options.UseInMemoryDatabase(databaseName, databaseRoot));
-        services.AddSingleton<IInProcessModuleSecretReader, HostInProcessModuleSecretReader>();
+        services.AddSingleton<IInProcessSecretReader, HostInProcessRegistrationSecretReader>();
         services.AddScoped<IModelRegistrar, HostModelRegistrar>();
 
         return services.BuildServiceProvider();
@@ -275,20 +275,20 @@ public sealed class InProcessModuleSecretReaderTests
 
     private static string CreateInProcessFixtureDirectory()
     {
-        var assemblyPath = typeof(InProcessPerformanceFixtureModule).Assembly.Location;
+        var assemblyPath = typeof(InProcessPerformanceFixtureRegistration).Assembly.Location;
         var sourceDir = Path.GetDirectoryName(assemblyPath)!;
-        var moduleDir = Path.Combine(
+        var registrationDir = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
             "inprocess-secret-reader-modules",
             Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(moduleDir);
+        Directory.CreateDirectory(registrationDir);
 
         foreach (var file in Directory.GetFiles(sourceDir, "*.dll"))
-            File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
+            File.Copy(file, Path.Combine(registrationDir, Path.GetFileName(file)), overwrite: true);
 
         foreach (var file in Directory.GetFiles(sourceDir, "*.deps.json"))
-            File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
+            File.Copy(file, Path.Combine(registrationDir, Path.GetFileName(file)), overwrite: true);
 
-        return moduleDir;
+        return registrationDir;
     }
 }

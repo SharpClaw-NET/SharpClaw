@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts.Exceptions;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host;

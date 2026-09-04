@@ -331,16 +331,16 @@ public sealed class DurableSegmentStoreTests
     {
         var root = CreateRoot();
         var processBoot = Guid.Empty;
-        var moduleBoot = Guid.NewGuid();
+        var registrationBoot = Guid.NewGuid();
         var processKey = DurableStreamKey.Process("Runtime/Host", processBoot);
-        var moduleKey = DurableStreamKey.Module("Module/One", moduleBoot);
+        var registrationKey = DurableStreamKey.Registration("Source/One", registrationBoot);
         try
         {
             await using (var store = CreateStore(root))
             {
                 await store.AppendAsync(processKey, Record("process"));
                 await store.SealAsync(processKey);
-                await store.AppendAsync(moduleKey, Record("module"));
+                await store.AppendAsync(registrationKey, Record("module"));
 
                 var processDirectory = new DurableStreamPathEncoder(root)
                     .GetStreamDirectory(processKey);
@@ -382,7 +382,7 @@ public sealed class DurableSegmentStoreTests
                 var process = catalog.Streams.Single(summary =>
                     summary.Stream.Kind == DurableStreamKind.ProcessLog);
                 process.AppName.Should().Be("runtime/host");
-                process.ModuleId.Should().BeNull();
+                process.SourceId.Should().BeNull();
                 process.BootId.Should().Be(Guid.Empty);
                 process.HasActiveSegment.Should().BeFalse();
                 process.HasSealedSegments.Should().BeTrue();
@@ -390,10 +390,10 @@ public sealed class DurableSegmentStoreTests
                 process.FirstAvailableSequence.Should().Be(1);
 
                 var module = catalog.Streams.Single(summary =>
-                    summary.Stream.Kind == DurableStreamKind.ModuleLog);
+                    summary.Stream.Kind == DurableStreamKind.RegistrationLog);
                 module.AppName.Should().BeNull();
-                module.ModuleId.Should().Be("module/one");
-                module.BootId.Should().Be(moduleBoot);
+                module.SourceId.Should().Be("source/one");
+                module.BootId.Should().Be(registrationBoot);
                 module.HasActiveSegment.Should().BeTrue();
                 module.HasSealedSegments.Should().BeFalse();
                 module.RecordCount.Should().Be(1);
@@ -411,7 +411,7 @@ public sealed class DurableSegmentStoreTests
             afterRestart.Streams.Select(summary => summary.Stream)
                 .Should().Contain(processKey);
             afterRestart.Streams.Select(summary => summary.Stream)
-                .Should().Contain(moduleKey);
+                .Should().Contain(registrationKey);
         }
         finally
         {
@@ -552,18 +552,18 @@ public sealed class DurableSegmentStoreTests
     public void OperationalKeyParserMatchesWritableKeySemantics()
     {
         var bootId = Guid.Empty;
-        var key = DurableStreamKey.Module("Module/With/Slashes", bootId);
+        var key = DurableStreamKey.Registration("Source/With/Slashes", bootId);
 
         DurableStreamKey.TryParseOperational(
                 key.CanonicalValue,
                 out var parsed,
                 out var appName,
-                out var moduleId,
+                out var SourceId,
                 out var parsedBootId)
             .Should().BeTrue();
         parsed.Should().Be(key);
         appName.Should().BeNull();
-        moduleId.Should().Be("module/with/slashes");
+        SourceId.Should().Be("source/with/slashes");
         parsedBootId.Should().Be(Guid.Empty);
     }
 
@@ -589,7 +589,7 @@ public sealed class DurableSegmentStoreTests
         {
             JobLogAge = TimeSpan.FromDays(1),
             ProcessLogAge = TimeSpan.FromDays(30),
-            ModuleLogAge = TimeSpan.FromDays(30),
+            RegistrationLogAge = TimeSpan.FromDays(30),
             MaximumEncodedBytes = long.MaxValue,
             MinimumFreeBytes = 0,
         });
@@ -635,7 +635,7 @@ public sealed class DurableSegmentStoreTests
         {
             JobLogAge = TimeSpan.FromDays(1),
             ProcessLogAge = TimeSpan.FromDays(30),
-            ModuleLogAge = TimeSpan.FromDays(30),
+            RegistrationLogAge = TimeSpan.FromDays(30),
             MaximumEncodedBytes = long.MaxValue,
             MinimumFreeBytes = 0,
         });
@@ -661,7 +661,7 @@ public sealed class DurableSegmentStoreTests
         {
             JobLogAge = TimeSpan.FromDays(1),
             ProcessLogAge = TimeSpan.FromDays(30),
-            ModuleLogAge = TimeSpan.FromDays(30),
+            RegistrationLogAge = TimeSpan.FromDays(30),
             MaximumEncodedBytes = long.MaxValue,
             MinimumFreeBytes = 0,
         });

@@ -134,17 +134,22 @@ $repositories = @(
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "f43f8f9f32e48f46efbb6185653f413ea9d7648a"
+        Commit = "e49db22335a7861401595c58bf96d205e05ba1e4"
+    },
+    [pscustomobject]@{
+        Name = "module-hosts"
+        Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
+        Commit = "e999c0917baaeff56f4346cb37b944e8bcea2a9a"
     },
     [pscustomobject]@{
         Name = "agent-contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "5682aabf54a04a77d818609337396c11db34e3e1"
+        Commit = "40aa22d193885d17847391fd4a29cf4b759b2e07"
     },
     [pscustomobject]@{
         Name = "agent-modules"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "5682aabf54a04a77d818609337396c11db34e3e1"
+        Commit = "40aa22d193885d17847391fd4a29cf4b759b2e07"
     },
     [pscustomobject]@{
         Name = "editor-integrations"
@@ -255,24 +260,26 @@ function Pack-Target
     param(
         [string] $Label,
         [string] $Target,
-        [string] $ArtifactGroup
+        [string] $ArtifactGroup,
+        [string[]] $ExtraArguments = @()
     )
 
     $targetArtifacts = Join-Path $artifactsPath $ArtifactGroup
+    $arguments = @(
+        "pack",
+        $Target,
+        "--no-restore",
+        "--configuration",
+        "Release",
+        "-p:ArtifactsPath=$targetArtifacts",
+        "-p:UseArtifactsOutput=true",
+        "-p:PackageOutputPath=$feedPath",
+        "-p:ContinuousIntegrationBuild=true"
+    ) + $ExtraArguments
     Invoke-BoundedProcess `
         -Label "pack-$Label" `
         -FilePath "dotnet" `
-        -Arguments @(
-            "pack",
-            $Target,
-            "--no-restore",
-            "--configuration",
-            "Release",
-            "-p:ArtifactsPath=$targetArtifacts",
-            "-p:UseArtifactsOutput=true",
-            "-p:PackageOutputPath=$feedPath",
-            "-p:ContinuousIntegrationBuild=true"
-        ) `
+        -Arguments $arguments `
         -WorkingDirectory (Split-Path -Parent $Target) | Out-Null
 }
 
@@ -291,18 +298,87 @@ function Restore-And-Pack
 $contractsProject = Join-Path $sourcesPath "contracts\SharpClaw.Contracts\SharpClaw.Contracts.csproj"
 $gatewayProject = Join-Path $sourcesPath "gateway-contracts\SharpClaw.Gateway.Contracts\SharpClaw.Gateway.Contracts.csproj"
 $coreProject = Join-Path $sourcesPath "core\SharpClaw.Core\SharpClaw.Core.csproj"
-$moduleSdkSolution = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.slnx"
+$moduleSdkProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK\SharpClaw.ModuleSDK.csproj"
+$moduleHostsSolution = Join-Path $sourcesPath "module-hosts\SharpClaw.ModuleSDK.slnx"
+$moduleInProcessProject = Join-Path $sourcesPath "module-hosts\SharpClaw.SidecarHost.InProcess\SharpClaw.SidecarHost.InProcess.csproj"
+$moduleOutOfProcessProject = Join-Path $sourcesPath "module-hosts\SharpClaw.SidecarHost.OutOfProcess\SharpClaw.SidecarHost.OutOfProcess.csproj"
+$moduleTestingProject = Join-Path $sourcesPath "module-hosts\SharpClaw.ModuleSDK.Testing\SharpClaw.ModuleSDK.Testing.csproj"
+$moduleHostOperationsProject = Join-Path $sourcesPath "module-hosts\SharpClaw.ModuleSDK.HostOperations\SharpClaw.ModuleSDK.HostOperations.csproj"
 $agentContractsProject = Join-Path $sourcesPath "agent-contracts\SharpClaw.AgentOrchestration.Contracts\SharpClaw.AgentOrchestration.Contracts.csproj"
 $agentSolution = Join-Path $sourcesPath "agent-modules\SharpClaw.AgentOrchestration.slnx"
 $editorSolution = Join-Path $sourcesPath "editor-integrations\SharpClaw.EditorIntegrations.slnx"
 $metricsProject = Join-Path $sourcesPath "metrics\SharpClaw.Modules.Metrics\SharpClaw.Modules.Metrics.csproj"
 $providerSolution = Join-Path $sourcesPath "provider-integrations\SharpClaw.ProviderIntegrations.slnx"
-$moduleDevProject = Join-Path $sourcesPath "module-dev\SharpClaw.Modules.ModuleDev\SharpClaw.Modules.ModuleDev.csproj"
+$moduleDevProject = Join-Path $sourcesPath "module-dev\SharpClaw.Modules.RegistrationDev\SharpClaw.Modules.RegistrationDev.csproj"
+$permissionRestrictionFixture = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\SharpClaw.Tests\Fixtures\PermissionRestriction\SharpClaw.TestFixtures.PermissionRestriction.csproj"))
 
 Restore-And-Pack -Label "contracts" -Target $contractsProject -ArtifactGroup "contracts"
 Restore-And-Pack -Label "gateway-contracts" -Target $gatewayProject -ArtifactGroup "gateway-contracts"
 Restore-And-Pack -Label "core" -Target $coreProject -ArtifactGroup "core"
-Restore-And-Pack -Label "module-sdk" -Target $moduleSdkSolution -ArtifactGroup "module-sdk"
+Restore-And-Pack -Label "module-sdk" -Target $moduleSdkProject -ArtifactGroup "module-sdk"
+
+Restore-Target -Label "module-hosts" -Target $moduleHostsSolution -ArtifactGroup "module-hosts"
+Pack-Target -Label "module-in-process" -Target $moduleInProcessProject -ArtifactGroup "module-hosts"
+Pack-Target -Label "module-testing" -Target $moduleTestingProject -ArtifactGroup "module-hosts"
+Pack-Target -Label "module-host-operations" -Target $moduleHostOperationsProject -ArtifactGroup "module-hosts"
+
+$moduleHostsArtifacts = Join-Path $artifactsPath "module-hosts"
+Invoke-BoundedProcess `
+    -Label "build-module-out-of-process" `
+    -FilePath "dotnet" `
+    -Arguments @(
+        "build",
+        $moduleOutOfProcessProject,
+        "--no-restore",
+        "--configuration",
+        "Release",
+        "-p:ArtifactsPath=$moduleHostsArtifacts",
+        "-p:UseArtifactsOutput=true",
+        "-p:ContinuousIntegrationBuild=true"
+    ) `
+    -WorkingDirectory (Split-Path -Parent $moduleOutOfProcessProject) | Out-Null
+
+$outOfProcessPayload = Join-Path $rootPath "out-of-process-payload"
+New-Item -ItemType Directory -Path $outOfProcessPayload | Out-Null
+$outOfProcessOutput = Join-Path $moduleHostsArtifacts "bin\SharpClaw.SidecarHost.OutOfProcess\release"
+foreach ($payloadName in @(
+    "SharpClaw.SidecarHost.OutOfProcess.exe",
+    "SharpClaw.SidecarHost.OutOfProcess.dll",
+    "SharpClaw.SidecarHost.OutOfProcess.deps.json",
+    "SharpClaw.SidecarHost.OutOfProcess.runtimeconfig.json",
+    "SharpClaw.Contracts.dll",
+    "SharpClaw.Core.dll",
+    "SharpClaw.SidecarHost.InProcess.dll"
+))
+{
+    Copy-Item -LiteralPath (Join-Path $outOfProcessOutput $payloadName) -Destination $outOfProcessPayload
+}
+
+$sdkArchive = Join-Path $feedPath "SharpClaw.ModuleSDK.0.5.0-beta.24.nupkg"
+$sdkZip = [System.IO.Compression.ZipFile]::OpenRead($sdkArchive)
+try
+{
+    $sdkEntry = $sdkZip.GetEntry("lib/net10.0/SharpClaw.ModuleSDK.dll")
+    if ($null -eq $sdkEntry)
+    {
+        throw "The accepted ModuleSDK package does not contain its runtime DLL."
+    }
+
+    [System.IO.Compression.ZipFileExtensions]::ExtractToFile(
+        $sdkEntry,
+        (Join-Path $outOfProcessPayload "SharpClaw.ModuleSDK.dll"),
+        $false)
+}
+finally
+{
+    $sdkZip.Dispose()
+}
+
+Pack-Target `
+    -Label "module-out-of-process" `
+    -Target $moduleOutOfProcessProject `
+    -ArtifactGroup "module-hosts" `
+    -ExtraArguments @("-p:OutOfProcessHostPayloadSource=$outOfProcessPayload")
 Restore-And-Pack -Label "agent-contracts" -Target $agentContractsProject -ArtifactGroup "agent-contracts"
 
 Restore-Target -Label "agent-modules" -Target $agentSolution -ArtifactGroup "agent-modules"
@@ -317,36 +393,42 @@ foreach ($agentProject in @(
     Pack-Target -Label $label -Target $target -ArtifactGroup "agent-modules"
 }
 
+Restore-And-Pack `
+    -Label "permission-restriction-fixture" `
+    -Target $permissionRestrictionFixture `
+    -ArtifactGroup "permission-restriction-fixture"
+
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"
 Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -ArtifactGroup "provider-integrations"
 Restore-And-Pack -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
 
 $expectedPackages = @(
-    "SharpClaw.AgentOrchestration.Contracts.0.5.0-beta.19.nupkg",
+    "SharpClaw.AgentOrchestration.Contracts.0.5.0-beta.22.nupkg",
     "SharpClaw.Contracts.0.5.0-beta.40.nupkg",
     "SharpClaw.Core.0.5.0-beta.36.nupkg",
     "SharpClaw.Gateway.Contracts.0.5.0-beta.4.nupkg",
-    "SharpClaw.ModuleHost.InProcess.0.5.0-beta.23.nupkg",
-    "SharpClaw.ModuleHost.OutOfProcess.0.5.0-beta.32.nupkg",
-    "SharpClaw.ModuleSDK.0.5.0-beta.22.nupkg",
-    "SharpClaw.ModuleSDK.HostOperations.0.5.0-beta.10.nupkg",
-    "SharpClaw.ModuleSDK.Testing.0.5.0-beta.17.nupkg",
-    "SharpClaw.Modules.Agents.0.5.0-beta.21.nupkg",
-    "SharpClaw.Modules.Context.0.5.0-beta.20.nupkg",
+    "SharpClaw.SidecarHost.InProcess.0.5.0-beta.24.nupkg",
+    "SharpClaw.SidecarHost.OutOfProcess.0.5.0-beta.34.nupkg",
+    "SharpClaw.ModuleSDK.0.5.0-beta.24.nupkg",
+    "SharpClaw.ModuleSDK.HostOperations.0.5.0-beta.11.nupkg",
+    "SharpClaw.ModuleSDK.Testing.0.5.0-beta.18.nupkg",
+    "SharpClaw.Modules.Agents.0.5.0-beta.24.nupkg",
+    "SharpClaw.Modules.Context.0.5.0-beta.23.nupkg",
     "SharpClaw.Modules.EditorCommon.0.5.0-beta.4.nupkg",
     "SharpClaw.Modules.Metrics.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.ModuleDev.0.5.0-beta.4.nupkg",
+    "SharpClaw.Modules.RegistrationDev.0.5.0-beta.4.nupkg",
     "SharpClaw.Modules.Providers.Anthropic.0.5.0-beta.4.nupkg",
     "SharpClaw.Modules.Providers.Google.0.5.0-beta.4.nupkg",
     "SharpClaw.Modules.Providers.LlamaSharp.0.5.0-beta.4.nupkg",
     "SharpClaw.Modules.Providers.Ollama.0.5.0-beta.4.nupkg",
     "SharpClaw.Modules.Providers.OpenAICompatible.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.TwoTierPermission.0.5.0-beta.21.nupkg",
+    "SharpClaw.Modules.TwoTierPermission.0.5.0-beta.24.nupkg",
     "SharpClaw.Modules.VS2026Editor.0.5.0-beta.4.nupkg",
     "SharpClaw.Modules.VSCodeEditor.0.5.0-beta.4.nupkg",
     "SharpClaw.Providers.Common.0.5.0-beta.4.nupkg",
-    "SharpClaw.Providers.LocalCommon.0.5.0-beta.4.nupkg"
+    "SharpClaw.Providers.LocalCommon.0.5.0-beta.4.nupkg",
+    "SharpClaw.TestFixtures.PermissionRestriction.0.5.0-beta.1.nupkg"
 )
 
 $actualPackages = Get-ChildItem -LiteralPath $feedPath -Filter "*.nupkg" -File |
@@ -411,13 +493,13 @@ foreach ($package in $actualPackages)
 }
 
 Invoke-BoundedProcess `
-    -Label "materialize-module-bundle" `
+    -Label "materialize-contribution-bundle" `
     -FilePath "pwsh" `
     -Arguments @(
         "-NoLogo",
         "-NoProfile",
         "-File",
-        (Join-Path $PSScriptRoot "MaterializeModuleBundle.ps1"),
+        (Join-Path $PSScriptRoot "MaterializeContributionBundle.ps1"),
         "-Feed",
         $feedPath,
         "-Output",
@@ -429,7 +511,7 @@ Invoke-BoundedProcess `
 $manifest = [pscustomobject]@{
     Repositories = $repositories
     ModuleBundleManifestSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (
-        Join-Path $bundlePath "module-bundle-manifest.json")).Hash
+        Join-Path $bundlePath "contribution-bundle-manifest.json")).Hash
     Packages = @($actualPackages | ForEach-Object {
         [pscustomobject]@{
             Name = $_.Name

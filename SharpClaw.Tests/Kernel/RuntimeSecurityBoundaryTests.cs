@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -373,24 +373,23 @@ public sealed class RuntimeSecurityBoundaryTests
         IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
     {
         var provider = new SecurityProvider();
-        var moduleId = "security-boundary-test";
+        var SourceId = "security-boundary-test";
         var grants = RuntimeSecurityActionManifest.Required.ToDictionary(
             key => key.Value,
             key => KernelActionCatalog.DescriptorFor(key).Capabilities,
             StringComparer.Ordinal);
-        return new RuntimeKernelAdapter(
+        return RuntimeKernelAdapterTestFactory.Create(
             configuration ?? Configuration(),
-            new ServiceCollection().BuildServiceProvider(),
-            [new SecurityModule(provider, probe)],
+            [new SecurityRegistration(provider, probe)],
             workspace.Paths,
             new SecurityProviderFactory(provider),
             new KernelGraphCompileOptions
             {
-                ActionModuleCapabilityGrants = new Dictionary<
+                ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
                     IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
                 {
-                    [moduleId] = grants,
+                    [SourceId] = grants,
                 },
                 SensitiveActionApprovals = RuntimeSecurityActionManifest.Required
                     .Select(key =>
@@ -401,7 +400,7 @@ public sealed class RuntimeSecurityBoundaryTests
                             typeof(KernelActionEnvelope),
                             typeof(object));
                         return new KernelSensitiveActionApproval(
-                            moduleId,
+                            SourceId,
                             key,
                             descriptor.Version,
                             types.ActionType.AssemblyQualifiedName!,
@@ -604,21 +603,21 @@ public sealed class RuntimeSecurityBoundaryTests
         }
     }
 
-    private sealed class SecurityModule(
+    private sealed class SecurityRegistration(
         IProviderPlugin provider,
         SecurityProbe probe) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
             new("security-boundary-test", "Security boundary test", "security");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection module)
         {
-            module.Services.AddSingleton<IProviderPlugin>(provider);
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton<SecurityInterceptor>();
+            module.AddSingleton<IProviderPlugin>(provider);
+            module.AddSingleton(probe);
+            module.AddSingleton<SecurityInterceptor>();
             foreach (var action in RuntimeSecurityActionManifest.Required)
             {
-                module.Hooks.For(action).Use<SecurityInterceptor>(new HookOrdering(
+                module.OnAction(action).Use<SecurityInterceptor>(new HookOrdering(
                     $"security-boundary-{action.Value}",
                     HookPriority.Normal,
                     [],
@@ -628,7 +627,7 @@ public sealed class RuntimeSecurityBoundaryTests
             }
         }
 
-        public ValueTask StartAsync(ModuleStartContext context, CancellationToken cancellationToken) =>
+        public ValueTask StartAsync(ServiceStartContext context, CancellationToken cancellationToken) =>
             ValueTask.CompletedTask;
 
         public ValueTask StopAsync(CancellationToken cancellationToken) =>

@@ -393,7 +393,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             foreach (var kind in new[]
                      {
                          DurableStreamKind.ProcessLog,
-                         DurableStreamKind.ModuleLog,
+                         DurableStreamKind.RegistrationLog,
                      })
             {
                 var kindDirectory = Path.Combine(
@@ -454,7 +454,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                             streams.Add(new DurableOperationalStreamSummary(
                                 identity.Value.Stream,
                                 identity.Value.AppName,
-                                identity.Value.ModuleId,
+                                identity.Value.SourceId,
                                 identity.Value.BootId,
                                 scan.HasActiveSegment,
                                 scan.HasSealedSegments,
@@ -507,8 +507,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             if (boot != 0)
                 return boot;
             return string.Compare(
-                left.AppName ?? left.ModuleId,
-                right.AppName ?? right.ModuleId,
+                left.AppName ?? left.SourceId,
+                right.AppName ?? right.SourceId,
                 StringComparison.Ordinal);
         });
         return new DurableOperationalStreamCatalog(
@@ -1190,7 +1190,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                 identity.CanonicalValue,
                 out var key,
                 out var appName,
-                out var moduleId,
+                out var SourceId,
                 out var bootId)
             || key.Kind != expectedKind
             || !string.Equals(
@@ -1207,7 +1207,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         }
 
         return new(
-            new CatalogIdentity(key, appName, moduleId, bootId),
+            new CatalogIdentity(key, appName, SourceId, bootId),
             null);
     }
 
@@ -1392,7 +1392,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         if (state.Key.Kind is not DurableStreamKind.ProcessLog
-            and not DurableStreamKind.ModuleLog)
+            and not DurableStreamKind.RegistrationLog)
         {
             return;
         }
@@ -2695,7 +2695,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
     private sealed record CatalogIdentity(
         DurableStreamKey Stream,
         string? AppName,
-        string? ModuleId,
+        string? SourceId,
         Guid BootId);
 
     private sealed record CatalogIdentityRead(

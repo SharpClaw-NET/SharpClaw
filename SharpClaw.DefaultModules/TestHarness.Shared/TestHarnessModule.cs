@@ -1,39 +1,39 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.ModuleSDK;
 
-namespace SharpClaw.DefaultModules.TestHarness;
+namespace SharpClaw.DefaultPackages.TestHarness;
 
 #if TEST_HARNESS_OUT_OF_PROCESS
-public sealed class TestHarnessOutOfProcessModule()
-    : TestHarnessModuleBase(TestHarnessConstants.OutOfProcessModuleId, "Test Harness Out Of Process");
+public sealed class TestHarnessOutOfProcessRegistration()
+    : TestHarnessRegistrationBase(TestHarnessConstants.OutOfProcessRegistrationId, "Test Harness Out Of Process");
 #endif
 
 #if TEST_HARNESS_IN_PROCESS
-public sealed class TestHarnessInProcessModule()
-    : TestHarnessModuleBase(TestHarnessConstants.InProcessModuleId, "Test Harness In Process");
+public sealed class TestHarnessInProcessRegistration()
+    : TestHarnessRegistrationBase(TestHarnessConstants.InProcessRegistrationId, "Test Harness In Process");
 #endif
 
 /// <summary>Provides deterministic provider and direct-tool behavior for host tests.</summary>
-public abstract class TestHarnessModuleBase(string moduleId, string displayName) : ISharpClawModule
+public abstract class TestHarnessRegistrationBase(string SourceId, string displayName) : ISharpClawModule
 {
-    public ModuleIdentity Identity { get; } = new(moduleId, displayName, TestHarnessConstants.ToolPrefix);
+    public ModuleIdentity Identity { get; } = new(SourceId, displayName, TestHarnessConstants.ToolPrefix);
 
-    public void Configure(ISharpClawModuleBuilder module)
+    public void ConfigureServices(IServiceCollection services)
     {
-        ArgumentNullException.ThrowIfNull(module);
-        module.Services.AddSingleton<TestHarnessState>();
-        AddProvider(module, TestHarnessConstants.PlainProviderKey, "SharpClaw Test Harness", false);
-        AddProvider(module, TestHarnessConstants.StreamingProviderKey, "SharpClaw Test Harness Streaming", true);
-        AddProvider(module, TestHarnessConstants.ToolProviderKey, "SharpClaw Test Harness Tools", true);
-        AddProvider(module, TestHarnessConstants.FailingProviderKey, "SharpClaw Test Harness Failure", true);
-        AddProvider(module, TestHarnessConstants.CostProviderKey, "SharpClaw Test Harness Cost", true);
-        AddProvider(module, TestHarnessConstants.EdenStyleProviderKey, "SharpClaw Test Harness EdenAI", true);
-        module.Services.AddSingleton<TestHarnessToolHandler>();
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddSingleton<TestHarnessState>();
+        AddProvider(services, TestHarnessConstants.PlainProviderKey, "SharpClaw Test Harness", false);
+        AddProvider(services, TestHarnessConstants.StreamingProviderKey, "SharpClaw Test Harness Streaming", true);
+        AddProvider(services, TestHarnessConstants.ToolProviderKey, "SharpClaw Test Harness Tools", true);
+        AddProvider(services, TestHarnessConstants.FailingProviderKey, "SharpClaw Test Harness Failure", true);
+        AddProvider(services, TestHarnessConstants.CostProviderKey, "SharpClaw Test Harness Cost", true);
+        AddProvider(services, TestHarnessConstants.EdenStyleProviderKey, "SharpClaw Test Harness EdenAI", true);
 
         foreach (var descriptor in ToolDescriptors())
-            module.Tools.Add<TestHarnessToolHandler>(descriptor);
+            services.AddTool<TestHarnessToolHandler>(descriptor);
     }
 
     public int PermissionDescriptorBuilds => 0;
@@ -43,12 +43,12 @@ public abstract class TestHarnessModuleBase(string moduleId, string displayName)
     }
 
     private void AddProvider(
-        ISharpClawModuleBuilder module,
+        IServiceCollection services,
         string providerKey,
         string displayName,
         bool supportsNativeToolCalling) =>
-        module.Services.AddSingleton<IProviderPlugin>(sp => new TestHarnessProviderPlugin(
-            ownerModuleId: Identity.Id,
+        services.AddSingleton<IProviderPlugin>(sp => new TestHarnessProviderPlugin(
+            OwnerId: Identity.Id,
             providerKey,
             displayName,
             supportsNativeToolCalling,

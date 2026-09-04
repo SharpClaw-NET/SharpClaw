@@ -17,7 +17,7 @@ public sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFactory
         var plugin = plugins.FirstOrDefault(value =>
             string.Equals(value.ProviderKey, providerKey, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException(
-                $"No enabled provider module registered provider '{providerKey}'.");
+                $"No enabled provider registration registered provider '{providerKey}'.");
         var endpoint = configuration[$"Providers:{providerKey}:Endpoint"]
             ?? configuration["Provider:Endpoint"];
         var credential = configuration[$"Providers:{providerKey}:ApiKey"]

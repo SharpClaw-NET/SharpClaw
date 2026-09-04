@@ -2,14 +2,13 @@ using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.Infrastructure;
-using SharpClaw.Gateway.Modules;
 using SharpClaw.Gateway.Security;
 using SharpClaw.Shared.Logging;
 using SharpClaw.Shared.Instances;
 using Serilog;
 using Serilog.Events;
-using SharpClaw.Gateway.Modules.Routing;
-using SharpClaw.Gateway.Modules.Hosting;
+using SharpClaw.Contracts.Kernel;
+using SharpClaw.Core.Kernel;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -111,58 +110,26 @@ builder.Services.AddHttpClient<InternalApiClient>(client =>
 builder.Services.Configure<GatewayEndpointOptions>(
     builder.Configuration.GetSection(GatewayEndpointOptions.SectionName));
 
-// ── Gateway-side module discovery (Phase 2) ─────────────────────
-// Loader runs here so DI can hand the catalog/loader to middleware,
-// but MapEndpoints / ConfigureGatewayServices stays deferred to Phase 3.
-builder.Services.Configure<GatewayModuleOptions>(
-    builder.Configuration.GetSection(GatewayModuleOptions.SectionName));
-
-var gatewayModuleOptionsSnapshot = builder.Configuration
-    .GetSection(GatewayModuleOptions.SectionName)
-    .Get<GatewayModuleOptions>() ?? new GatewayModuleOptions();
-var gatewayModuleLoader = GatewayModuleLoader.DiscoverBundled(
-    startupLogger,
-    gatewayModuleOptionsSnapshot);
-foreach (var ext in gatewayModuleLoader.All)
-{
-    startupLogger.Information(
-        "Gateway module discovered: {ModuleId} ({DisplayName})",
-        ext.ModuleId,
-        ext.DisplayName);
-}
-
-builder.Services.AddSingleton(gatewayModuleLoader);
-builder.Services.AddSingleton<GatewayEndpointGroupCatalog>();
-builder.Services.AddSingleton<ModuleEndpointDataSource>();
-builder.Services.AddSingleton<GatewayModuleHostManager>();
-
-// ── Gateway-side module service registration (Phase 3) ─────────
-// Run ConfigureGatewayServices only for modules explicitly enabled in
-// configuration so a disabled module's services don't leak into DI.
-foreach (var ext in gatewayModuleLoader.All)
-{
-    if (!gatewayModuleOptionsSnapshot.IsModuleEnabled(ext.ModuleId))
-        continue;
-
-    try
-    {
-        ext.ConfigureGatewayServices(builder.Services);
-        startupLogger.Information("Gateway module services configured: {ModuleId}", ext.ModuleId);
-    }
-    catch (Exception ex)
-    {
-        startupLogger.Error(ex,
-            "Gateway module {ModuleId} threw during ConfigureGatewayServices; module will not be mapped.",
-            ext.ModuleId);
-    }
-}
-
 // ── Request queue (sequential forwarding to core API) ────────────
 builder.Services.Configure<RequestQueueOptions>(
     builder.Configuration.GetSection(RequestQueueOptions.SectionName));
 
 builder.Services.AddSingleton<QueueMetrics>();
 builder.Services.AddSingleton<RequestQueueService>();
+builder.Services.AddSingleton(static services =>
+{
+    var graph = new KernelGraphBuilder().Compile(services);
+    GatewayActionManifest.Validate(graph);
+    return graph;
+});
+builder.Services.AddSingleton(static services =>
+    new KernelActionDispatcher(
+        services.GetRequiredService<KernelGraph>(),
+        new KernelActionExecutionContext(
+            RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty,
+            Guid.NewGuid(),
+            Guid.NewGuid())));
 builder.Services.AddSingleton<GatewayBackgroundActionBoundary>();
 builder.Services.AddHostedService<RequestQueueProcessor>();
 builder.Services.AddScoped<GatewayRequestDispatcher>();
@@ -220,9 +187,8 @@ app.Use(async (context, next) =>
 
         // X-RateLimit-Limit — applicable rate limit for this path
         var path = context.Request.Path.Value ?? string.Empty;
-        var rateCatalog = context.RequestServices.GetService<GatewayEndpointGroupCatalog>();
         context.Response.Headers["X-RateLimit-Limit"] =
-            RateLimiterConfiguration.ResolveRateLimit(path, rateCatalog).ToString();
+            RateLimiterConfiguration.ResolveRateLimit(path).ToString();
 
         // Cache-Control — short cache for reads, no-store for mutations
         if (!context.Response.Headers.ContainsKey("Cache-Control"))
@@ -317,6 +283,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseWebSockets();
 
 if (loggingOptions.RequestLoggingEnabled)
     app.UseSerilogRequestLogging();
@@ -332,18 +299,12 @@ app.UseMiddleware<AntiSpamMiddleware>();
 
 // 4. Rate limiting
 app.UseRateLimiter();
-((IApplicationBuilder)app).Properties[GatewayModuleEndpointMapping.RateLimiterReadyKey] = true;
 
 app.UseAuthorization();
 
 app.UseMiddleware<GatewayActionMiddleware>();
 
-app.MapDirectChatGatewayEndpoints();
-
-// ── Module-contributed endpoint groups (Phase 3) ────────────────
-// Must run AFTER UseRateLimiter so RequireRateLimiting on the route
-// groups attaches the limiter middleware in the correct order.
-app.MapGatewayModuleEndpoints();
+app.MapGatewayProxyEndpoints();
 
 try
 {

@@ -8,28 +8,28 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Runtime.Host.Routing;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class ForeignModuleEndpointProxyTests
+public sealed class ForeignEndpointProxyTests
 {
     [Test]
     public async Task DiscoveredEndpointIsReachableThroughSharpClawRoute()
     {
         using var workspace = TestWorkspace.Create();
-        await using var foreignHost = await ForeignModuleHost.StartAsync(
+        await using var foreignHost = await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace, "normal"));
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         registry.Register(foreignHost.Module, foreignHost);
 
         await using var api = await StartApiAsync(registry);
         using var client = new HttpClient { BaseAddress = api.BaseAddress };
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/modules/sample/ping?value=42");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/contributions/sample/ping?value=42");
         request.Headers.TryAddWithoutValidation("X-Test-Marker", "from-host");
 
         using var response = await client.SendAsync(request);
@@ -40,7 +40,7 @@ public sealed class ForeignModuleEndpointProxyTests
         response.Headers.TryGetValues("X-Sidecar", out var sidecarHeaders).Should().BeTrue();
         sidecarHeaders!.Single().Should().Be("yes");
         doc.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
-        doc.RootElement.GetProperty("path").GetString().Should().Be("/modules/sample/ping");
+        doc.RootElement.GetProperty("path").GetString().Should().Be("/contributions/sample/ping");
         doc.RootElement.GetProperty("query").GetString().Should().Be("?value=42");
         doc.RootElement.GetProperty("marker").GetString().Should().Be("from-host");
     }
@@ -49,50 +49,50 @@ public sealed class ForeignModuleEndpointProxyTests
     public async Task ProxyForwardsRequestBodyAndContentHeaders()
     {
         using var workspace = TestWorkspace.Create();
-        await using var foreignHost = await ForeignModuleHost.StartAsync(
+        await using var foreignHost = await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace, "normal"));
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         registry.Register(foreignHost.Module, foreignHost);
 
         await using var api = await StartApiAsync(registry);
         using var client = new HttpClient { BaseAddress = api.BaseAddress };
         using var content = new StringContent("""{"hello":"world"}""", Encoding.UTF8, "application/json");
 
-        using var response = await client.PostAsync("/modules/sample/echo?mode=body", content);
+        using var response = await client.PostAsync("/contributions/sample/echo?mode=body", content);
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         doc.RootElement.GetProperty("method").GetString().Should().Be("POST");
-        doc.RootElement.GetProperty("path").GetString().Should().Be("/modules/sample/echo");
+        doc.RootElement.GetProperty("path").GetString().Should().Be("/contributions/sample/echo");
         doc.RootElement.GetProperty("query").GetString().Should().Be("?mode=body");
         doc.RootElement.GetProperty("body").GetString().Should().Be("""{"hello":"world"}""");
         doc.RootElement.GetProperty("contentType").GetString().Should().Contain("application/json");
     }
 
     [Test]
-    public async Task RouteReturnsUnavailableAfterModuleIsUnregistered()
+    public async Task RouteReturnsUnavailableAfterRegistrationIsUnregistered()
     {
         using var workspace = TestWorkspace.Create();
-        await using var foreignHost = await ForeignModuleHost.StartAsync(
+        await using var foreignHost = await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace, "normal"));
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         registry.Register(foreignHost.Module, foreignHost);
 
         await using var api = await StartApiAsync(registry);
         registry.Unregister(foreignHost.Module.Id);
 
         using var client = new HttpClient { BaseAddress = api.BaseAddress };
-        using var response = await client.GetAsync("/modules/sample/ping");
+        using var response = await client.GetAsync("/contributions/sample/ping");
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
     }
 
-    private static async Task<TestApiHost> StartApiAsync(ModuleRegistry registry)
+    private static async Task<TestApiHost> StartApiAsync(RegistrationCatalog registry)
     {
         var port = GetFreeTcpPort();
         var baseAddress = new Uri($"http://127.0.0.1:{port}");
@@ -100,22 +100,22 @@ public sealed class ForeignModuleEndpointProxyTests
         builder.WebHost.UseUrls(baseAddress.ToString());
         builder.Services.AddSingleton(registry);
         var app = builder.Build();
-        app.MapForeignModuleEndpoints(registry);
+        app.MapForeignEndpoints(registry);
         await app.StartAsync();
         return new TestApiHost(app, baseAddress);
     }
 
-    private static ModuleManifest Manifest() =>
+    private static PackageManifest Manifest() =>
         new(
-            "sample_dotnet_module",
+            "sample_dotnet_registration",
             "Sample .NET Module",
             "1.0.0",
             "sdm",
             "SharpClaw.TestFixtures.ForeignSidecar.dll",
             "0.0.0");
 
-    private static ModuleManifestRuntimeInfo RuntimeInfo() =>
-        ModuleManifestRuntimeInfo.FromJson("""
+    private static PackageRuntimeInfo RuntimeInfo() =>
+        PackageRuntimeInfo.FromJson("""
         {
           "runtime": "dotnet",
           "hostMode": "sidecar",
@@ -123,18 +123,18 @@ public sealed class ForeignModuleEndpointProxyTests
         }
         """);
 
-    private static ForeignModuleHostLaunchOptions CreateLaunchOptions(
+    private static ForeignRegistrationHostLaunchOptions CreateLaunchOptions(
         TestWorkspace workspace,
         string mode)
     {
         var helperPath = ResolveSidecarHelperPath();
-        return new ForeignModuleHostLaunchOptions
+        return new ForeignRegistrationHostLaunchOptions
         {
             ExecutablePath = "dotnet",
             Arguments = [helperPath, "--mode", mode],
             WorkingDirectory = Path.GetDirectoryName(helperPath),
             ModuleDirectory = workspace.ModuleDir,
-            ModuleDataDirectory = workspace.DataDir,
+            RegistrationDataDirectory = workspace.DataDir,
             ControlAddress = new Uri($"http://127.0.0.1:{GetFreeTcpPort()}"),
             ControlToken = "run-token",
             StartupTimeout = TimeSpan.FromSeconds(5),

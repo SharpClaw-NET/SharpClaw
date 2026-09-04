@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -36,8 +36,8 @@ public static class LocalRuntimeHost
             .AddEnvironmentVariables()
             .AddLocalEnvironment(isDevelopment: false, instancePaths)
             .Build();
-        await using var moduleSet = await PackagedDotNetModuleSet.LoadProductionAsync(
-            Path.Combine(AppContext.BaseDirectory, "modules"),
+        await using var registrationSet = await PackagedDotNetRegistrationSet.LoadProductionAsync(
+            Path.Combine(AppContext.BaseDirectory, "contributions"),
             earlyConfiguration,
             cancellationToken);
 
@@ -69,7 +69,7 @@ public static class LocalRuntimeHost
             DatabaseProviderOptions.FromConfiguration(
                 earlyConfiguration,
                 Path.Combine(instancePaths.DataDirectory, "database")),
-            moduleSet.Modules);
+            registrationSet.Services);
 
         await using var app = builder.Build();
         var apiKeyProvider = app.Services.GetRequiredService<ApiKeyProvider>();
@@ -94,7 +94,7 @@ public static class LocalRuntimeHost
                 null,
                 cancellationToken => new ValueTask(
                     databaseReadiness.ValidateAsync(cancellationToken)));
-            await moduleSet.ConnectCapabilitiesAsync(app.Services, cancellationToken);
+            await registrationSet.ConnectCapabilitiesAsync(app.Services, cancellationToken);
             await kernel.StartAsync("0.1.0-beta");
             runtimeStarted = true;
 
@@ -104,7 +104,7 @@ public static class LocalRuntimeHost
                     args,
                     kernel,
                     kernel.Kernel,
-                    moduleSet.Application,
+                    registrationSet.Application,
                     Console.Out,
                     Console.Error,
                     cancellationToken);
@@ -114,7 +114,7 @@ public static class LocalRuntimeHost
             app.UseMiddleware<ApiKeyMiddleware>();
             app.UseWebSockets();
             KernelHostEndpoints.Map(app);
-            moduleSet.Application.MapEndpoints(app, kernel);
+            registrationSet.Application.MapEndpoints(app, kernel);
             app.MapHandlers();
 
             await kernel.RunRuntimeLifecycleActionAsync(

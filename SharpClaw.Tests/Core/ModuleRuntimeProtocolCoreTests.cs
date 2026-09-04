@@ -1,49 +1,49 @@
 using System.Text.Json;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Modules.Sidecar;
 
 namespace SharpClaw.Tests.Core;
 
 [TestFixture]
-public sealed class ModuleRuntimeProtocolCoreTests
+public sealed class RegistrationRuntimeProtocolCoreTests
 {
     [Test]
-    public void ForeignModuleProtocolSurface_ComesFromContractsAssembly()
+    public void ForeignRegistrationProtocolSurface_ComesFromContractsAssembly()
     {
-        typeof(ForeignModuleProtocol).Assembly.GetName().Name
+        typeof(ForeignRegistrationProtocol).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleHostCapabilityProtocol).Assembly.GetName().Name
+        typeof(ForeignRegistrationHostCapabilityProtocol).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleEndpointResponseMode).Assembly.GetName().Name
+        typeof(ForeignEndpointResponseMode).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleCapability).Assembly.GetName().Name
+        typeof(ForeignRegistrationCapability).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
 
-        ForeignModuleProtocol.Version.Should().Be(1);
-        ForeignModuleProtocol.HandshakePath.Should().Be("/.sharpclaw/handshake");
-        ForeignModuleEndpointResponseMode.WebSocket.Should().Be("websocket");
-        ForeignModuleCapability.ProviderPlugins.Should().Be("providerPlugins");
+        ForeignRegistrationProtocol.Version.Should().Be(1);
+        ForeignRegistrationProtocol.HandshakePath.Should().Be("/.sharpclaw/handshake");
+        ForeignEndpointResponseMode.WebSocket.Should().Be("websocket");
+        ForeignRegistrationCapability.ProviderPlugins.Should().Be("providerPlugins");
     }
 
     [Test]
-    public void ForeignModuleSidecarProtocolModels_ComeFromContractsAndUseCoreMappers()
+    public void ForeignRegistrationSidecarProtocolModels_ComeFromContractsAndUseCoreMappers()
     {
-        typeof(ForeignModuleHandshakeRequest).Assembly.GetName().Name
+        typeof(ForeignRegistrationHandshakeRequest).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleDiscoveryResponse).Assembly.GetName().Name
+        typeof(ForeignRegistrationDiscoveryResponse).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleToolDescriptor).Assembly.GetName().Name
+        typeof(ForeignRegistrationToolDescriptor).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleProtocolContractInvocationRequest).Assembly.GetName().Name
+        typeof(ForeignRegistrationProtocolContractInvocationRequest).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleProviderChatCompletionRequest).Assembly.GetName().Name
+        typeof(ForeignRegistrationProviderChatCompletionRequest).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleProviderPluginDescriptor).Assembly.GetName().Name
+        typeof(ForeignRegistrationProviderPluginDescriptor).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleProtocolModelMapper).Assembly.GetName().Name
+        typeof(ForeignRegistrationProtocolModelMapper).Assembly.GetName().Name
             .Should().Be("SharpClaw.Core");
 
-        typeof(SharpClaw.Contracts.Modules.ModuleManifest).Assembly.GetName().Name
+        typeof(SharpClaw.Contracts.Kernel.PackageManifest).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
         typeof(SharpClaw.Contracts.Providers.ChatCompletionMessage).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
@@ -51,57 +51,57 @@ public sealed class ModuleRuntimeProtocolCoreTests
             .Should().Be("SharpClaw.Contracts");
 
         var schema = JsonSerializer.SerializeToElement(new { type = "object" });
-        var descriptor = new ForeignModuleToolDescriptor(
+        var descriptor = new ForeignRegistrationToolDescriptor(
             "sample",
             "Sample tool",
             schema,
-            Permission: new ForeignModulePermissionDescriptor(IsPerResource: false));
+            Permission: new ForeignRegistrationPermissionDescriptor(IsPerResource: false));
 
-        descriptor.ToModuleToolDefinition().Name.Should().Be("sample");
+        descriptor.ToRegistrationToolDefinition().Name.Should().Be("sample");
 
-        var health = new ForeignModuleHealthResponse(true, Details: new Dictionary<string, JsonElement>
+        var health = new ForeignRegistrationHealthResponse(true, Details: new Dictionary<string, JsonElement>
         {
             ["queueDepth"] = JsonSerializer.SerializeToElement(3),
         });
 
-        health.ToModuleHealthStatus().Details.Should().ContainKey("queueDepth");
+        health.ToRegistrationHealthStatus().Details.Should().ContainKey("queueDepth");
     }
 
     [Test]
-    public void ModuleManifestRuntimeInfo_ParsesAndNormalizesInContracts()
+    public void PackageManifestRuntimeInfo_ParsesAndNormalizesInContracts()
     {
-        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(
+        var runtimeInfo = PackageRuntimeInfo.FromJson(
             """
             {
               "runtime": " DOTNET ",
-              "moduleType": "SharpClaw.Tests.FakeModule",
+              "entryType": "SharpClaw.Tests.FakeRegistration",
               "hostMode": "inprocess"
             }
             """);
 
-        typeof(ModuleManifestRuntimeInfo).Assembly.GetName().Name
+        typeof(PackageRuntimeInfo).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        runtimeInfo.Runtime.Should().Be(ModuleManifestRuntimeInfo.DotNet);
-        runtimeInfo.ModuleType.Should().Be("SharpClaw.Tests.FakeModule");
-        runtimeInfo.HostMode.Should().Be(ModuleManifestRuntimeInfo.HostModeInProcess);
+        runtimeInfo.Runtime.Should().Be(PackageRuntimeInfo.DotNet);
+        runtimeInfo.EntryType.Should().Be("SharpClaw.Tests.FakeRegistration");
+        runtimeInfo.HostMode.Should().Be(PackageRuntimeInfo.HostModeInProcess);
         runtimeInfo.IsDotNet.Should().BeTrue();
         runtimeInfo.IsInProcessHostMode.Should().BeTrue();
     }
 
     [Test]
-    public void ModuleManifestRuntimeInfo_RejectsPathLikeDotNetEntryAssembly()
+    public void PackageManifestRuntimeInfo_RejectsPathLikeDotNetEntryAssembly()
     {
-        var manifest = JsonSerializer.Deserialize<SharpClaw.Contracts.Modules.ModuleManifest>(
+        var manifest = JsonSerializer.Deserialize<SharpClaw.Contracts.Kernel.PackageManifest>(
             """
             {
-              "id": "bad_module",
+              "id": "bad_registration",
               "displayName": "Bad",
               "toolPrefix": "bad",
               "entryAssembly": "nested/bad.dll"
             }
             """)!;
 
-        var act = () => ModuleManifestRuntimeInfo.DotNetDefault
+        var act = () => PackageRuntimeInfo.DotNetDefault
             .EnsureDotNetEntryAssembly(manifest);
 
         act.Should().Throw<ArgumentException>()
@@ -109,13 +109,13 @@ public sealed class ModuleRuntimeProtocolCoreTests
     }
 
     [Test]
-    public void ForeignModuleHostCapabilityDtos_ComeFromContracts()
+    public void ForeignRegistrationHostCapabilityDtos_ComeFromContracts()
     {
-        typeof(ForeignModuleConfigGetRequest).Assembly.GetName().Name
+        typeof(ForeignConfigurationGetRequest).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleInfoListResponse).Assembly.GetName().Name
+        typeof(ForeignRegistrationInfoListResponse).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(SharpClaw.Contracts.Modules.ModuleInfo).Assembly.GetName().Name
+        typeof(SharpClaw.Contracts.Kernel.PackageInfo).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
 
     }
@@ -123,18 +123,18 @@ public sealed class ModuleRuntimeProtocolCoreTests
     [Test]
     public void SidecarReadinessEvaluator_ComeFromCoreAndEvaluatesPreCollectedFacts()
     {
-        typeof(ModuleSidecarReadinessReport).Assembly.GetName().Name
+        typeof(RegistrationSidecarReadinessReport).Assembly.GetName().Name
             .Should().Be("SharpClaw.Core");
         typeof(SidecarReadinessEvaluator).Assembly.GetName().Name
             .Should().Be("SharpClaw.Core");
 
-        var facts = new ModuleSidecarReadinessFacts(
+        var facts = new RegistrationSidecarReadinessFacts(
             "sample",
             "Sample",
             "sam",
             "Sample.Module",
             "Sample.Assembly",
-            new ModuleContributionInventory(
+            new RegistrationContributionInventory(
                 ToolCount: 1,
                 InlineToolCount: 0,
                 ResourceTypeDescriptorCount: 0,
@@ -156,9 +156,9 @@ public sealed class ModuleRuntimeProtocolCoreTests
                 OverridesHealthCheck: false,
                 OverridesStreamingTools: false,
                 OverridesJobCompletionBehavior: false),
-            new ModuleServiceInventory(
+            new RegistrationServiceInventory(
                 Registrations: [],
-                ModuleStorageRegistrationTypes: [],
+                ScopedStorageEntryTypes: [],
                 ProviderPluginRegistrations: [],
                 EventSinkRegistrations: [],
                 FactoryBackedServiceRegistrations: []));

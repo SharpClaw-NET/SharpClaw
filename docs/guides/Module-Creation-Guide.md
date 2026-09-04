@@ -32,8 +32,8 @@ troubleshooting at runtime.
 ## What a module is
 
 A module is a manifest-backed package that runs as a sidecar process. A C#
-module still implements `ISharpClawModule`, but the parent host discovers the
-`module.json` manifest and talks to the module through the sidecar protocol
+module still implements `IKernelRegistrationSource`, but the parent host discovers the
+`package.json` manifest and talks to the module through the sidecar protocol
 instead of composing the module assembly into the API process. Whether it runs
 is controlled by a single line in the core `.env` file, and it can be toggled
 on and off at runtime without restarting the Core API process.
@@ -65,7 +65,7 @@ own Runtime Host `Environment/.env`.
 ## Project setup
 
 Add a new class library project to the solution. Reference `SharpClaw.Contracts` so
-you have access to `ISharpClawModule` and all the supporting types.
+you have access to `IKernelRegistrationSource` and all the supporting types.
 
 ```xml
 <ItemGroup>
@@ -86,7 +86,7 @@ and a nearby manifest:
 ```
 MyModule/
     MyModule.csproj
-    MyModule.cs          â† implements ISharpClawModule
+    MyModule.cs          â† implements IKernelRegistrationSource
     Tools/
       MyToolHandler.cs
 ```
@@ -98,9 +98,9 @@ MyModule/
 ```csharp
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 
-public sealed class MyModule : ISharpClawModule
+public sealed class MyModule : IKernelRegistrationSource
 {
     public string Id          => "my_module";
     public string DisplayName => "My Module";
@@ -111,7 +111,7 @@ public sealed class MyModule : ISharpClawModule
         // Register anything this module needs from DI.
     }
 
-    public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
+    public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() => [];
 
     public void MapEndpoints(IEndpointRouteBuilder app)
     {
@@ -250,7 +250,7 @@ anything with side effects, latency, or that the user might want to audit.
 Return them from `GetToolDefinitions()`:
 
 ```csharp
-public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() =>
+public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() =>
 [
     new(
         Name:             "do_something",
@@ -264,7 +264,7 @@ public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() =>
               "required": ["target"]
             }
             """).RootElement,
-        Permission: new ModuleToolPermission(
+        Permission: new RegistrationToolPermission(
             IsPerResource: false,
             Check: (agentId, resourceId, caller, ct) =>
                 _permissionService.CheckGlobalFlagAsync(agentId, "CanDoSomething", ct)
@@ -351,7 +351,7 @@ Inline tools execute inside the streaming chat loop without creating a job recor
 Use them for fast, stateless operations: waiting, reading context, listing things.
 
 ```csharp
-public IReadOnlyList<ModuleInlineToolDefinition> GetInlineToolDefinitions() =>
+public IReadOnlyList<RegistrationInlineToolDefinition> GetInlineToolDefinitions() =>
 [
     new(
         Name:             "ping",
@@ -380,12 +380,12 @@ public Task<ModuleInlineToolResult> ExecuteInlineToolAsync(
 
 ### Permission checks
 
-`ModuleToolPermission` has two modes:
+`RegistrationToolPermission` has two modes:
 
 **Custom check** â€” supply a `Func` that calls whatever service you need:
 
 ```csharp
-Permission: new ModuleToolPermission(
+Permission: new RegistrationToolPermission(
     IsPerResource: true,
     Check: async (agentId, resourceId, caller, ct) =>
     {
@@ -398,7 +398,7 @@ Permission: new ModuleToolPermission(
 **Delegate to existing** â€” reuse a built-in permission category by name:
 
 ```csharp
-Permission: new ModuleToolPermission(
+Permission: new RegistrationToolPermission(
     IsPerResource: false,
     Check: null,
     DelegateTo: "AccessSafeShellAsync"
@@ -439,7 +439,7 @@ public void MapEndpoints(IEndpointRouteBuilder app)
 
 ## Adding CLI commands
 
-Implement `ICliCommandProvider` alongside `ISharpClawModule`. The `CliDispatcher`
+Implement `ICliCommandProvider` alongside `IKernelRegistrationSource`. The `CliDispatcher`
 discovers all `ICliCommandProvider` implementations and routes input to them.
 
 ```csharp
@@ -480,7 +480,7 @@ lets the module loader enforce initialization order.
 **Exporting:**
 
 ```csharp
-public IReadOnlyList<ModuleContractExport> ExportedContracts =>
+public IReadOnlyList<ContractExport> ExportedContracts =>
 [
     new("my_data_source", typeof(IMyDataSource), "Provides live data from my hardware.")
 ];
@@ -495,7 +495,7 @@ services.AddSingleton<IMyDataSource, MyDataSource>();
 **Requiring (consuming):**
 
 ```csharp
-public IReadOnlyList<ModuleContractRequirement> RequiredContracts =>
+public IReadOnlyList<ContractRequirement> RequiredContracts =>
 [
     new("my_data_source", IsOptional: false)
 ];
@@ -594,7 +594,7 @@ Guard with an existence check so re-seeding manually doesn't produce duplicates.
 ## Debugging and troubleshooting
 
 **Module doesn't appear in `module list`**
-The class doesn't implement `ISharpClawModule`, or the project isn't compiled into
+The class doesn't implement `IKernelRegistrationSource`, or the project isn't compiled into
 the solution. Check references and rebuild.
 
 **Module status is `failed` after enable**
@@ -605,7 +605,7 @@ restart needed.
 **Tool never reaches `ExecuteToolAsync`**
 The permission check is returning denied. Add a log line at the top of
 `ExecuteToolAsync` â€” if it never appears, the block is at the pipeline level, not
-in your code. Check the `ModuleToolPermission` configuration for that tool.
+in your code. Check the `RegistrationToolPermission` configuration for that tool.
 
 **Inline tool fires but produces no model output**
 `ExecuteInlineToolAsync` returned `NotHandled()` or threw silently. Inject an

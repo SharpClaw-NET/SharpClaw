@@ -36,16 +36,9 @@ public sealed class CanonicalJobsRouteBoundaryTests
         GetSourceFiles(bll, "Services").Should().BeEmpty();
         GetSourceFiles(host, "Cli").Should().BeEmpty();
 
-        var moduleSources = Directory.Exists(Path.Combine(bll, "Modules"))
-            ? Directory.GetFiles(
-                    Path.Combine(bll, "Modules"),
-                    "*.cs",
-                    SearchOption.AllDirectories)
-                .Select(path => Path.GetRelativePath(bll, path))
-                .ToArray()
-            : [];
-
-        moduleSources.Should().Equal("Modules\\SecureJsonOptions.cs");
+        Directory.Exists(Path.Combine(bll, "Modules")).Should().BeFalse();
+        File.Exists(Path.Combine(bll, "Configuration", "SecureJsonOptions.cs"))
+            .Should().BeTrue();
     }
 
     private static IReadOnlyList<string> GetSourceFiles(string root, string relativeDirectory)

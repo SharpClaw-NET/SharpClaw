@@ -3,48 +3,48 @@ using System.Text;
 using System.Text.Json;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class ForeignModuleProtocolClientTests
+public sealed class ForeignRegistrationProtocolClientTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Test]
     public async Task HandshakeSendsControlTokenAndValidatesManifestIdentity()
     {
-        using var handler = new FakeSidecarHandler((_, _) => Json(new ForeignModuleHandshakeResponse(
-            ForeignModuleProtocol.Version,
-            "sample_dotnet_module",
+        using var handler = new FakeSidecarHandler((_, _) => Json(new ForeignRegistrationHandshakeResponse(
+            ForeignRegistrationProtocol.Version,
+            "sample_dotnet_registration",
             "sdm",
-            ModuleManifestRuntimeInfo.DotNet,
+            PackageRuntimeInfo.DotNet,
             "net10.0",
             [
-                ForeignModuleCapability.Endpoints,
-                ForeignModuleCapability.LifecycleHooks,
+                ForeignRegistrationCapability.Endpoints,
+                ForeignRegistrationCapability.LifecycleHooks,
             ])));
         using var httpClient = CreateHttpClient(handler);
-        var client = new ForeignModuleProtocolClient(httpClient, "run-token");
+        var client = new ForeignRegistrationProtocolClient(httpClient, "run-token");
 
         var response = await client.HandshakeAsync(
             Manifest(),
-            new ModuleManifestRuntimeInfo(ModuleManifestRuntimeInfo.DotNet, "SharpClaw.TestFixtures.ForeignSidecar.dll"),
+            new PackageRuntimeInfo(PackageRuntimeInfo.DotNet, "SharpClaw.TestFixtures.ForeignSidecar.dll"),
             "0.1.0-beta");
 
-        response.Runtime.Should().Be(ModuleManifestRuntimeInfo.DotNet);
-        response.Capabilities.Should().Contain(ForeignModuleCapability.Endpoints);
+        response.Runtime.Should().Be(PackageRuntimeInfo.DotNet);
+        response.Capabilities.Should().Contain(ForeignRegistrationCapability.Endpoints);
         handler.Requests.Should().ContainSingle();
         handler.Requests[0].Method.Should().Be(HttpMethod.Post);
-        handler.Requests[0].Path.Should().Be(ForeignModuleProtocol.HandshakePath);
+        handler.Requests[0].Path.Should().Be(ForeignRegistrationProtocol.HandshakePath);
         handler.Requests[0].Token.Should().Be("run-token");
 
-        var request = JsonSerializer.Deserialize<ForeignModuleHandshakeRequest>(
+        var request = JsonSerializer.Deserialize<ForeignRegistrationHandshakeRequest>(
             handler.Requests[0].Body!,
             JsonOptions)!;
-        request.ProtocolVersion.Should().Be(ForeignModuleProtocol.Version);
-        request.ModuleId.Should().Be("sample_dotnet_module");
+        request.ProtocolVersion.Should().Be(ForeignRegistrationProtocol.Version);
+        request.SourceId.Should().Be("sample_dotnet_registration");
         request.ToolPrefix.Should().Be("sdm");
         request.HostVersion.Should().Be("0.1.0-beta");
     }
@@ -52,52 +52,52 @@ public sealed class ForeignModuleProtocolClientTests
     [Test]
     public async Task HandshakeRejectsModuleIdentityMismatch()
     {
-        using var handler = new FakeSidecarHandler((_, _) => Json(new ForeignModuleHandshakeResponse(
-            ForeignModuleProtocol.Version,
-            "wrong_module",
+        using var handler = new FakeSidecarHandler((_, _) => Json(new ForeignRegistrationHandshakeResponse(
+            ForeignRegistrationProtocol.Version,
+            "wrong_registration",
             "sdm",
-            ModuleManifestRuntimeInfo.DotNet,
+            PackageRuntimeInfo.DotNet,
             "net10.0")));
         using var httpClient = CreateHttpClient(handler);
-        var client = new ForeignModuleProtocolClient(httpClient, "run-token");
+        var client = new ForeignRegistrationProtocolClient(httpClient, "run-token");
 
         var act = async () => await client.HandshakeAsync(
             Manifest(),
-            new ModuleManifestRuntimeInfo(ModuleManifestRuntimeInfo.DotNet, "SharpClaw.TestFixtures.ForeignSidecar.dll"));
+            new PackageRuntimeInfo(PackageRuntimeInfo.DotNet, "SharpClaw.TestFixtures.ForeignSidecar.dll"));
 
         await act.Should()
-            .ThrowAsync<ForeignModuleProtocolException>()
-            .WithMessage("*handshake id 'wrong_module'*manifest id 'sample_dotnet_module'*");
+            .ThrowAsync<ForeignRegistrationProtocolException>()
+            .WithMessage("*handshake id 'wrong_registration'*manifest id 'sample_dotnet_registration'*");
     }
 
     [Test]
     public async Task DiscoverReadsEndpointDescriptors()
     {
-        var permission = new ForeignModulePermissionDescriptor(
+        var permission = new ForeignRegistrationPermissionDescriptor(
             IsPerResource: true,
             DelegateTo: "CanUpdateAgentJob");
-        var endpoint = new ForeignModuleEndpointDescriptor(
+        var endpoint = new ForeignEndpointDescriptor(
             Method: "POST",
-            RoutePattern: "/modules/sample/render",
-            ResponseMode: ForeignModuleEndpointResponseMode.Json,
+            RoutePattern: "/contributions/sample/render",
+            ResponseMode: ForeignEndpointResponseMode.Json,
             AuthPolicy: "authenticated",
             Permission: permission,
             ContributionId: "sample.render");
 
-        using var handler = new FakeSidecarHandler((_, _) => Json(new ForeignModuleDiscoveryResponse([endpoint])));
+        using var handler = new FakeSidecarHandler((_, _) => Json(new ForeignRegistrationDiscoveryResponse([endpoint])));
         using var httpClient = CreateHttpClient(handler);
-        var client = new ForeignModuleProtocolClient(httpClient, "run-token");
+        var client = new ForeignRegistrationProtocolClient(httpClient, "run-token");
 
         var discovery = await client.DiscoverAsync();
 
         discovery.Endpoints.Should().ContainSingle();
         var actual = discovery.Endpoints![0];
         actual.Method.Should().Be("POST");
-        actual.RoutePattern.Should().Be("/modules/sample/render");
-        actual.ResponseMode.Should().Be(ForeignModuleEndpointResponseMode.Json);
+        actual.RoutePattern.Should().Be("/contributions/sample/render");
+        actual.ResponseMode.Should().Be(ForeignEndpointResponseMode.Json);
         actual.Permission.Should().Be(permission);
         handler.Requests[0].Method.Should().Be(HttpMethod.Get);
-        handler.Requests[0].Path.Should().Be(ForeignModuleProtocol.DiscoveryPath);
+        handler.Requests[0].Path.Should().Be(ForeignRegistrationProtocol.DiscoveryPath);
         handler.Requests[0].Token.Should().Be("run-token");
     }
 
@@ -107,31 +107,31 @@ public sealed class ForeignModuleProtocolClientTests
         using var handler = new FakeSidecarHandler((request, _) =>
             request.RequestUri!.AbsolutePath switch
             {
-                ForeignModuleProtocol.HealthPath => Json(new ForeignModuleHealthResponse(
+                ForeignRegistrationProtocol.HealthPath => Json(new ForeignRegistrationHealthResponse(
                     IsHealthy: true,
                     Message: "ready")),
-                ForeignModuleProtocol.InitializePath => Json(new ForeignModuleLifecycleResponse(
+                ForeignRegistrationProtocol.InitializePath => Json(new ForeignRegistrationLifecycleResponse(
                     Accepted: true,
                     Message: "initialized")),
-                ForeignModuleProtocol.ShutdownPath => Json(new ForeignModuleLifecycleResponse(
+                ForeignRegistrationProtocol.ShutdownPath => Json(new ForeignRegistrationLifecycleResponse(
                     Accepted: true,
                     Message: "stopped")),
                 _ => new HttpResponseMessage(HttpStatusCode.NotFound),
             });
         using var httpClient = CreateHttpClient(handler);
-        var client = new ForeignModuleProtocolClient(httpClient, "run-token");
+        var client = new ForeignRegistrationProtocolClient(httpClient, "run-token");
 
         var health = await client.HealthAsync();
         var initialized = await client.InitializeAsync(Manifest());
         var stopped = await client.ShutdownAsync(Manifest());
 
-        health.ToModuleHealthStatus().IsHealthy.Should().BeTrue();
+        health.ToRegistrationHealthStatus().IsHealthy.Should().BeTrue();
         initialized.Message.Should().Be("initialized");
         stopped.Message.Should().Be("stopped");
         handler.Requests.Select(r => r.Path).Should().Equal(
-            ForeignModuleProtocol.HealthPath,
-            ForeignModuleProtocol.InitializePath,
-            ForeignModuleProtocol.ShutdownPath);
+            ForeignRegistrationProtocol.HealthPath,
+            ForeignRegistrationProtocol.InitializePath,
+            ForeignRegistrationProtocol.ShutdownPath);
         handler.Requests.Should().OnlyContain(r => r.Token == "run-token");
     }
 
@@ -143,19 +143,19 @@ public sealed class ForeignModuleProtocolClientTests
             Content = new StringContent("bad token", Encoding.UTF8, "text/plain"),
         });
         using var httpClient = CreateHttpClient(handler);
-        var client = new ForeignModuleProtocolClient(httpClient, "run-token");
+        var client = new ForeignRegistrationProtocolClient(httpClient, "run-token");
 
         var act = async () => await client.HealthAsync();
 
         var ex = await act.Should()
-            .ThrowAsync<ForeignModuleProtocolException>();
+            .ThrowAsync<ForeignRegistrationProtocolException>();
         ex.Which.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         ex.Which.ResponseBody.Should().Be("bad token");
     }
 
-    private static ModuleManifest Manifest() =>
+    private static PackageManifest Manifest() =>
         new(
-            "sample_dotnet_module",
+            "sample_dotnet_registration",
             "Sample .NET Module",
             "1.0.0",
             "sdm",
@@ -196,7 +196,7 @@ public sealed class ForeignModuleProtocolClientTests
             var body = request.Content is null
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
-            request.Headers.TryGetValues(ForeignModuleProtocol.TokenHeaderName, out var tokens);
+            request.Headers.TryGetValues(ForeignRegistrationProtocol.TokenHeaderName, out var tokens);
             Requests.Add(new CapturedRequest(
                 request.Method,
                 request.RequestUri!.AbsolutePath,

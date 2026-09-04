@@ -4,7 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Tests.TestHarness;
 
@@ -18,19 +18,19 @@ public sealed class BundledTestHarnessSidecarConformanceTests
     {
         using var workspace = TestWorkspace.Create();
         CopyTestHarnessPayload(workspace.ModuleDir);
-        var json = await File.ReadAllTextAsync(Path.Combine(workspace.ModuleDir, "module.json"));
-        var manifest = JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)!;
-        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
+        var json = await File.ReadAllTextAsync(Path.Combine(workspace.ModuleDir, "package.json"));
+        var manifest = JsonSerializer.Deserialize<PackageManifest>(json, SecureJsonOptions.Manifest)!;
+        var runtimeInfo = PackageRuntimeInfo.FromJson(json);
 
         runtimeInfo.IsSidecarHostMode.Should().BeTrue();
-        runtimeInfo.ModuleType.Should().Be("SharpClaw.DefaultModules.TestHarness.TestHarnessOutOfProcessModule");
+        runtimeInfo.EntryType.Should().Be("SharpClaw.DefaultPackages.TestHarness.TestHarnessOutOfProcessRegistration");
 
-        await using var foreignHost = await ForeignModuleHost.StartAsync(
+        await using var foreignHost = await ForeignRegistrationHost.StartAsync(
             manifest,
             runtimeInfo,
             CreateLaunchOptions(workspace));
 
-        foreignHost.Handshake.Runtime.Should().Be(ModuleManifestRuntimeInfo.DotNet);
+        foreignHost.Handshake.Runtime.Should().Be(PackageRuntimeInfo.DotNet);
         foreignHost.Module.GetGlobalFlagDescriptors()
             .Should()
             .ContainSingle(flag => flag.FlagKey == TestHarnessConstants.GlobalFlagKey);
@@ -62,7 +62,7 @@ public sealed class BundledTestHarnessSidecarConformanceTests
                 parameters.RootElement,
                 job)
             .Should()
-            .Be(ModuleJobCompletionBehavior.RemainExecuting);
+            .Be(RegistrationJobCompletionBehavior.RemainExecuting);
 
         var jobResult = await foreignHost.Module.ExecuteToolAsync(
             TestHarnessConstants.JobPermissionedTool,
@@ -135,16 +135,16 @@ public sealed class BundledTestHarnessSidecarConformanceTests
         cost!.TotalAmount.Should().Be(0.25m);
     }
 
-    private static ForeignModuleHostLaunchOptions CreateLaunchOptions(TestWorkspace workspace)
+    private static ForeignRegistrationHostLaunchOptions CreateLaunchOptions(TestWorkspace workspace)
     {
-        var hostPath = ResolveOutOfProcessModuleHostPath();
-        return new ForeignModuleHostLaunchOptions
+        var hostPath = ResolveOutOfProcessRegistrationHostPath();
+        return new ForeignRegistrationHostLaunchOptions
         {
             ExecutablePath = "dotnet",
             Arguments = [hostPath],
             WorkingDirectory = Path.GetDirectoryName(hostPath),
             ModuleDirectory = workspace.ModuleDir,
-            ModuleDataDirectory = workspace.DataDir,
+            RegistrationDataDirectory = workspace.DataDir,
             ControlAddress = new Uri($"http://127.0.0.1:{GetFreeTcpPort()}"),
             ControlToken = "test-harness-sidecar-token",
             StartupTimeout = TimeSpan.FromSeconds(10),
@@ -153,34 +153,34 @@ public sealed class BundledTestHarnessSidecarConformanceTests
         };
     }
 
-    private static void CopyTestHarnessPayload(string moduleDir)
+    private static void CopyTestHarnessPayload(string registrationDir)
     {
         var sourceDir = TestContext.CurrentContext.TestDirectory;
-        foreach (var file in Directory.GetFiles(sourceDir, "SharpClaw.DefaultModules.TestHarness.OutOfProcess.*"))
+        foreach (var file in Directory.GetFiles(sourceDir, "SharpClaw.DefaultPackages.TestHarness.OutOfProcess.*"))
         {
             if (file.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
                 || file.EndsWith(".deps.json", StringComparison.OrdinalIgnoreCase)
                 || file.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase))
             {
-                File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
+                File.Copy(file, Path.Combine(registrationDir, Path.GetFileName(file)), overwrite: true);
             }
         }
 
         File.Copy(
             Path.Combine(
                 ResolveRepoRoot(),
-                "SharpClaw.DefaultModules",
+                "SharpClaw.DefaultPackages",
                 "TestHarness.OutOfProcess",
-                "module.json"),
-            Path.Combine(moduleDir, "module.json"),
+                "package.json"),
+            Path.Combine(registrationDir, "package.json"),
             overwrite: true);
     }
 
-    private static string ResolveOutOfProcessModuleHostPath()
+    private static string ResolveOutOfProcessRegistrationHostPath()
     {
         var hostPath = Path.Combine(
             TestContext.CurrentContext.TestDirectory,
-            "SharpClaw.ModuleHost.OutOfProcess.dll");
+            "SharpClaw.SidecarHost.OutOfProcess.dll");
 
         File.Exists(hostPath).Should().BeTrue(
             $"shared .NET sidecar host package payload must be copied to test output before tests run: '{hostPath}'");

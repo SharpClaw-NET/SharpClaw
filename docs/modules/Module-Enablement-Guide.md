@@ -4,13 +4,13 @@ SharpClaw modules are runtime feature packages discovered by the Core API at
 startup. A module can add tools, REST endpoints, CLI commands, resource types,
 provider implementations or editor integrations. The bundled
 modules are restored from NuGet package payloads; external modules can be added
-separately through the `ExternalModules` section in the Core env file.
+separately through the `ExternalRegistrations` section in the Core env file.
 
 The deployed Runtime Host assembly's `Environment/.env` uses
 canonical dotenv. In development mode, `.dev.env` is loaded after `.env`, so
 the development file can turn on modules without changing the base template.
 File keys use `__`, while `IConfiguration` uses `:`. A module is enabled only
-when its `Modules__<module_id>` key is explicitly set to `"true"`. A missing key or
+when its `Modules__<registration_id>` key is explicitly set to `"true"`. A missing key or
 a value of `"false"` keeps that module disabled.
 
 Module-owned configuration uses the same package-backed env loader. If an
@@ -79,7 +79,7 @@ providers. It is disabled in the base template and enabled in development. If a
 metric threshold depends on metric thresholds but never fires, this is the first
 module to check.
 
-`sharpclaw_module_dev` is the Module Development Kit. It provides module
+`sharpclaw_registration_dev` is the Module Development Kit. It provides module
 authoring, building, hot-loading, and introspection tools. It has an optional
 `window_management` dependency, so it can still load when that contract is not
 available, but features backed by that contract will be unavailable.
@@ -140,15 +140,15 @@ usually explains the difference.
 ## External Modules
 
 External modules are configured separately from bundled modules. Add an
-absolute path to a directory that contains `module.json` under
-`ExternalModules`. The `Enabled` value defaults to true when it is omitted. By
+absolute path to a directory that contains `package.json` under
+`ExternalRegistrations`. The `Enabled` value defaults to true when it is omitted. By
 default, startup fails if an enabled external module path cannot be loaded;
 set `Modules:CrashOnExternalModuleLoadFailure` to `"false"` only when you want
 startup to continue while investigating a broken local module path.
 
 ```dotenv
-ExternalModules__0__Path="C:/modules/Custom.Module/bin/Debug/net10.0"
-ExternalModules__0__Enabled="true"
+ExternalRegistrations__0__Path="C:/modules/Custom.Module/bin/Debug/net10.0"
+ExternalRegistrations__0__Enabled="true"
 ```
 
 When an external module is loaded through the runtime loader, SharpClaw can add

@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -62,7 +62,7 @@ public sealed class RuntimeLifecycleActionTests
             "runtime.start.prepare",
             "runtime.start.bind",
             "runtime.stop.complete");
-        probe.ModuleStopCount.Should().Be(1);
+        probe.RegistrationStopCount.Should().Be(1);
     }
 
     [Test]
@@ -113,7 +113,7 @@ public sealed class RuntimeLifecycleActionTests
 
     [Test]
     [NonParallelizable]
-    public async Task Shutdown_stops_listener_before_modules_and_rejects_new_requests()
+    public async Task Shutdown_stops_listener_before_registrations_and_rejects_new_requests()
     {
         var probe = new LifecycleProbe();
         using var workspace = new TemporaryWorkspace();
@@ -165,7 +165,7 @@ public sealed class RuntimeLifecycleActionTests
                 onComplete: _ => cleanup.CompleteAsync());
 
             requestCount.Should().Be(0);
-            probe.ModuleStopCount.Should().Be(1);
+            probe.RegistrationStopCount.Should().Be(1);
             probe.ShutdownEvents.Should().Equal(
                 "not-ready",
                 "listener",
@@ -249,24 +249,23 @@ public sealed class RuntimeLifecycleActionTests
                 ["Provider:Model"] = "lifecycle-model",
             })
             .Build();
-        var moduleId = "k01-lifecycle-test";
+        var SourceId = "k01-lifecycle-test";
         var grants = LifecycleActionNames.ToDictionary(
             name => name,
             name => KernelActionCatalog.DescriptorFor(Action(name)).Capabilities,
             StringComparer.Ordinal);
-        return new RuntimeKernelAdapter(
+        return RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
-            [new LifecycleModule(provider, probe)],
+            [new LifecycleRegistration(provider, probe)],
             workspace.CreateInstancePaths(),
             new LifecycleProviderClientFactory(provider),
             new KernelGraphCompileOptions
             {
-                ActionModuleCapabilityGrants = new Dictionary<
+                ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
                     IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
                 {
-                    [moduleId] = grants,
+                    [SourceId] = grants,
                 },
             });
     }
@@ -308,7 +307,7 @@ public sealed class RuntimeLifecycleActionTests
         cleanup.PreparationAttempted.Should().BeTrue();
         cleanup.CompletionAttempted.Should().BeTrue();
         cleanupEvents.Should().Equal("not-ready", "listener", "discovery", "api-key");
-        probe.ModuleStopCount.Should().Be(1);
+        probe.RegistrationStopCount.Should().Be(1);
         probe.Actions.Should().Contain(actionName);
     }
 
@@ -320,9 +319,9 @@ public sealed class RuntimeLifecycleActionTests
 
         public ConcurrentQueue<string> ShutdownEvents { get; } = new();
 
-        private int _moduleStopCount;
+        private int _registrationStopCount;
 
-        public int ModuleStopCount => Volatile.Read(ref _moduleStopCount);
+        public int RegistrationStopCount => Volatile.Read(ref _registrationStopCount);
 
         public string? CancelAction { get; init; }
 
@@ -330,9 +329,9 @@ public sealed class RuntimeLifecycleActionTests
 
         public void Record(string actionKey) => Actions.Enqueue(actionKey);
 
-        public void RecordModuleStop()
+        public void RecordRegistrationStop()
         {
-            Interlocked.Increment(ref _moduleStopCount);
+            Interlocked.Increment(ref _registrationStopCount);
             ShutdownEvents.Enqueue("module-stop");
         }
 
@@ -370,22 +369,21 @@ public sealed class RuntimeLifecycleActionTests
         }
     }
 
-    private sealed class LifecycleModule(
+    private sealed class LifecycleRegistration(
         IProviderPlugin provider,
         LifecycleProbe probe) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
             new("k01-lifecycle-test", "K01 lifecycle test", "k01");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection module)
         {
-            module.Services.AddSingleton<IProviderPlugin>(provider);
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton<LifecycleInterceptor>();
+            module.AddSingleton<IProviderPlugin>(provider);
+            module.AddSingleton(probe);
+            module.AddSingleton<LifecycleInterceptor>();
             foreach (var actionName in LifecycleActionNames)
             {
-                module.Hooks
-                    .For(Action(actionName))
+                module.OnAction(Action(actionName))
                     .Use<LifecycleInterceptor>(new HookOrdering(
                         $"k01-lifecycle-{actionName}",
                         HookPriority.Normal,
@@ -396,12 +394,12 @@ public sealed class RuntimeLifecycleActionTests
             }
         }
 
-        public ValueTask StartAsync(ModuleStartContext context, CancellationToken cancellationToken) =>
+        public ValueTask StartAsync(ServiceStartContext context, CancellationToken cancellationToken) =>
             ValueTask.CompletedTask;
 
         public ValueTask StopAsync(CancellationToken cancellationToken)
         {
-            probe.RecordModuleStop();
+            probe.RecordRegistrationStop();
             return ValueTask.CompletedTask;
         }
     }

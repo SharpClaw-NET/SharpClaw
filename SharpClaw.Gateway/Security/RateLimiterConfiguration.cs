@@ -20,9 +20,7 @@ public static class RateLimiterConfiguration
                 banService.RecordViolation(ip);
 
                 var path = context.HttpContext.Request.Path.Value ?? string.Empty;
-                var catalog = context.HttpContext.RequestServices
-                    .GetService<Modules.GatewayEndpointGroupCatalog>();
-                var limit = ResolveRateLimit(path, catalog);
+                var limit = ResolveRateLimit(path);
 
                 context.HttpContext.Response.Headers["X-RateLimit-Limit"] = limit.ToString();
                 context.HttpContext.Response.Headers["X-RateLimit-Remaining"] = "0";
@@ -70,21 +68,8 @@ public static class RateLimiterConfiguration
         return services;
     }
 
-    public static int ResolveRateLimit(
-        string path,
-        Modules.GatewayEndpointGroupCatalog? catalog = null)
+    public static int ResolveRateLimit(string path)
     {
-        if (catalog is not null
-            && path.StartsWith("/api/modules/", StringComparison.OrdinalIgnoreCase)
-            && catalog.Resolve(path) is { } match)
-        {
-            return match.Group.RateLimitPolicy switch
-            {
-                ChatPolicy => 20,
-                _ => 60,
-            };
-        }
-
         return path.Contains("/chat", StringComparison.OrdinalIgnoreCase) ? 20 : 60;
     }
 }

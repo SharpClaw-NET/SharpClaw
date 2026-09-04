@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 
 namespace SharpClaw.Gateway.Infrastructure;
@@ -221,8 +221,8 @@ public sealed class GatewayActionMiddleware(
 
     private static SharpClawActionKey ResolveForwardAction(HttpContext context)
     {
-        if (context.Request.Path.StartsWithSegments("/api/modules"))
-            return new SharpClawActionKey("gateway.module.endpoint.dispatch");
+        if (!context.Request.Path.StartsWithSegments("/api/chat"))
+            return new SharpClawActionKey("gateway.endpoint.dispatch");
 
         return new SharpClawActionKey("gateway.request.forward");
     }

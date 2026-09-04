@@ -1,13 +1,14 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.ModuleSDK;
 
-namespace SharpClaw.TestFixtures.ExternalModule;
+namespace SharpClaw.TestFixtures.ExternalRegistration;
 
-public sealed class SyntheticExternalLifecycleModule : ISharpClawModule
+public sealed class SyntheticExternalLifecycleRegistration : ISharpClawModule
 {
-    public const string ModuleId = "synthetic_external_lifecycle";
+    public const string SourceId = "synthetic_external_lifecycle";
     public const string ToolPrefixValue = "sel";
     public const string ProviderKey = "synthetic-external-provider";
     public const string ModelId = "synthetic-external-model";
@@ -15,15 +16,15 @@ public sealed class SyntheticExternalLifecycleModule : ISharpClawModule
     public const string JobTool = "synthetic_external_job";
     public const string ChatText = "external provider response";
 
-    public ModuleIdentity Identity { get; } = new(ModuleId, "Synthetic external lifecycle", ToolPrefixValue);
+    public ModuleIdentity Identity { get; } = new(SourceId, "Synthetic external lifecycle", ToolPrefixValue);
 
-    public void Configure(ISharpClawModuleBuilder module)
+    public void ConfigureServices(IServiceCollection services)
     {
-        module.Services.AddSingleton<SyntheticExternalToolHandler>();
-        module.Services.AddSingleton<IProviderPlugin, SyntheticExternalProviderPlugin>();
-        module.Tools.Add<SyntheticExternalToolHandler>(
+        services.AddSingleton<SyntheticExternalToolHandler>();
+        services.AddSingleton<IProviderPlugin, SyntheticExternalProviderPlugin>();
+        services.AddTool<SyntheticExternalToolHandler>(
             new ToolDescriptor(JobTool, "External lifecycle tool.", ToolSchemas.EmptyObject));
-        module.Tools.Add<SyntheticExternalToolHandler>(
+        services.AddTool<SyntheticExternalToolHandler>(
             new ToolDescriptor(InlineTool, "External lifecycle inline tool.", ToolSchemas.EmptyObject));
     }
 
@@ -42,9 +43,9 @@ public sealed class SyntheticExternalLifecycleModule : ISharpClawModule
 
     private sealed class SyntheticExternalProviderPlugin : IProviderPlugin
     {
-        public string ProviderKey => SyntheticExternalLifecycleModule.ProviderKey;
+        public string ProviderKey => SyntheticExternalLifecycleRegistration.ProviderKey;
         public string DisplayName => "Synthetic External Provider";
-        public string OwnerModuleId => ModuleId;
+        public string OwnerId => SourceId;
         public bool RequiresEndpoint => false;
         public bool RequiresApiKey => false;
         public IDeviceCodeFlow? DeviceCodeFlow => null;
@@ -61,7 +62,7 @@ public sealed class SyntheticExternalLifecycleModule : ISharpClawModule
 
     private sealed class SyntheticExternalProviderClient : IProviderApiClient
     {
-        public string ProviderKey => SyntheticExternalLifecycleModule.ProviderKey;
+        public string ProviderKey => SyntheticExternalLifecycleRegistration.ProviderKey;
 
         public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<string>>([ModelId]);

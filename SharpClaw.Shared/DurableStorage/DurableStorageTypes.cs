@@ -4,7 +4,7 @@ public enum DurableStreamKind
 {
     JobLog,
     ProcessLog,
-    ModuleLog,
+    RegistrationLog,
 }
 
 public enum DurableWriteMode
@@ -32,21 +32,21 @@ public readonly record struct DurableStreamKey
             DurableStreamKind.ProcessLog,
             $"process/{NormalizeLogicalName(appName)}/{bootId:D}");
 
-    public static DurableStreamKey Module(string moduleId, Guid bootId) =>
+    public static DurableStreamKey Registration(string sourceId, Guid bootId) =>
         new(
-            DurableStreamKind.ModuleLog,
-            $"module/{NormalizeLogicalName(moduleId)}/{bootId:D}");
+            DurableStreamKind.RegistrationLog,
+            $"registration/{NormalizeLogicalName(sourceId)}/{bootId:D}");
 
     public static bool TryParseOperational(
         string? canonicalValue,
         out DurableStreamKey key,
         out string? appName,
-        out string? moduleId,
+        out string? SourceId,
         out Guid bootId)
     {
         key = default;
         appName = null;
-        moduleId = null;
+        SourceId = null;
         bootId = Guid.Empty;
         if (string.IsNullOrWhiteSpace(canonicalValue))
             return false;
@@ -74,10 +74,10 @@ public readonly record struct DurableStreamKey
                 key = Process(logicalName, bootId);
                 appName = logicalName;
             }
-            else if (kind.Equals("module", StringComparison.Ordinal))
+            else if (kind.Equals("registration", StringComparison.Ordinal))
             {
-                key = Module(logicalName, bootId);
-                moduleId = logicalName;
+                key = Registration(logicalName, bootId);
+                SourceId = logicalName;
             }
             else
             {
@@ -93,7 +93,7 @@ public readonly record struct DurableStreamKey
         {
             key = default;
             appName = null;
-            moduleId = null;
+            SourceId = null;
             bootId = Guid.Empty;
             return false;
         }
@@ -189,7 +189,7 @@ public sealed record DurableStreamSummary(
 public sealed record DurableOperationalStreamSummary(
     DurableStreamKey Stream,
     string? AppName,
-    string? ModuleId,
+    string? SourceId,
     Guid BootId,
     bool HasActiveSegment,
     bool HasSealedSegments,
@@ -228,7 +228,7 @@ public sealed class DurableRetentionOptions
 {
     public TimeSpan JobLogAge { get; init; } = TimeSpan.FromDays(30);
     public TimeSpan ProcessLogAge { get; init; } = TimeSpan.FromDays(14);
-    public TimeSpan ModuleLogAge { get; init; } = TimeSpan.FromDays(14);
+    public TimeSpan RegistrationLogAge { get; init; } = TimeSpan.FromDays(14);
     public long MaximumEncodedBytes { get; init; } = 10L * 1024 * 1024 * 1024;
     public long MinimumFreeBytes { get; init; } = 1024L * 1024 * 1024;
     public int MaximumDeletesPerRun { get; init; } = 10_000;
@@ -237,7 +237,7 @@ public sealed class DurableRetentionOptions
     {
         DurableStreamKind.JobLog => JobLogAge,
         DurableStreamKind.ProcessLog => ProcessLogAge,
-        DurableStreamKind.ModuleLog => ModuleLogAge,
+        DurableStreamKind.RegistrationLog => RegistrationLogAge,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 }

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\build\PackagedModulePayload.targets" />
+  <Import Project="..\build\PackagedContributionPayload.targets" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -34,7 +34,7 @@
     <PackageReference Include="SharpClaw.Modules.Agents" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Metrics" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.ModuleDev" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.ModuleHost.OutOfProcess" GeneratePathProperty="true" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.SidecarHost.OutOfProcess" GeneratePathProperty="true" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Anthropic" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Google" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.LlamaSharp" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
@@ -75,59 +75,59 @@
     <ProjectReference Include="Fixtures\ForeignSidecar\SharpClaw.TestFixtures.ForeignSidecar.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
-  <Target Name="CopyPackagedModulesToTestOutput"
+  <Target Name="CopyPackagedContributionsToTestOutput"
           AfterTargets="Build"
-          DependsOnTargets="_ResolvePackagedModulePayloadFiles">
+          DependsOnTargets="_ResolvePackagedContributionPayloadFiles">
     <ItemGroup>
-      <_BundledModuleDll Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll"
+      <_BundledRegistrationDll Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll"
                          Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' != ''" />
       <_NonHostDll Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\*.dll"
                    Exclude="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\SharpClaw.*.dll"
                    Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' != ''" />
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.*.dll"
+      <_BundledRegistrationDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.*.dll"
                          Condition="'$(ArtifactsPath)' == ''" />
       <_NonHostDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\*.dll"
                    Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll"
                    Condition="'$(ArtifactsPath)' == ''" />
-      <_BundledModuleManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\module.json"
+      <_BundledPackageManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\package.json"
                               Condition="'$(Configuration)' == 'Debug'">
-        <ModuleId>sharpclaw_test_harness_out_of_process</ModuleId>
-      </_BundledModuleManifest>
-      <_InProcessHarnessPayload Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.InProcess\$(Configuration.ToLower())\SharpClaw.DefaultModules.TestHarness.InProcess.dll"
+        <SourceId>sharpclaw_test_harness_out_of_process</SourceId>
+      </_BundledPackageManifest>
+      <_InProcessHarnessPayload Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.InProcess\$(Configuration.ToLower())\SharpClaw.DefaultPackages.TestHarness.InProcess.dll"
                                 Condition="'$(ArtifactsPath)' != ''" />
       <_InProcessHarnessPayload Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.InProcess\$(Configuration.ToLower())\*.dll"
                                 Exclude="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.InProcess\$(Configuration.ToLower())\SharpClaw.*.dll"
                                 Condition="'$(ArtifactsPath)' != ''" />
-      <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.InProcess.dll"
+      <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultPackages.TestHarness.InProcess.dll"
                                 Condition="'$(ArtifactsPath)' == ''" />
       <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\*.dll"
                                 Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
-      <_InProcessHarnessManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\module.json" />
+      <_InProcessHarnessManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\package.json" />
     </ItemGroup>
-    <RemoveDir Directories="$(OutDir)modules\sharpclaw_test_harness;$(OutDir)modules\sharpclaw_test_harness_in_process;$(OutDir)modules\sharpclaw_test_harness_out_of_process" />
-    <Copy SourceFiles="@(_BundledModuleDll);@(_NonHostDll)"
+    <RemoveDir Directories="$(OutDir)contributions\sharpclaw_test_harness;$(OutDir)contributions\sharpclaw_test_harness_in_process;$(OutDir)contributions\sharpclaw_test_harness_out_of_process" />
+    <Copy SourceFiles="@(_BundledRegistrationDll);@(_NonHostDll)"
           DestinationFolder="$(OutDir)"
           SkipUnchangedFiles="true"
-          Condition="'@(_BundledModuleDll);@(_NonHostDll)' != ''" />
+          Condition="'@(_BundledRegistrationDll);@(_NonHostDll)' != ''" />
     <Copy SourceFiles="@(_InProcessHarnessPayload)"
-          DestinationFolder="$(OutDir)test-modules\sharpclaw_test_harness_in_process"
+          DestinationFolder="$(OutDir)test-contributions\sharpclaw_test_harness_in_process"
           SkipUnchangedFiles="true"
           Condition="'@(_InProcessHarnessPayload)' != ''" />
     <Copy SourceFiles="@(_InProcessHarnessManifest)"
-          DestinationFiles="$(OutDir)test-modules\sharpclaw_test_harness_in_process\module.json"
+          DestinationFiles="$(OutDir)test-contributions\sharpclaw_test_harness_in_process\package.json"
           SkipUnchangedFiles="true"
           Condition="'@(_InProcessHarnessManifest)' != ''" />
     <Copy SourceFiles="@(_PackagedSidecarHostFile)"
           DestinationFolder="$(OutDir)"
           SkipUnchangedFiles="true"
           Condition="'@(_PackagedSidecarHostFile)' != ''" />
-    <Copy SourceFiles="@(_PackagedModulePayloadFile)"
-          DestinationFiles="@(_PackagedModulePayloadFile->'$(OutDir)modules\%(RecursiveDir)%(Filename)%(Extension)')"
+    <Copy SourceFiles="@(_PackagedContributionPayloadFile)"
+          DestinationFiles="@(_PackagedContributionPayloadFile->'$(OutDir)contributions\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"
-          Condition="'@(_PackagedModulePayloadFile)' != ''" />
-    <Copy SourceFiles="@(_BundledModuleManifest)"
-          DestinationFiles="@(_BundledModuleManifest->'$(OutDir)modules\%(ModuleId)\module.json')"
+          Condition="'@(_PackagedContributionPayloadFile)' != ''" />
+    <Copy SourceFiles="@(_BundledPackageManifest)"
+          DestinationFiles="@(_BundledPackageManifest->'$(OutDir)contributions\%(SourceId)\package.json')"
           SkipUnchangedFiles="true"
-          Condition="'@(_BundledModuleManifest)' != ''" />
+          Condition="'@(_BundledPackageManifest)' != ''" />
   </Target>
 </Project>

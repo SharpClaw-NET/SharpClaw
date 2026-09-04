@@ -11,10 +11,10 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Kernel;
-using SharpClaw.ModuleHost.OutOfProcess;
+using SharpClaw.SidecarHost.OutOfProcess;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host;
 using SharpClaw.Runtime.Host.Api;
@@ -28,9 +28,11 @@ namespace SharpClaw.Tests.Kernel;
 [NonParallelizable]
 public sealed class AgentOrchestrationHostGateTests
 {
-    private const string ContextModuleId = "sharpclaw_context";
-    private const string PermissionModuleId = "sharpclaw_two_tier_permission";
-    private const string AgentsModuleId = "sharpclaw_agents";
+    private const string ContextRegistrationId = "sharpclaw_context";
+    private const string PermissionRegistrationId = "sharpclaw_two_tier_permission";
+    private const string AgentsRegistrationId = "sharpclaw_agents";
+    private const string RestrictionModuleId = "sharpclaw_test_permission_restriction";
+    private const string RestrictionDenyRole = "test-permission-restriction-deny";
     private const string ContextActionKey = "context.api.dispatch";
     private const string PermissionActionKey = "permission.api.dispatch";
     private const string AgentsActionKey = "agents.api.dispatch";
@@ -39,24 +41,34 @@ public sealed class AgentOrchestrationHostGateTests
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     private static readonly JsonSerializerOptions HashJson = new(JsonSerializerDefaults.General);
 
+    private static void RecordStage(string record)
+    {
+        TestContext.Progress.WriteLine(record);
+        var evidencePath = Environment.GetEnvironmentVariable(
+            "SHARPCLAW_PRODUCTION_GATE_EVIDENCE_PATH");
+        if (!string.IsNullOrWhiteSpace(evidencePath))
+            File.AppendAllText(evidencePath, record + Environment.NewLine);
+    }
+
     [Test, CancelAfter(300000)]
-    public async Task ProductionHost_ComposesAllPackagedModulesAndExecutesAgentContracts()
+    public async Task ProductionHost_ComposesAllPackagedRegistrationsAndExecutesAgentContracts()
     {
         var initialSidecars = FindSidecarProcessIds();
         await using var provider = await FakeOpenAiServer.CreateAsync();
         using var workspace = new TemporaryWorkspace();
         var configuration = CreateConfiguration(provider.Endpoint);
 
-        await using (var moduleSet = await PackagedDotNetModuleSet.LoadProductionAsync(
-                         Path.Combine(AppContext.BaseDirectory, "modules"),
+        await using (var registrationSet = await PackagedDotNetRegistrationSet.LoadProductionAsync(
+                         Path.Combine(AppContext.BaseDirectory, "contributions"),
                          configuration))
         {
-            var sidecars = moduleSet.Modules.OfType<OutOfProcessModuleProxy>().ToArray();
+            RecordStage("production-gate-stage=modules-loaded");
+            var sidecars = registrationSet.Sidecars.ToArray();
             sidecars.Select(module => module.Identity.Id).Should().Contain(
-                [ContextModuleId, PermissionModuleId, AgentsModuleId]);
-            var providerModule = moduleSet.Modules.Single(module =>
-                module.Identity.Id == "sharpclaw_providers_openai_compat");
-            providerModule.Should().NotBeOfType<OutOfProcessModuleProxy>();
+                [ContextRegistrationId, PermissionRegistrationId, AgentsRegistrationId, RestrictionModuleId]);
+            registrationSet.SourceIds.Should().Contain("sharpclaw_providers_openai_compat");
+            sidecars.Should().NotContain(registration =>
+                registration.SourceId == "sharpclaw_providers_openai_compat");
 
             var databaseOptions = new DatabaseProviderOptions
             {
@@ -65,7 +77,7 @@ public sealed class AgentOrchestrationHostGateTests
             databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
             databaseOptions.JsonFile.EncryptAtRest = false;
 
-            var telemetry = new RecordingModuleStorageTelemetry();
+            var telemetry = new RecordingScopedStorageTelemetry();
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions
             {
                 ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
@@ -79,8 +91,8 @@ public sealed class AgentOrchestrationHostGateTests
                 workspace.InstancePaths,
                 new EncryptionOptions { Key = new byte[32] },
                 databaseOptions,
-                moduleSet.Modules);
-            builder.Services.AddSingleton<IModuleStorageTelemetry>(telemetry);
+                registrationSet.Services);
+            builder.Services.AddSingleton<IStorageTelemetry>(telemetry);
 
             await using var app = builder.Build();
             var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
@@ -89,7 +101,8 @@ public sealed class AgentOrchestrationHostGateTests
             dispatcher.Should().BeSameAs(adapter.ActionDispatcher);
 
             await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
-            await moduleSet.ConnectCapabilitiesAsync(app.Services);
+            await registrationSet.ConnectCapabilitiesAsync(app.Services);
+            RecordStage("production-gate-stage=capabilities-connected");
             await adapter.StartAsync("tracked-package-production-gate");
             readiness.MarkReady();
 
@@ -112,30 +125,32 @@ public sealed class AgentOrchestrationHostGateTests
             app.UseMiddleware<ApiKeyMiddleware>();
             app.UseWebSockets();
             KernelHostEndpoints.Map(app);
-            moduleSet.Application.MapEndpoints(app, adapter);
+            registrationSet.Application.MapEndpoints(app, adapter);
 
             try
             {
                 await app.StartAsync();
-                var context = FindModule(sidecars, ContextModuleId);
-                var permission = FindModule(sidecars, PermissionModuleId);
-                var agents = FindModule(sidecars, AgentsModuleId);
+                RecordStage("production-gate-stage=host-started");
+                var context = FindRegistration(sidecars, ContextRegistrationId);
+                var permission = FindRegistration(sidecars, PermissionRegistrationId);
+                var agents = FindRegistration(sidecars, AgentsRegistrationId);
 
                 await AssertApplicationCliAsync(
-                    moduleSet.Application,
+                    registrationSet.Application,
                     "ctx-channel-list",
                     adapter,
                     administrator);
                 await AssertApplicationCliAsync(
-                    moduleSet.Application,
+                    registrationSet.Application,
                     "perm-policy-list",
                     adapter,
                     administrator);
                 await AssertApplicationCliAsync(
-                    moduleSet.Application,
+                    registrationSet.Application,
                     "agents-list",
                     adapter,
                     administrator);
+                RecordStage("production-gate-stage=cli-complete");
 
                 using var client = CreateHostClient(
                     app,
@@ -144,6 +159,7 @@ public sealed class AgentOrchestrationHostGateTests
                 await AssertEndpointAsync(client, "/sharpclaw/context/channels");
                 await AssertEndpointAsync(client, "/sharpclaw/permission/policies");
                 await AssertEndpointAsync(client, "/sharpclaw/agents/list");
+                RecordStage("production-gate-stage=endpoints-complete");
 
                 (await InvokeApiAsync(
                     context.Client,
@@ -163,6 +179,7 @@ public sealed class AgentOrchestrationHostGateTests
                     "agent.list",
                     EmptyPayload,
                     administrator)).Kind.Should().Be(ActionOutcomeKind.Completed);
+                RecordStage("production-gate-stage=typed-reads-complete");
 
                 var worker = new RequestPrincipal(Guid.NewGuid().ToString("D"), IsAuthenticated: true);
                 var denied = await InvokeApiAsync(
@@ -197,6 +214,7 @@ public sealed class AgentOrchestrationHostGateTests
                 policy.Kind.Should().Be(
                     ActionOutcomeKind.Completed,
                     FormatFailure(policy, telemetry));
+                RecordStage("production-gate-stage=policy-saved");
 
                 var allowed = await InvokeApiAsync(
                     agents.Client,
@@ -207,6 +225,35 @@ public sealed class AgentOrchestrationHostGateTests
                 allowed.Kind.Should().Be(
                     ActionOutcomeKind.Completed,
                     FormatFailure(allowed, telemetry));
+                RecordStage("production-gate-stage=provider-allow-complete");
+
+                var agentWritesBeforeRestriction = telemetry.Events.Count(item =>
+                    item.SourceId == AgentsRegistrationId
+                    && item.Operation == ScopedStorageOperations.Upsert);
+                var restrictedWorker = new RequestPrincipal(
+                    worker.SubjectId,
+                    "Restricted Worker",
+                    new HashSet<string>([RestrictionDenyRole], StringComparer.Ordinal),
+                    IsAuthenticated: true);
+                var restricted = await InvokeApiAsync(
+                    agents.Client,
+                    AgentsActionKey,
+                    "agent.create",
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        name = "Rejected Agent",
+                        modelId = Guid.NewGuid(),
+                        providerKey = "custom",
+                        modelName = "rejected-model",
+                        systemPrompt = "This write must not run.",
+                    }, WebJson),
+                    restrictedWorker);
+                RecordStage("production-gate-stage=restriction-returned");
+                restricted.Kind.Should().NotBe(ActionOutcomeKind.Completed);
+                telemetry.Events.Count(item =>
+                    item.SourceId == AgentsRegistrationId
+                    && item.Operation == ScopedStorageOperations.Upsert)
+                    .Should().Be(agentWritesBeforeRestriction);
 
                 var sourceId = Guid.NewGuid();
                 var import = await InvokeApiAsync(
@@ -218,6 +265,7 @@ public sealed class AgentOrchestrationHostGateTests
                 import.Kind.Should().Be(
                     ActionOutcomeKind.Completed,
                     FormatFailure(import, telemetry));
+                RecordStage("production-gate-stage=import-complete");
                 import.Result.ValueKind.Should().Be(JsonValueKind.Array);
                 import.Result.GetArrayLength().Should().Be(1);
                 import.Result[0].GetProperty("id").GetGuid().Should().Be(sourceId);
@@ -227,6 +275,7 @@ public sealed class AgentOrchestrationHostGateTests
                     adapter,
                     administrator);
                 await AssertCancellationAndLaterUseAsync(context.Client, administrator);
+                RecordStage("production-gate-stage=recovery-complete");
 
                 var agentResult = await InvokeApiAsync(
                     agents.Client,
@@ -278,6 +327,7 @@ public sealed class AgentOrchestrationHostGateTests
                 agentPolicy.Kind.Should().Be(
                     ActionOutcomeKind.Completed,
                     FormatFailure(agentPolicy, telemetry));
+                RecordStage("production-gate-stage=agent-policy-saved");
 
                 var agentToken = RegisterHttpPrincipal(httpPrincipals, agentPrincipal);
                 using var agentClient = CreateHostClient(
@@ -289,33 +339,36 @@ public sealed class AgentOrchestrationHostGateTests
                 chat.StatusCode.Should().Be(HttpStatusCode.OK, chatBody);
                 chatBody.Should().Contain("frozen package graph response");
                 provider.RequestCount.Should().Be(1);
+                RecordStage("production-gate-stage=chat-complete");
 
                 telemetry.Events.Should().NotBeEmpty();
                 telemetry.Events.Should().OnlyContain(item => item.Success);
                 telemetry.Events.Should().Contain(item =>
-                    item.ModuleId == PermissionModuleId
-                    && item.Operation == ModuleStorageOperations.Upsert);
+                    item.SourceId == PermissionRegistrationId
+                    && item.Operation == ScopedStorageOperations.Upsert);
                 telemetry.Events.Should().Contain(item =>
-                    item.ModuleId == AgentsModuleId
-                    && item.Operation == ModuleStorageOperations.Upsert);
-                TestContext.Progress.WriteLine(
+                    item.SourceId == AgentsRegistrationId
+                    && item.Operation == ScopedStorageOperations.Upsert);
+                RecordStage(
                     "module-storage-counts=" + string.Join(
                         ",",
                         telemetry.Events
-                            .GroupBy(item => (item.ModuleId, item.Operation))
-                            .OrderBy(group => group.Key.ModuleId, StringComparer.Ordinal)
+                            .GroupBy(item => (item.SourceId, item.Operation))
+                            .OrderBy(group => group.Key.SourceId, StringComparer.Ordinal)
                             .ThenBy(group => group.Key.Operation, StringComparer.Ordinal)
-                            .Select(group => $"{group.Key.ModuleId}:{group.Key.Operation}:{group.Count()}")));
+                            .Select(group => $"{group.Key.SourceId}:{group.Key.Operation}:{group.Count()}")));
             }
             finally
             {
                 readiness.MarkNotReady();
                 await adapter.StopAsync();
                 await app.StopAsync();
+                RecordStage("production-gate-stage=host-stopped");
             }
         }
 
         await AssertSidecarsStoppedAsync(initialSidecars);
+        RecordStage("production-gate-stage=sidecars-stopped");
     }
 
     private static IConfiguration CreateConfiguration(string providerEndpoint) =>
@@ -330,13 +383,13 @@ public sealed class AgentOrchestrationHostGateTests
             })
             .Build();
 
-    private static OutOfProcessModuleProxy FindModule(
-        IEnumerable<OutOfProcessModuleProxy> modules,
-        string moduleId) =>
-        modules.Single(module => module.Identity.Id == moduleId);
+    private static OutOfProcessRegistrationProxy FindRegistration(
+        IEnumerable<OutOfProcessRegistrationProxy> modules,
+        string SourceId) =>
+        modules.Single(module => module.Identity.Id == SourceId);
 
     private static async Task AssertApplicationCliAsync(
-        PackagedModuleApplicationRegistry application,
+        PackagedApplicationRegistry application,
         string command,
         RuntimeKernelAdapter adapter,
         RequestPrincipal caller)
@@ -381,7 +434,7 @@ public sealed class AgentOrchestrationHostGateTests
     }
 
     private static async ValueTask<IActionOutcome<JsonElement>> InvokeApiAsync(
-        OutOfProcessModuleClient client,
+        OutOfProcessRegistrationClient client,
         string actionKey,
         string operation,
         JsonElement payload,
@@ -397,9 +450,9 @@ public sealed class AgentOrchestrationHostGateTests
             item.ActionKey == entry.Descriptor.Key
             && item.Version == entry.Descriptor.Version);
         var context = client.IssueHostActionContext(
-            HostActionEntryIngress.CrossModule,
+            HostActionEntryIngress.CrossRegistration,
             "sharpclaw-host-gate",
-            client.Discovery.ModuleId,
+            client.Discovery.SourceId,
             definition,
             entry.Descriptor,
             action,
@@ -408,7 +461,7 @@ public sealed class AgentOrchestrationHostGateTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             DateTimeOffset.UtcNow.AddMinutes(1));
-        return await client.InvokeModuleActionEntryAsync(
+        return await client.InvokeRegistrationActionEntryAsync(
             definition,
             entry.Descriptor,
             action,
@@ -417,7 +470,7 @@ public sealed class AgentOrchestrationHostGateTests
     }
 
     private static async Task AssertReplayRejectedAndLaterUseAsync(
-        OutOfProcessModuleClient client,
+        OutOfProcessRegistrationClient client,
         RuntimeKernelAdapter adapter,
         RequestPrincipal caller)
     {
@@ -433,7 +486,7 @@ public sealed class AgentOrchestrationHostGateTests
         var context = client.IssueHostActionContext(
             HostActionEntryIngress.Cli,
             command,
-            client.Discovery.ModuleId,
+            client.Discovery.SourceId,
             descriptor,
             new KernelActionEnvelope(descriptor.Key, invocation),
             caller,
@@ -441,10 +494,14 @@ public sealed class AgentOrchestrationHostGateTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             DateTimeOffset.UtcNow.AddMinutes(1));
+        RecordStage("production-gate-stage=replay-first-start");
         var first = await client.InvokeCliAsync(command, [], context);
+        RecordStage("production-gate-stage=replay-first-returned");
         first.Result.Succeeded.Should().BeTrue();
         var replay = async () => await client.InvokeCliAsync(command, [], context);
+        RecordStage("production-gate-stage=replay-rejected-start");
         await replay.Should().ThrowAsync<Exception>();
+        RecordStage("production-gate-stage=replay-rejected-complete");
 
         var later = await InvokeApiAsync(
             client,
@@ -452,15 +509,17 @@ public sealed class AgentOrchestrationHostGateTests
             "policy.list",
             EmptyPayload,
             caller);
+        RecordStage("production-gate-stage=replay-later-use-returned");
         later.Kind.Should().Be(ActionOutcomeKind.Completed);
     }
 
     private static async Task AssertCancellationAndLaterUseAsync(
-        OutOfProcessModuleClient client,
+        OutOfProcessRegistrationClient client,
         RequestPrincipal caller)
     {
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
+        RecordStage("production-gate-stage=cancellation-start");
         var cancelled = async () => await InvokeApiAsync(
             client,
             ContextActionKey,
@@ -469,12 +528,14 @@ public sealed class AgentOrchestrationHostGateTests
             caller,
             cancellation.Token);
         await cancelled.Should().ThrowAsync<OperationCanceledException>();
+        RecordStage("production-gate-stage=cancellation-rejected");
         var later = await InvokeApiAsync(
             client,
             ContextActionKey,
             "channel.list",
             EmptyPayload,
             caller);
+        RecordStage("production-gate-stage=cancellation-later-use-returned");
         later.Kind.Should().Be(ActionOutcomeKind.Completed);
     }
 
@@ -533,7 +594,7 @@ public sealed class AgentOrchestrationHostGateTests
 
     private static string FormatFailure(
         IActionOutcome<JsonElement> outcome,
-        RecordingModuleStorageTelemetry telemetry) =>
+        RecordingScopedStorageTelemetry telemetry) =>
         $"{outcome.Error?.Code}: {outcome.Error?.Message}; "
         + $"storage={JsonSerializer.Serialize(telemetry.Events.ToArray())}";
 
@@ -557,7 +618,7 @@ public sealed class AgentOrchestrationHostGateTests
     }
 
     private static HashSet<int> FindSidecarProcessIds() =>
-        Process.GetProcessesByName("SharpClaw.ModuleHost.OutOfProcess")
+        Process.GetProcessesByName("SharpClaw.SidecarHost.OutOfProcess")
             .Select(process => process.Id)
             .ToHashSet();
 
@@ -611,11 +672,11 @@ public sealed class AgentOrchestrationHostGateTests
         string HandlerKey,
         string PayloadCodec);
 
-    private sealed class RecordingModuleStorageTelemetry : IModuleStorageTelemetry
+    private sealed class RecordingScopedStorageTelemetry : IStorageTelemetry
     {
-        public ConcurrentQueue<ModuleStorageTelemetryEvent> Events { get; } = new();
+        public ConcurrentQueue<ScopedStorageTelemetryEvent> Events { get; } = new();
 
-        public void Record(ModuleStorageTelemetryEvent telemetryEvent) =>
+        public void Record(ScopedStorageTelemetryEvent telemetryEvent) =>
             Events.Enqueue(telemetryEvent);
     }
 

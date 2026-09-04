@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>SharpClaw.TestFixtures.PermissionRestriction</PackageId>
+    <Version>0.5.0-beta.1</Version>
+    <AssemblyVersion>0.5.0.0</AssemblyVersion>
+    <FileVersion>0.5.0.0</FileVersion>
+    <InformationalVersion>0.5.0-beta.1</InformationalVersion>
+    <Authors>SharpClaw-NET</Authors>
+    <Description>Provides the tracked restriction-only permission module for the SharpClaw production gate.</Description>
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/SharpClaw-NET/SharpClaw</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <IncludeContentInPack>false</IncludeContentInPack>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddPermissionRestrictionPayloadToPackage</TargetsForTfmSpecificContentInPackage>
+    <NoWarn>$(NoWarn);NU5100;NU5118;NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.ModuleSDK" PrivateAssets="all" IncludeAssets="compile;build;buildTransitive" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="package.json" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+  </ItemGroup>
+
+  <Target Name="AddPermissionRestrictionPayloadToPackage">
+    <ItemGroup>
+      <_PermissionRestrictionPayload Include="$(TargetPath)" />
+      <_PermissionRestrictionPayload Include="$(TargetDir)$(AssemblyName).deps.json" />
+      <_PermissionRestrictionPayload Include="$(TargetDir)SharpClaw.Contracts.dll" />
+      <_PermissionRestrictionPayload Include="$(TargetDir)Microsoft.Extensions.DependencyInjection.Abstractions.dll" />
+      <TfmSpecificPackageFile Include="@(_PermissionRestrictionPayload)" PackagePath="sharpclaw\" />
+      <TfmSpecificPackageFile Include="$(MSBuildProjectDirectory)\package.json" PackagePath="sharpclaw\" />
+    </ItemGroup>
+  </Target>
+</Project>

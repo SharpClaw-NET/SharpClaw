@@ -76,11 +76,11 @@ public sealed class TestHarnessPromptAssemblyExpandedTests
     }
 
     [Test]
-    public async Task ModuleHeaderTagsDoNotExecuteWhenModuleTagsAreDisabled()
+    public async Task RegistrationHeaderTagsDoNotExecuteWhenRegistrationTagsAreDisabled()
     {
         await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
         {
-            ["Chat:DisableModuleHeaderTags"] = "true"
+            ["Chat:DisableRegistrationHeaderTags"] = "true"
         });
         var seeded = await host.SeedChatAsync(
             TestHarnessConstants.PlainProviderKey,
@@ -103,7 +103,7 @@ public sealed class TestHarnessPromptAssemblyExpandedTests
             ["Chat:DisableDefaultHeaders"] = "true",
             ["Chat:DisableDefaultSystemPrompt"] = "true",
             ["Chat:DisableHeaderTagExpansion"] = "true",
-            ["Chat:DisableModuleHeaderTags"] = "true",
+            ["Chat:DisableRegistrationHeaderTags"] = "true",
             ["AgentOrchestration:DisableAccessibleThreadsHeader"] = "true",
             ["Chat:CacheMaxMegabytes"] = "0"
         });

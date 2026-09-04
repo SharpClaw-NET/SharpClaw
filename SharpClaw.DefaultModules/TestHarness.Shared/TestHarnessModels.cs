@@ -1,15 +1,15 @@
 using System.Text.Json;
 
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 
-namespace SharpClaw.DefaultModules.TestHarness;
+namespace SharpClaw.DefaultPackages.TestHarness;
 
 public static class TestHarnessConstants
 {
-    public const string OutOfProcessModuleId = "sharpclaw_test_harness_out_of_process";
-    public const string InProcessModuleId = "sharpclaw_test_harness_in_process";
-    public const string ModuleId = OutOfProcessModuleId;
+    public const string OutOfProcessRegistrationId = "sharpclaw_test_harness_out_of_process";
+    public const string InProcessRegistrationId = "sharpclaw_test_harness_in_process";
+    public const string SourceId = OutOfProcessRegistrationId;
     public const string ToolPrefix = "th";
 
     public const string PlainProviderKey = "sharpclaw-test";

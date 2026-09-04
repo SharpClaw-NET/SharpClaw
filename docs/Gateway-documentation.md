@@ -18,7 +18,7 @@ ANY  /api/chat
 
 `GET /api/health` returns the Gateway health response. `GET /api/gateway/status` returns the configured Runtime target and ready status. `/api/chat` forwards the request to the Runtime `/chat` route and copies the response status, content type, and body.
 
-Gateway modules can add endpoint groups under `/api/modules/{moduleId}/{groupId}`. The module loader discovers only valid Gateway module extensions. The endpoint catalog rejects unknown groups and disabled groups before the request reaches module code. A module endpoint does not create a second Runtime or storage path.
+Gateway modules can add endpoint groups under `/api/modules/{SourceId}/{groupId}`. The module loader discovers only valid Gateway module extensions. The endpoint catalog rejects unknown groups and disabled groups before the request reaches module code. A module endpoint does not create a second Runtime or storage path.
 
 ## Configuration
 

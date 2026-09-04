@@ -1,5 +1,5 @@
 using System.Collections.ObjectModel;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 
 namespace SharpClaw.Services;
 

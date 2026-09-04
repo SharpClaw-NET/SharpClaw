@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Gateway.Infrastructure;
 
@@ -202,8 +202,6 @@ public sealed class GatewayBackgroundActionBoundaryTests
 
     private static GatewayBackgroundActionBoundary CreateBoundary(BackgroundProbe probe)
     {
-        var registry = new KernelModuleRegistry();
-        registry.Add(new BackgroundProbeModule(probe));
         var actionGrants = GatewayBackgroundActionManifest.Required.ToDictionary(
             static key => key.Value,
             static key => key.Value == "background.tick.execute"
@@ -214,9 +212,11 @@ public sealed class GatewayBackgroundActionBoundaryTests
                 : ActionInterceptionCapabilities.Inspect |
                     ActionInterceptionCapabilities.Wrap,
             StringComparer.Ordinal);
-        var graph = registry.Compile(options: new KernelGraphCompileOptions
+        var graph = TestServiceGraph.Compile(
+            [new BackgroundProbeRegistration(probe)],
+            new KernelGraphCompileOptions
         {
-            ActionModuleCapabilityGrants = new Dictionary<
+            ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(
                 StringComparer.Ordinal)
@@ -243,18 +243,18 @@ public sealed class GatewayBackgroundActionBoundaryTests
         public int WorkCalls;
     }
 
-    private sealed class BackgroundProbeModule(BackgroundProbe probe) : ISharpClawModule
+    private sealed class BackgroundProbeRegistration(BackgroundProbe probe) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
             new("gateway-background-test", "Gateway background test", "gateway-background");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection extension)
         {
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton<BackgroundInterceptor>();
+            extension.AddSingleton(probe);
+            extension.AddSingleton<BackgroundInterceptor>();
             foreach (var key in GatewayBackgroundActionManifest.Required)
             {
-                module.Hooks.For(key).Use<BackgroundInterceptor>(new HookOrdering(
+                extension.OnAction(key).Use<BackgroundInterceptor>(new HookOrdering(
                     $"gateway-background-{key.Value}",
                     HookPriority.Normal,
                     [],

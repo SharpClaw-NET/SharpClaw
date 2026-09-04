@@ -1,0 +1,29 @@
+{
+  "id": "sharpclaw_test_permission_restriction",
+  "displayName": "Tracked Permission Restriction",
+  "version": "0.5.0-beta.1",
+  "toolPrefix": "test_permission",
+  "runtime": "dotnet",
+  "hostMode": "sidecar",
+  "entryAssembly": "SharpClaw.TestFixtures.PermissionRestriction.dll",
+  "entryType": "SharpClaw.TestFixtures.CustomPermissionPolicy.CustomPermissionRestrictionModule",
+  "minHostVersion": "0.5.0-beta.3",
+  "author": "SharpClaw-NET",
+  "description": "Restriction-only permission package for the tracked production gate.",
+  "license": "AGPL-3.0-or-later",
+  "enabled": true,
+  "defaultEnabled": true,
+  "requires": [
+    {
+      "contractName": "sharpclaw.authorization",
+      "serviceType": "SharpClaw.Contracts.Kernel.AuthorizationContract",
+      "optional": false
+    }
+  ],
+  "requestedHooks": [
+    {
+      "target": "authorization.evaluate",
+      "effects": ["Inspect", "Wrap"]
+    }
+  ]
+}

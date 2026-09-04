@@ -153,17 +153,17 @@ The base client must not contain obsolete agent, skill, or memory navigation beh
 The existing SharpClaw module persistence contracts are authoritative.
 This specification must not create a second database extension system.
 
-`ISharpClawModuleBuilder.Storage` and `IModuleStorageBuilder` declare host-managed module storage.
-They use `ModuleStorageContractDescriptor` for operations, indexes, ownership, and storage limits.
+`IKernelBuilder.Storage` and `IStorageContractBuilder` declare host-managed module storage.
+They use `ScopedStorageContractDescriptor` for operations, indexes, ownership, and storage limits.
 
-Modules use `IModuleStorageGateway` and the existing typed document helpers to access that storage.
+Modules use `IScopedStorageGateway` and the existing typed document helpers to access that storage.
 The current revision, fencing, claim, query, and atomic outbox rules remain authoritative.
 
-`IModuleDbContextFactory` is the existing boundary for a module-owned Entity Framework model.
+`IOwnedDbContextFactory` is the existing boundary for a module-owned Entity Framework model.
 The current module `DbContext` discovery and registration path binds each model to its module owner.
 
 A module-owned `DbContext` and its entity types must remain in the owning module package.
-The host configures the selected database provider through `IModuleDbContextFactory`.
+The host configures the selected database provider through `IOwnedDbContextFactory`.
 
 Feature modules must use these existing persistence contracts.
 They must not access `SharpClawDbContext` directly or add another storage gateway, schema registry, or persistence host.

@@ -126,7 +126,7 @@ Every Jobs operation uses the universal action dispatcher. Jobs do not require a
 
 The Runtime loads module manifests from the `modules` directory beside the host executable. The graph validates each enabled manifest before it publishes readiness.
 
-Provider modules register provider plugins through `ISharpClawModuleBuilder`. The host does not contain provider-specific execution or a provider fallback.
+Provider modules register provider plugins through `IKernelBuilder`. The host does not contain provider-specific execution or a provider fallback.
 
 A module can run in-process or through the published sidecar host contract. The host owns the singleton action dispatcher and module storage gateway.
 

@@ -2,37 +2,37 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Runtime.BLL.Modules;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Modules;
 using SharpClaw.Tests.TestHarness;
-using SharpClaw.TestFixtures.ExternalModule;
+using SharpClaw.TestFixtures.ExternalRegistration;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
 [NonParallelizable]
-public sealed class InProcessModuleJsonColdStoreTests
+public sealed class InProcessRegistrationJsonColdStoreTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Test]
-    public async Task InProcessModule_StorageClaimAndSpawnJob_WorkWithJsonColdStore()
+    public async Task InProcessRegistration_StorageClaimAndSpawnJob_WorkWithJsonColdStore()
     {
         await using var host = ChatHarnessHost.Create(
             new Dictionary<string, string?>
             {
-                ["Modules:DotNetHostingMode"] = "allow-in-process",
+                ["Packages:DotNetHostingMode"] = "allow-in-process",
             },
             useJsonColdStoreDatabase: true);
-        var module = new InProcessPerformanceFixtureModule();
-        var registry = host.RootServices.GetRequiredService<ModuleRegistry>();
+        var module = new InProcessPerformanceFixtureRegistration();
+        var registry = host.RootServices.GetRequiredService<RegistrationCatalog>();
         registry.Register(module);
         var seeded = await host.SeedChatAsync(
             TestHarnessConstants.PlainProviderKey,
             disableToolSchemas: true);
 
         using var scope = host.CreateScope();
-        var restrictedScope = ModuleHostServiceAccess.CreateRestrictedScope(
+        var restrictedScope = RegistrationHostServiceAccess.CreateRestrictedScope(
             scope.ServiceProvider,
             module.Id);
         var job = new AgentJobContext(
@@ -40,12 +40,12 @@ public sealed class InProcessModuleJsonColdStoreTests
             seeded.Agent.Id,
             seeded.Channel.Id,
             ResourceId: null,
-            ActionKey: InProcessPerformanceFixtureModule.NoopTool);
+            ActionKey: InProcessPerformanceFixtureRegistration.NoopTool);
 
         using var storageParameters = JsonDocument.Parse(
             JsonSerializer.Serialize(new { variant = 900 }, JsonOptions));
         var storageResult = await module.ExecuteToolAsync(
-            InProcessPerformanceFixtureModule.StorageTool,
+            InProcessPerformanceFixtureRegistration.StorageTool,
             storageParameters.RootElement,
             job,
             restrictedScope,
@@ -56,7 +56,7 @@ public sealed class InProcessModuleJsonColdStoreTests
         using var spawnParameters = JsonDocument.Parse(
             JsonSerializer.Serialize(new { variant = 901 }, JsonOptions));
         var spawnResult = await module.ExecuteToolAsync(
-            InProcessPerformanceFixtureModule.SpawnJobTool,
+            InProcessPerformanceFixtureRegistration.SpawnJobTool,
             spawnParameters.RootElement,
             job,
             restrictedScope,

@@ -7,9 +7,7 @@ namespace SharpClaw.Tests.Gateway;
 
 /// <summary>
 /// Enforces the safety rail that the gateway contracts assembly
-/// stays free of any reference to the gateway implementation. A regression
-/// here would re-couple module code to the gateway process, defeating the
-/// whole point of the package split.
+/// stays free of any reference to the gateway implementation.
 /// </summary>
 [TestFixture]
 public sealed class GatewayContractsIsolationTests
@@ -17,21 +15,20 @@ public sealed class GatewayContractsIsolationTests
     [Test]
     public void ContractsAssembly_DoesNotReferenceGatewayImplementation()
     {
-        var contractsAssembly = typeof(IGatewayModuleExtension).Assembly;
+        var contractsAssembly = typeof(IGatewayDispatcher).Assembly;
 
         var referencedNames = contractsAssembly.GetReferencedAssemblies()
             .Select(a => a.Name)
             .ToArray();
 
         referencedNames.Should().NotContain("SharpClaw.Gateway",
-            because: "the contracts assembly is consumed by modules and must not pull the gateway "
-                   + "implementation into their compilation closure.");
+            because: "the contracts assembly must not pull the gateway implementation into its compilation closure.");
     }
 
     [Test]
     public void ContractsAssembly_OnlyReferencesFrameworkAndBclAssemblies()
     {
-        var contractsAssembly = typeof(IGatewayModuleExtension).Assembly;
+        var contractsAssembly = typeof(IGatewayDispatcher).Assembly;
 
         var nonFrameworkRefs = contractsAssembly.GetReferencedAssemblies()
             .Select(a => a.Name ?? string.Empty)
@@ -42,6 +39,6 @@ public sealed class GatewayContractsIsolationTests
             .ToArray();
 
         nonFrameworkRefs.Should().BeEmpty(
-            because: "Phase 1 keeps the abstractions assembly on framework and BCL types only.");
+            because: "the transport contract must contain only framework and BCL dependencies.");
     }
 }

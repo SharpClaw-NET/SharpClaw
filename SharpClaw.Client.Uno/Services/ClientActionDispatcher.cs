@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net.Http;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 
 namespace SharpClaw.Services;
@@ -24,9 +24,8 @@ public sealed class ClientActionDispatcher
 
     public ClientActionDispatcher(ClientActionContextSource contextSource)
         : this(
-            ClientActionModuleSet.Create(),
-            serviceProvider: null,
-            ClientActionModuleSet.CreateOptions(),
+            ClientActionServiceSet.Create(),
+            ClientActionServiceSet.CreateOptions(),
             contextSource,
             repeatEvidenceAuthority: null)
     {
@@ -34,29 +33,28 @@ public sealed class ClientActionDispatcher
 
     internal static ClientActionDispatcher CreateProduction(
         ClientActionContextSource contextSource,
-        ClientActionModuleSet.IClientActionContextSink? contextSink = null) =>
+        ClientActionServiceSet.IClientActionContextSink? contextSink = null) =>
         new(
-            ClientActionModuleSet.Create(contextSink),
-            serviceProvider: null,
-            ClientActionModuleSet.CreateOptions(),
+            ClientActionServiceSet.Create(contextSink),
+            ClientActionServiceSet.CreateOptions(),
             contextSource,
             repeatEvidenceAuthority: null);
 
     internal ClientActionDispatcher(
-        IEnumerable<ISharpClawModule> modules,
-        IServiceProvider? serviceProvider,
+        IEnumerable<ServiceDescriptor> serviceDescriptors,
         KernelGraphCompileOptions? options,
         ClientActionContextSource? contextSource = null,
         IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
     {
-        ArgumentNullException.ThrowIfNull(modules);
+        ArgumentNullException.ThrowIfNull(serviceDescriptors);
         _contextSource = contextSource ?? new ClientActionContextSource();
 
-        var registry = new KernelModuleRegistry();
-        foreach (var module in modules.OrderBy(value => value.Identity.Id, StringComparer.Ordinal))
-            registry.Add(module);
+        var services = new ServiceCollection();
+        foreach (var descriptor in serviceDescriptors)
+            ((ICollection<ServiceDescriptor>)services).Add(descriptor);
 
-        _graph = registry.Compile(serviceProvider, options);
+        var serviceProvider = services.BuildServiceProvider();
+        _graph = new KernelGraphBuilder().Compile(serviceProvider, options);
         _repeatEvidenceAuthority = repeatEvidenceAuthority ?? new ClientRepeatEvidenceAuthority();
         _dispatcher = new KernelActionDispatcher(
             _graph,

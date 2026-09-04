@@ -4,19 +4,19 @@ using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using SharpClaw.Runtime.Host;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Tests.Kernel;
 using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class BundledModuleStorageGatewayTests
+public sealed class BundledScopedStorageGatewayTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Test]
-    public async Task ListContracts_ExposesParentBackedModuleStorageOperations()
+    public async Task ListContracts_ExposesParentBackedScopedStorageOperations()
     {
         await using var db = CreateDbContext();
         var gateway = CreateGateway(db);
@@ -57,9 +57,9 @@ public sealed class BundledModuleStorageGatewayTests
 
         result.GetProperty("found").GetBoolean().Should().BeTrue();
         result.GetProperty("value").GetProperty("name").GetString().Should().Be("Alpha");
-        db.ModuleStorageRecords.Should().ContainSingle();
-        db.ModuleStorageIndexEntries.Should().HaveCount(4);
-        db.ModuleStorageIndexEntries.Single(index => index.IndexName == "dueAt")
+        db.ScopedStorageRecords.Should().ContainSingle();
+        db.ScopedStorageIndexEntries.Should().HaveCount(4);
+        db.ScopedStorageIndexEntries.Single(index => index.IndexName == "dueAt")
             .DateTimeValue
             .Should()
             .Be(dueAt);
@@ -110,8 +110,8 @@ public sealed class BundledModuleStorageGatewayTests
         var result = await InvokeAsync(gateway, "delete", new { key = "delete-me" });
 
         result.GetProperty("deleted").GetBoolean().Should().BeTrue();
-        db.ModuleStorageRecords.Should().BeEmpty();
-        db.ModuleStorageIndexEntries.Should().BeEmpty();
+        db.ScopedStorageRecords.Should().BeEmpty();
+        db.ScopedStorageIndexEntries.Should().BeEmpty();
     }
 
     [Test]
@@ -141,9 +141,9 @@ public sealed class BundledModuleStorageGatewayTests
         });
 
         result.GetProperty("saved").GetInt32().Should().Be(2);
-        db.ModuleStorageRecords.Should().HaveCount(2);
+        db.ScopedStorageRecords.Should().HaveCount(2);
         telemetry.Events.Should().ContainSingle(e =>
-            e.Operation == ModuleStorageOperations.BatchUpsert && e.Success);
+            e.Operation == ScopedStorageOperations.BatchUpsert && e.Success);
     }
 
     [Test]
@@ -166,8 +166,8 @@ public sealed class BundledModuleStorageGatewayTests
 
         await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*cannot exceed 10 records*");
-        db.ModuleStorageRecords.Should().BeEmpty();
-        db.ModuleStorageIndexEntries.Should().BeEmpty();
+        db.ScopedStorageRecords.Should().BeEmpty();
+        db.ScopedStorageIndexEntries.Should().BeEmpty();
     }
 
     [Test]
@@ -185,8 +185,8 @@ public sealed class BundledModuleStorageGatewayTests
 
         await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*exceeds the declared 65536 byte limit*");
-        db.ModuleStorageRecords.Should().BeEmpty();
-        db.ModuleStorageIndexEntries.Should().BeEmpty();
+        db.ScopedStorageRecords.Should().BeEmpty();
+        db.ScopedStorageIndexEntries.Should().BeEmpty();
     }
 
     [Test]
@@ -206,10 +206,10 @@ public sealed class BundledModuleStorageGatewayTests
         });
 
         result.GetProperty("deleted").GetInt32().Should().Be(3);
-        db.ModuleStorageRecords.Should().BeEmpty();
-        db.ModuleStorageIndexEntries.Should().BeEmpty();
+        db.ScopedStorageRecords.Should().BeEmpty();
+        db.ScopedStorageIndexEntries.Should().BeEmpty();
         telemetry.Events.Should().ContainSingle(e =>
-            e.Operation == ModuleStorageOperations.BatchDelete && e.Success);
+            e.Operation == ScopedStorageOperations.BatchDelete && e.Success);
     }
 
     [Test]
@@ -268,7 +268,7 @@ public sealed class BundledModuleStorageGatewayTests
 
             db.ChangeTracker.Clear();
 
-            var statusIndex = await db.ModuleStorageIndexEntries.SingleAsync(index =>
+            var statusIndex = await db.ScopedStorageIndexEntries.SingleAsync(index =>
                 index.RecordKey == "due" && index.IndexName == "status");
             statusIndex.StringValue.Should().Be("Running");
         }
@@ -338,20 +338,20 @@ public sealed class BundledModuleStorageGatewayTests
 
             db.ChangeTracker.Clear();
 
-            var storedDue = await db.ModuleStorageRecords.SingleAsync(record =>
-                record.ModuleId == "test_module"
+            var storedDue = await db.ScopedStorageRecords.SingleAsync(record =>
+                record.SourceId == "test_registration"
                 && record.StorageName == "records"
                 && record.RecordKey == "due");
             storedDue.ValueJson.Should().Contain("\"Running\"");
 
-            var storedFuture = await db.ModuleStorageRecords.SingleAsync(record =>
-                record.ModuleId == "test_module"
+            var storedFuture = await db.ScopedStorageRecords.SingleAsync(record =>
+                record.SourceId == "test_registration"
                 && record.StorageName == "records"
                 && record.RecordKey == "future");
             storedFuture.ValueJson.Should().Contain("\"Pending\"");
 
-            var dueStatus = await db.ModuleStorageIndexEntries.SingleAsync(index =>
-                index.ModuleId == "test_module"
+            var dueStatus = await db.ScopedStorageIndexEntries.SingleAsync(index =>
+                index.SourceId == "test_registration"
                 && index.StorageName == "records"
                 && index.RecordKey == "due"
                 && index.IndexName == "status");
@@ -446,9 +446,9 @@ public sealed class BundledModuleStorageGatewayTests
 
             db.ChangeTracker.Clear();
 
-            var record = await db.ModuleStorageRecords.SingleAsync();
+            var record = await db.ScopedStorageRecords.SingleAsync();
             record.ValueJson.Should().Contain("\"Pending\"");
-            var statusIndex = await db.ModuleStorageIndexEntries.SingleAsync(index =>
+            var statusIndex = await db.ScopedStorageIndexEntries.SingleAsync(index =>
                 index.RecordKey == "due" && index.IndexName == "status");
             statusIndex.StringValue.Should().Be("Pending");
         }
@@ -534,7 +534,7 @@ public sealed class BundledModuleStorageGatewayTests
     }
 
     private static async Task UpsertJobAsync(
-        BundledModuleStorageGateway gateway,
+        ScopedStorageGateway gateway,
         string key,
         DateTimeOffset nextRunAt,
         string status = "Pending")
@@ -556,9 +556,9 @@ public sealed class BundledModuleStorageGatewayTests
         });
     }
 
-    private static BundledModuleStorageGateway CreateGateway(
+    private static ScopedStorageGateway CreateGateway(
         SharpClawDbContext db,
-        IModuleStorageTelemetry? telemetry = null,
+        IStorageTelemetry? telemetry = null,
         IRuntimeTransactionActionRunner? transactionRunner = null) =>
         new(
             db,
@@ -570,11 +570,11 @@ public sealed class BundledModuleStorageGatewayTests
             telemetry);
 
     private static Task<JsonElement> InvokeAsync(
-        BundledModuleStorageGateway gateway,
+        ScopedStorageGateway gateway,
         string operation,
         object parameters) =>
         gateway.InvokeAsync(
-            "test_module",
+            "test_registration",
             "records",
             operation,
             JsonSerializer.SerializeToElement(parameters, JsonOptions));
@@ -582,7 +582,7 @@ public sealed class BundledModuleStorageGatewayTests
     private static SharpClawDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<SharpClawDbContext>()
-            .UseInMemoryDatabase($"ModuleStorage_{Guid.NewGuid():N}", new InMemoryDatabaseRoot())
+            .UseInMemoryDatabase($"ScopedStorage_{Guid.NewGuid():N}", new InMemoryDatabaseRoot())
             .Options;
         return new SharpClawDbContext(options);
     }
@@ -604,45 +604,45 @@ public sealed class BundledModuleStorageGatewayTests
         return new SharpClawDbContext(options);
     }
 
-    private sealed class TestStorageContractProvider : IModuleStorageContractProvider
+    private sealed class TestStorageContractProvider : IStorageContractProvider
     {
         public static readonly TestStorageContractProvider Instance = new();
 
-        private static readonly IReadOnlyList<ModuleStorageContractDescriptor> Contracts =
+        private static readonly IReadOnlyList<ScopedStorageContractDescriptor> Contracts =
         [
             new(
-                "test_module",
+                "test_registration",
                 "records",
                 [
-                    new(ModuleStorageOperations.Get),
-                    new(ModuleStorageOperations.Upsert),
-                    new(ModuleStorageOperations.BatchUpsert),
-                    new(ModuleStorageOperations.Delete),
-                    new(ModuleStorageOperations.BatchDelete),
-                    new(ModuleStorageOperations.List),
-                    new(ModuleStorageOperations.Query),
-                    new(ModuleStorageOperations.Claim),
+                    new(ScopedStorageOperations.Get),
+                    new(ScopedStorageOperations.Upsert),
+                    new(ScopedStorageOperations.BatchUpsert),
+                    new(ScopedStorageOperations.Delete),
+                    new(ScopedStorageOperations.BatchDelete),
+                    new(ScopedStorageOperations.List),
+                    new(ScopedStorageOperations.Query),
+                    new(ScopedStorageOperations.Claim),
                 ],
                 Indexes:
                 [
-                    new("name", ModuleStorageIndexValueKind.String),
-                    new("dueAt", ModuleStorageIndexValueKind.DateTime, AllowsRange: true),
-                    new("nextRunAt", ModuleStorageIndexValueKind.DateTime, AllowsRange: true),
-                    new("priority", ModuleStorageIndexValueKind.Number, AllowsRange: true),
-                    new("active", ModuleStorageIndexValueKind.Bool),
-                    new("status", ModuleStorageIndexValueKind.String),
+                    new("name", ScopedStorageIndexValueKind.String),
+                    new("dueAt", ScopedStorageIndexValueKind.DateTime, AllowsRange: true),
+                    new("nextRunAt", ScopedStorageIndexValueKind.DateTime, AllowsRange: true),
+                    new("priority", ScopedStorageIndexValueKind.Number, AllowsRange: true),
+                    new("active", ScopedStorageIndexValueKind.Bool),
+                    new("status", ScopedStorageIndexValueKind.String),
                 ],
                 MaxDocumentBytes: 65_536,
                 MaxBatchSize: 10),
         ];
 
-        public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() => Contracts;
+        public IReadOnlyList<ScopedStorageContractDescriptor> GetStorageContracts() => Contracts;
 
-        public ModuleStorageContractDescriptor? FindStorageContract(
-            string moduleId,
+        public ScopedStorageContractDescriptor? FindStorageContract(
+            string SourceId,
             string storageName) =>
             Contracts.FirstOrDefault(contract =>
-                contract.ModuleId == moduleId && contract.StorageName == storageName);
+                contract.SourceId == SourceId && contract.StorageName == storageName);
     }
 
     private sealed class RecordingRuntimeTransactionActionBoundary
@@ -660,11 +660,11 @@ public sealed class BundledModuleStorageGatewayTests
         }
     }
 
-    private sealed class RecordingStorageTelemetry : IModuleStorageTelemetry
+    private sealed class RecordingStorageTelemetry : IStorageTelemetry
     {
-        public List<ModuleStorageTelemetryEvent> Events { get; } = [];
+        public List<ScopedStorageTelemetryEvent> Events { get; } = [];
 
-        public void Record(ModuleStorageTelemetryEvent telemetryEvent) =>
+        public void Record(ScopedStorageTelemetryEvent telemetryEvent) =>
             Events.Add(telemetryEvent);
     }
 }

@@ -1,4 +1,4 @@
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 
 namespace SharpClaw.Runtime.BLL.Kernel;
 

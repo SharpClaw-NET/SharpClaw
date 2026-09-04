@@ -3,7 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -205,7 +205,7 @@ public sealed class RuntimeEventBoundaryTests
         var service = File.ReadAllText(Path.Combine(
             root!, "SharpClaw.Runtime", "Host", "RuntimeEventOutboxService.cs"));
         var store = File.ReadAllText(Path.Combine(
-            root!, "SharpClaw.Runtime", "Host", "RuntimeModuleStorageEventOutboxStore.cs"));
+            root!, "SharpClaw.Runtime", "Host", "RuntimeScopedStorageEventOutboxStore.cs"));
         var bllProject = File.ReadAllText(Path.Combine(
             root!, "SharpClaw.Runtime", "BLL", "SharpClaw.Runtime.BLL.csproj"));
         var kernelSources = Directory.EnumerateFiles(
@@ -223,7 +223,7 @@ public sealed class RuntimeEventBoundaryTests
         store.Should().Contain("SaveChangesThroughKernelAsync");
         bllProject.Should().Contain("Compile Include=\"Kernel\\**\\*.cs\"");
         kernelSources.Should().NotContain(source => source.Contains(
-            "ModuleEventDispatcher",
+            "RegistrationEventDispatcher",
             StringComparison.Ordinal));
     }
 
@@ -233,7 +233,7 @@ public sealed class RuntimeEventBoundaryTests
         IKernelEventDeliverySink? sink = null)
     {
         var provider = new EventProvider();
-        var module = new EventModule(provider, probe);
+        var module = new EventRegistration(provider, probe);
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -247,7 +247,7 @@ public sealed class RuntimeEventBoundaryTests
             StringComparer.Ordinal);
         var options = new KernelGraphCompileOptions
         {
-            ActionModuleCapabilityGrants = new Dictionary<
+            ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
             {
@@ -255,9 +255,8 @@ public sealed class RuntimeEventBoundaryTests
             },
         };
 
-        return new RuntimeKernelAdapter(
+        return RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
             [module],
             workspace.CreateInstancePaths(),
             new EventProviderClientFactory(provider),
@@ -294,22 +293,21 @@ public sealed class RuntimeEventBoundaryTests
         public RuntimeEventPayload? ReplacementPayload { get; init; }
     }
 
-    private sealed class EventModule(
+    private sealed class EventRegistration(
         IProviderPlugin provider,
         EventProbe probe) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
             new("event-test-module", "Event test module", "event-test");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection module)
         {
-            module.Services.AddSingleton<IProviderPlugin>(provider);
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton<EventActionInterceptor>();
+            module.AddSingleton<IProviderPlugin>(provider);
+            module.AddSingleton(probe);
+            module.AddSingleton<EventActionInterceptor>();
             foreach (var action in RuntimeEventActionManifest.Required)
             {
-                module.Hooks
-                    .For(action)
+                module.OnAction(action)
                     .Use<EventActionInterceptor>(new HookOrdering(
                         $"event-test-{action.Value}",
                         HookPriority.Normal,
@@ -320,7 +318,7 @@ public sealed class RuntimeEventBoundaryTests
             }
         }
 
-        public ValueTask StartAsync(ModuleStartContext context, CancellationToken cancellationToken) =>
+        public ValueTask StartAsync(ServiceStartContext context, CancellationToken cancellationToken) =>
             ValueTask.CompletedTask;
 
         public ValueTask StopAsync(CancellationToken cancellationToken) =>

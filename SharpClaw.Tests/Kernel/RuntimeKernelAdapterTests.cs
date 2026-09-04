@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -13,7 +13,7 @@ namespace SharpClaw.Tests.Kernel;
 public sealed class RuntimeKernelAdapterTests
 {
     [Test]
-    public async Task Adapter_compiles_module_graph_and_routes_direct_chat_through_module_provider()
+    public async Task Adapter_compiles_registration_graph_and_routes_direct_chat_through_registration_provider()
     {
         var provider = new RecordingProviderClient();
         var module = new ProviderModule(provider);
@@ -24,22 +24,16 @@ public sealed class RuntimeKernelAdapterTests
                 ["Provider:Model"] = "test-model",
             })
             .Build();
-        using var hostServices = new ServiceCollection().BuildServiceProvider();
         using var workspace = new TemporaryWorkspace();
         var instancePaths = workspace.CreateInstancePaths();
         var providerFactory = new RecordingProviderClientFactory(provider);
 
-        var adapter = new RuntimeKernelAdapter(
+        var adapter = RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            hostServices,
             [module],
             instancePaths,
             providerFactory);
 
-        adapter.Graph.Modules.Modules.Should().HaveCount(3);
-        adapter.Graph.Modules.Modules.Select(module => module.Identity.Id)
-            .Should()
-            .BeEquivalentTo(["sharpclaw.runtime.events", "sharpclaw.core.jobs", "test-module"]);
         adapter.Graph.GetService(typeof(IEnumerable<IProviderPlugin>))
             .Should().NotBeNull();
         providerFactory.Plugins.Should().ContainSingle()
@@ -68,9 +62,8 @@ public sealed class RuntimeKernelAdapterTests
             })
             .Build();
         using var workspace = new TemporaryWorkspace();
-        var adapter = new RuntimeKernelAdapter(
+        var adapter = RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
             [module],
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider));
@@ -106,15 +99,15 @@ public sealed class RuntimeKernelAdapterTests
             })
             .Build();
         using var workspace = new TemporaryWorkspace();
-        var adapter = new RuntimeKernelAdapter(
+        var adapter = RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
             [new ProviderModule(provider)],
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider));
 
         SharpClawActionCatalog.Jobs.Should().HaveCount(138);
-        adapter.Graph.ActionSnapshot.ActionGrants.Should().HaveCount(310);
+        adapter.Graph.ActionSnapshot.ActionGrants.Should()
+            .HaveCount(KernelActionCatalog.Descriptors.Count);
         SharpClawActionCatalog.Jobs.Should().OnlyContain(key => adapter.Graph.ContainsAction(key));
 
         var terminalCalls = 0;
@@ -152,9 +145,8 @@ public sealed class RuntimeKernelAdapterTests
             })
             .Build();
         using var workspace = new TemporaryWorkspace();
-        var adapter = new RuntimeKernelAdapter(
+        var adapter = RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
             [new ProviderModule(provider)],
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider));
@@ -201,7 +193,7 @@ public sealed class RuntimeKernelAdapterTests
     public async Task Request_stream_replace_result_without_terminal_fails_closed()
     {
         var provider = new RecordingProviderClient();
-        var module = new StreamReplacementModule(provider);
+        var module = new StreamReplacementRegistration(provider);
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -217,15 +209,14 @@ public sealed class RuntimeKernelAdapterTests
             descriptor,
             typeof(KernelActionEnvelope),
             typeof(object));
-        var adapter = new RuntimeKernelAdapter(
+        var adapter = RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
             [module],
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider),
             new KernelGraphCompileOptions
             {
-                ActionModuleCapabilityGrants = new Dictionary<
+                ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
                     IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
                 {
@@ -284,7 +275,7 @@ public sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
-    public async Task Adapter_uses_stateless_chat_without_context_module()
+    public async Task Adapter_uses_stateless_chat_without_context_registration()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -296,29 +287,27 @@ public sealed class RuntimeKernelAdapterTests
         using var workspace = new TemporaryWorkspace();
         var instancePaths = workspace.CreateInstancePaths();
         var firstStore = new InMemoryConversationStore();
-        var firstModule = new ProviderModule(new RecordingProviderClient());
-        var firstAdapter = new RuntimeKernelAdapter(
+        var firstRegistration = new ProviderModule(new RecordingProviderClient());
+        var firstAdapter = RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
-            [firstModule],
+            [firstRegistration],
             instancePaths,
-            new RecordingProviderClientFactory(firstModule.Provider));
+            new RecordingProviderClientFactory(firstRegistration.Provider));
 
         await firstAdapter.StartAsync("test-host");
         var firstResult = await firstAdapter.Kernel.RunAsync(new ChatTurnInput("first"));
         await firstAdapter.StopAsync();
 
-        var secondModule = new ProviderModule(new RecordingProviderClient());
-        var secondAdapter = new RuntimeKernelAdapter(
+        var secondRegistration = new ProviderModule(new RecordingProviderClient());
+        var secondAdapter = RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
-            [secondModule],
+            [secondRegistration],
             new SharpClawInstancePaths(
                 SharpClawInstanceKind.Backend,
                 instancePaths.InstanceRoot,
                 instancePaths.SharedRoot,
                 instancePaths.InstallAnchor),
-            new RecordingProviderClientFactory(secondModule.Provider));
+            new RecordingProviderClientFactory(secondRegistration.Provider));
 
         await secondAdapter.StartAsync("test-host");
         var secondResult = await secondAdapter.Kernel.RunAsync(new ChatTurnInput("second"));
@@ -391,10 +380,10 @@ public sealed class RuntimeKernelAdapterTests
 
         public IProviderApiClient Provider => (IProviderApiClient)provider;
 
-        public void Configure(ISharpClawModuleBuilder module) =>
-            module.Services.AddSingleton<IProviderPlugin>(provider);
+        public void ConfigureServices(IServiceCollection module) =>
+            module.AddSingleton<IProviderPlugin>(provider);
 
-        public ValueTask StartAsync(ModuleStartContext context, CancellationToken ct)
+        public ValueTask StartAsync(ServiceStartContext context, CancellationToken ct)
         {
             Started = true;
             return ValueTask.CompletedTask;
@@ -407,16 +396,16 @@ public sealed class RuntimeKernelAdapterTests
         }
     }
 
-    private sealed class StreamReplacementModule(IProviderPlugin provider) : ISharpClawModule
+    private sealed class StreamReplacementRegistration(IProviderPlugin provider) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
             new("stream-replacement-module", "Stream replacement module", "stream-replace");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection module)
         {
-            module.Services.AddSingleton<IProviderPlugin>(provider);
-            module.Services.AddSingleton<StreamReplacementInterceptor>();
-            module.Hooks.For(new SharpClawActionKey("runtime.request.receive"))
+            module.AddSingleton<IProviderPlugin>(provider);
+            module.AddSingleton<StreamReplacementInterceptor>();
+            module.OnAction(new SharpClawActionKey("runtime.request.receive"))
                 .Use<StreamReplacementInterceptor>(new HookOrdering(
                     "stream-replacement-test",
                     HookPriority.Normal,
@@ -426,7 +415,7 @@ public sealed class RuntimeKernelAdapterTests
                     HookFailurePolicy.FailAction));
         }
 
-        public ValueTask StartAsync(ModuleStartContext context, CancellationToken cancellationToken) =>
+        public ValueTask StartAsync(ServiceStartContext context, CancellationToken cancellationToken) =>
             ValueTask.CompletedTask;
 
         public ValueTask StopAsync(CancellationToken cancellationToken) =>

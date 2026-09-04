@@ -22,7 +22,6 @@
   <ItemGroup>
     <PackageReference Include="SharpClaw.Core" />
     <PackageReference Include="SharpClaw.Contracts" />
-    <PackageReference Include="SharpClaw.ModuleHost.InProcess" />
     <ProjectReference Include="..\..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
     <ProjectReference Include="..\INF\SharpClaw.Runtime.INF.csproj" />
   </ItemGroup>
@@ -34,7 +33,7 @@
   <!--
     The old application orchestration tree depended on the removed Core domain
     model. Runtime BLL now exposes only the direct-chat kernel adapter and the
-    package-backed environment service while feature modules move to their
+    package-backed environment service while feature registrations move to their
     canonical contribution contracts.
   -->
   <ItemGroup>
@@ -42,7 +41,7 @@
     <Compile Include="GlobalUsings.cs" />
     <Compile Include="CorePackageDependency.cs" />
     <Compile Include="Kernel\**\*.cs" />
-    <Compile Include="Modules\SecureJsonOptions.cs" />
+    <Compile Include="Configuration\SecureJsonOptions.cs" />
   </ItemGroup>
 
 </Project>

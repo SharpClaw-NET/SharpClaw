@@ -2,10 +2,10 @@ using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.INF.Persistence;
-using SharpClaw.Runtime.INF.Persistence.Modules;
+using SharpClaw.Runtime.INF.Persistence.Registrations;
 
 namespace SharpClaw.Runtime.INF;
 
@@ -21,15 +21,15 @@ public static class InfrastructureServiceExtensions
         ArgumentNullException.ThrowIfNull(databaseOptions);
         databaseOptions.Validate();
 
-        services.AddSingleton(new ModuleDbContextOptions
+        services.AddSingleton(new RegistrationDbContextOptions
         {
             StorageMode = databaseOptions.Provider,
             ConnectionString = databaseOptions.ConnectionString,
         });
         services.AddSingleton(databaseOptions);
-        services.AddSingleton<RuntimeModuleDbContextRegistry>();
-        services.AddSingleton<ModulePersistenceRegistrationFactory>();
-        services.AddSingleton<IModuleDbContextFactory, ModuleDbContextFactory>();
+        services.AddSingleton<RuntimeRegistrationDbContextRegistry>();
+        services.AddSingleton<RegistrationPersistenceRegistrationFactory>();
+        services.AddSingleton<IOwnedDbContextFactory, RegistrationDbContextFactory>();
         services.AddScoped<IRuntimePersistenceActionRunnerAccessor, RuntimePersistenceActionRunnerAccessor>();
 
         switch (databaseOptions.Provider)
@@ -185,7 +185,7 @@ public static class InfrastructureServiceExtensions
     /// </summary>
     public static async Task InitializeInfrastructureAsync(this IServiceProvider services)
     {
-        var storage = services.GetRequiredService<ModuleDbContextOptions>();
+        var storage = services.GetRequiredService<RegistrationDbContextOptions>();
         if (storage.StorageMode != StorageMode.JsonFile)
             return;
 

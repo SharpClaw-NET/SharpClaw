@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Modules;
 
@@ -13,7 +13,7 @@ public sealed class ChatHeaderGrantFormatterTests
     [Test]
     public void FormatGrantNames_WhenGlobalFlagStartsWithCan_TrimsPrefix()
     {
-        var formatter = new ChatHeaderGrantFormatter(new ModuleRegistry());
+        var formatter = new ChatHeaderGrantFormatter(new RegistrationCatalog());
         var permissionSet = new PermissionSetState
         {
             GlobalFlags =
@@ -36,9 +36,9 @@ public sealed class ChatHeaderGrantFormatterTests
     {
         var firstId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         var secondId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-        var registry = new ModuleRegistry();
-        registry.Register(new ResourceModule(
-            new ModuleResourceTypeDescriptor(
+        var registry = new RegistrationCatalog();
+        registry.Register(new ResourceRegistration(
+            new RegistrationResourceTypeDescriptor(
                 "documents",
                 "Documents",
                 "CanUseDocuments",
@@ -71,15 +71,15 @@ public sealed class ChatHeaderGrantFormatterTests
         grants.Should().Equal($"Documents[{firstId:D},{secondId:D}]");
     }
 
-    private sealed class ResourceModule(ModuleResourceTypeDescriptor descriptor)
-        : ISharpClawCoreModule
+    private sealed class ResourceRegistration(RegistrationResourceTypeDescriptor descriptor)
+        : ISharpClawCoreRegistration
     {
         public string Id => "grant_test";
         public string DisplayName => "Grant Test";
         public string ToolPrefix => "granttest";
         public void ConfigureServices(IServiceCollection services) { }
-        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
-        public IReadOnlyList<ModuleResourceTypeDescriptor> GetResourceTypeDescriptors()
+        public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() => [];
+        public IReadOnlyList<RegistrationResourceTypeDescriptor> GetResourceTypeDescriptors()
             => [descriptor];
 
         public Task<string> ExecuteToolAsync(

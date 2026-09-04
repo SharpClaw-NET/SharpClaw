@@ -1,10 +1,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
-using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.Host.Api;
 using SharpClaw.Runtime.INF;
 using SharpClaw.Runtime.INF.Persistence;
@@ -22,17 +21,24 @@ internal static class RuntimeHostComposition
         SharpClawInstancePaths instancePaths,
         EncryptionOptions encryptionOptions,
         DatabaseProviderOptions databaseOptions,
-        IEnumerable<ISharpClawModule> modules,
-        IEnumerable<ModuleStorageContractDescriptor>? additionalStorageContracts = null)
+        IEnumerable<ServiceDescriptor> discoveredServices,
+        IEnumerable<ScopedStorageContractDescriptor>? additionalStorageContracts = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(instancePaths);
         ArgumentNullException.ThrowIfNull(encryptionOptions);
         ArgumentNullException.ThrowIfNull(databaseOptions);
-        ArgumentNullException.ThrowIfNull(modules);
+        ArgumentNullException.ThrowIfNull(discoveredServices);
 
-        var moduleArray = modules.ToArray();
+        foreach (var descriptor in discoveredServices)
+            services.Add(descriptor);
+        foreach (var contract in KernelJobsStorage.Contracts)
+            services.AddSingleton(contract);
+        foreach (var contract in additionalStorageContracts ?? [])
+            services.AddSingleton(contract);
+
+        var jobs = new KernelJobsBindings();
 
         services.AddSingleton(configuration);
         services.AddSingleton(instancePaths);
@@ -48,13 +54,12 @@ internal static class RuntimeHostComposition
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>().ActionDispatcher);
         services.AddScoped<IModelRegistrar, RuntimeModelRegistrar>();
 
-        services.AddSingleton<IModuleStorageContractProvider>(
-            new RuntimeModuleStorageContractProvider(moduleArray, additionalStorageContracts));
-        services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
+        services.AddSingleton(jobs);
+        services.AddSingleton<IStorageContractProvider>(serviceProvider =>
+            new RuntimeScopedStorageContractProvider(
+                serviceProvider.GetServices<ScopedStorageContractDescriptor>()));
+        services.AddScoped<IScopedStorageGateway, ScopedStorageGateway>();
         services.AddScoped<KernelJobsStore>();
-
-        foreach (var module in moduleArray)
-            services.AddSingleton<ISharpClawModule>(module);
 
         services.AddSingleton<RuntimeKernelAdapter>();
         services.AddScoped<KernelJobsCoordinator>(serviceProvider =>
@@ -73,8 +78,6 @@ internal static class RuntimeHostComposition
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
         services.AddSingleton<IRuntimeTransactionActionBoundary>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
-        services.AddSingleton<IRuntimeModuleActionBoundary>(serviceProvider =>
-            serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
         services.AddSingleton<IRuntimeEventActionBoundary>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
         services.AddSingleton<IRuntimeEventPublisher>(serviceProvider =>
@@ -82,7 +85,7 @@ internal static class RuntimeHostComposition
         services.AddSingleton<IRuntimeEventActionBoundaryAccessor,
             RuntimeEventActionBoundaryAccessor>();
         services.AddSingleton<IKernelEventDeliverySink, RuntimeEventDeliverySink>();
-        services.AddScoped<IRuntimeEventOutboxStore, RuntimeModuleStorageEventOutboxStore>();
+        services.AddScoped<IRuntimeEventOutboxStore, RuntimeScopedStorageEventOutboxStore>();
         services.AddScoped<IRuntimeEventOutboxService, RuntimeEventOutboxService>();
         services.AddScoped<RuntimePersistenceActionRunner>();
         services.AddScoped<IRuntimeTransactionActionRunnerAccessor,
@@ -90,8 +93,6 @@ internal static class RuntimeHostComposition
         services.AddScoped<RuntimeTransactionActionRunner>();
         services.AddScoped<IRuntimeTransactionActionRunner>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeTransactionActionRunner>());
-        services.AddScoped<IRuntimeModuleActionBoundaryAccessor,
-            RuntimeModuleActionBoundaryAccessor>();
         services.AddSingleton<DirectChatKernel>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>().Kernel);
     }

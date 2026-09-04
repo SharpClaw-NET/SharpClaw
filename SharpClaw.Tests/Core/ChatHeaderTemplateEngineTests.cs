@@ -2,7 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Clients;
 using SharpClaw.Core.Modules;
@@ -60,13 +60,13 @@ public sealed class ChatHeaderTemplateEngineTests
     }
 
     [Test]
-    public async Task ExpandAsync_WhenModuleTagIsRegistered_UsesContextAwareResolver()
+    public async Task ExpandAsync_WhenRegistrationTagIsRegistered_UsesContextAwareResolver()
     {
-        var registry = new ModuleRegistry();
-        registry.Register(new HeaderModule(
+        var registry = new RegistrationCatalog();
+        registry.Register(new HeaderRegistration(
             headerTags:
             [
-                new ModuleHeaderTag(
+                new RegistrationHeaderTag(
                     "active",
                     static (_, _) => Task.FromResult("fallback"))
                 {
@@ -88,13 +88,13 @@ public sealed class ChatHeaderTemplateEngineTests
     }
 
     [Test]
-    public async Task ExpandAsync_WhenModuleHeaderTagsAreDisabled_ReplacesModuleTagWithEmptyText()
+    public async Task ExpandAsync_WhenRegistrationHeaderTagsAreDisabled_ReplacesRegistrationTagWithEmptyText()
     {
-        var registry = new ModuleRegistry();
-        registry.Register(new HeaderModule(
+        var registry = new RegistrationCatalog();
+        registry.Register(new HeaderRegistration(
             headerTags:
             [
-                new ModuleHeaderTag(
+                new RegistrationHeaderTag(
                     "active",
                     static (_, _) => Task.FromResult("visible"))
             ]));
@@ -103,7 +103,7 @@ public sealed class ChatHeaderTemplateEngineTests
         var expanded = await engine.ExpandAsync(
             "before {{active}} after",
             CreateContext(),
-            new ChatHeaderExpansionOptions(DisableModuleHeaderTags: true),
+            new ChatHeaderExpansionOptions(DisableRegistrationHeaderTags: true),
             resourceTags: null,
             new ServiceCollection().BuildServiceProvider(),
             CancellationToken.None);
@@ -116,11 +116,11 @@ public sealed class ChatHeaderTemplateEngineTests
     {
         var firstId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         var secondId = Guid.Parse("22222222-2222-2222-2222-222222222222");
-        var registry = new ModuleRegistry();
-        registry.Register(new HeaderModule(
+        var registry = new RegistrationCatalog();
+        registry.Register(new HeaderRegistration(
             resourceTypes:
             [
-                new ModuleResourceTypeDescriptor(
+                new RegistrationResourceTypeDescriptor(
                     "documents",
                     "Documents",
                     "CanUseDocuments",
@@ -158,9 +158,9 @@ public sealed class ChatHeaderTemplateEngineTests
         expanded.Should().Be($"Researcher ({expectedGrant}) | {expectedGrant}");
     }
 
-    private static ChatHeaderTemplateEngine CreateEngine(ModuleRegistry? registry = null)
+    private static ChatHeaderTemplateEngine CreateEngine(RegistrationCatalog? registry = null)
     {
-        registry ??= new ModuleRegistry();
+        registry ??= new RegistrationCatalog();
         return new ChatHeaderTemplateEngine(
             registry,
             new ProviderApiClientFactory([], registry));
@@ -208,18 +208,18 @@ public sealed class ChatHeaderTemplateEngineTests
         }
     }
 
-    private sealed class HeaderModule(
-        IReadOnlyList<ModuleHeaderTag>? headerTags = null,
-        IReadOnlyList<ModuleResourceTypeDescriptor>? resourceTypes = null)
-        : ISharpClawCoreModule
+    private sealed class HeaderRegistration(
+        IReadOnlyList<RegistrationHeaderTag>? headerTags = null,
+        IReadOnlyList<RegistrationResourceTypeDescriptor>? resourceTypes = null)
+        : ISharpClawCoreRegistration
     {
         public string Id => "header_test";
         public string DisplayName => "Header Test";
         public string ToolPrefix => "headertest";
         public void ConfigureServices(IServiceCollection services) { }
-        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
-        public IReadOnlyList<ModuleHeaderTag>? GetHeaderTags() => headerTags;
-        public IReadOnlyList<ModuleResourceTypeDescriptor> GetResourceTypeDescriptors()
+        public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() => [];
+        public IReadOnlyList<RegistrationHeaderTag>? GetHeaderTags() => headerTags;
+        public IReadOnlyList<RegistrationResourceTypeDescriptor> GetResourceTypeDescriptors()
             => resourceTypes ?? [];
 
         public Task<string> ExecuteToolAsync(

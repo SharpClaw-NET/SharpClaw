@@ -1,5 +1,6 @@
 using System.Text.Json;
-using SharpClaw.Contracts.Modules;
+using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -52,7 +53,8 @@ public sealed class DirectChatKernelTests
     {
         var provider = new RecordingProviderClient();
         var conversationId = Guid.NewGuid();
-        var graph = new KernelGraphBuilder().Compile();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var graph = new KernelGraphBuilder().Compile(services);
         var kernel = DirectChatKernelFactory.CreateFromGraph(
             graph,
             CreateDispatcher(graph),
@@ -73,7 +75,8 @@ public sealed class DirectChatKernelTests
     {
         var provider = new RecordingProviderClient();
         var store = new InMemoryConversationStore();
-        var graph = new KernelGraphBuilder().Compile();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var graph = new KernelGraphBuilder().Compile(services);
         var kernel = DirectChatKernelFactory.CreateFromGraph(
             graph,
             CreateDispatcher(graph),
@@ -103,7 +106,8 @@ public sealed class DirectChatKernelTests
         var provider = new RecordingProviderClient();
         var store = new InMemoryConversationStore();
         var conversationId = Guid.NewGuid();
-        var graph = new KernelGraphBuilder().Compile();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var graph = new KernelGraphBuilder().Compile(services);
         var kernel = DirectChatKernelFactory.CreateFromGraph(
             graph,
             CreateDispatcher(graph),
@@ -137,7 +141,8 @@ public sealed class DirectChatKernelTests
         var provider = new BlockingProviderClient();
         var store = new InMemoryConversationStore();
         var conversationId = Guid.NewGuid();
-        var graph = new KernelGraphBuilder().Compile();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var graph = new KernelGraphBuilder().Compile(services);
         var kernel = DirectChatKernelFactory.CreateFromGraph(
             graph,
             CreateDispatcher(graph),
@@ -166,7 +171,8 @@ public sealed class DirectChatKernelTests
         var conversationId = Guid.NewGuid();
         var provider = new SequencedProviderClient();
         var resolver = new SignalingConversationResolver(conversationId);
-        var graph = new KernelGraphBuilder().Compile();
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var graph = new KernelGraphBuilder().Compile(services);
         var kernel = DirectChatKernelFactory.CreateFromGraph(
             graph,
             CreateDispatcher(graph),

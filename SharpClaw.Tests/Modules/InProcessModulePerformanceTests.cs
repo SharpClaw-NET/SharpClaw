@@ -5,18 +5,18 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Tests.TestHarness;
-using SharpClaw.TestFixtures.ExternalModule;
+using SharpClaw.TestFixtures.ExternalRegistration;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
 [NonParallelizable]
-public sealed class InProcessModulePerformanceTests
+public sealed class InProcessRegistrationPerformanceTests
 {
     private const int VariantsPerOperation = 63;
     private InProcessPerformanceHarness _harness = null!;
@@ -47,7 +47,7 @@ public sealed class InProcessModulePerformanceTests
 
     [TestCaseSource(nameof(PerformanceCases))]
     [Category(HarnessTestCategories.PerformanceGate)]
-    public async Task InProcessModuleHotPath_PerformanceCase(InProcessPerformanceCase testCase)
+    public async Task InProcessRegistrationHotPath_PerformanceCase(InProcessPerformanceCase testCase)
     {
         var measurement = await _harness.MeasureAsync(testCase);
 
@@ -66,7 +66,7 @@ public sealed class InProcessModulePerformanceTests
         AddCases(cases, InProcessPerformanceOperation.RegistryLookup, "registry_lookup", 50);
         AddCases(cases, InProcessPerformanceOperation.RuntimeScopeCapabilities, "runtime_scope_capabilities", 75);
         AddCases(cases, InProcessPerformanceOperation.DirectToolDispatch, "direct_tool_dispatch", 100);
-        AddCases(cases, InProcessPerformanceOperation.ModuleSubmitsChildJob, "module_submits_child_job", 750);
+        AddCases(cases, InProcessPerformanceOperation.RegistrationSubmitsChildJob, "registration_submits_child_job", 750);
         return cases;
     }
 
@@ -79,7 +79,7 @@ public sealed class InProcessModulePerformanceTests
         for (var variant = 0; variant < VariantsPerOperation; variant++)
         {
             cases.Add(new InProcessPerformanceCase(
-                $"InProcessModulePerf_{name}_{variant:D3}",
+                $"InProcessRegistrationPerf_{name}_{variant:D3}",
                 operation,
                 variant,
                 maxElapsedMs));
@@ -93,8 +93,8 @@ public sealed class InProcessModulePerformanceTests
 
         private InProcessPerformanceHarness(
             ChatHarnessHost host,
-            InProcessModuleHost runtimeHost,
-            ISharpClawCoreModule module,
+            InProcessRegistrationHost runtimeHost,
+            ISharpClawCoreRegistration module,
             SeededChat seeded)
         {
             _host = host;
@@ -103,40 +103,40 @@ public sealed class InProcessModulePerformanceTests
             Seeded = seeded;
         }
 
-        private InProcessModuleHost RuntimeHost { get; }
-        private ISharpClawCoreModule Module { get; }
+        private InProcessRegistrationHost RuntimeHost { get; }
+        private ISharpClawCoreRegistration Module { get; }
         private SeededChat Seeded { get; }
-        private ModuleRegistry Registry => _host.RootServices.GetRequiredService<ModuleRegistry>();
+        private RegistrationCatalog Registry => _host.RootServices.GetRequiredService<RegistrationCatalog>();
 
         public static async Task<InProcessPerformanceHarness> CreateAsync()
         {
             var host = ChatHarnessHost.Create(new Dictionary<string, string?>
             {
-                ["Modules:DotNetHostingMode"] = "allow-in-process",
+                ["Packages:DotNetHostingMode"] = "allow-in-process",
             });
 
             try
             {
-                var moduleDir = CreateExternalModuleDirectory();
-                var moduleService = host.Services.GetRequiredService<ModuleService>();
+                var registrationDir = CreateExternalRegistrationDirectory();
+                var moduleService = host.Services.GetRequiredService<RegistrationService>();
                 var response = await moduleService.LoadExternalFromAbsolutePathAsync(
-                    moduleDir,
+                    registrationDir,
                     host.RootServices,
                     CancellationToken.None,
                     persistDisabledEnvEntry: false);
 
                 response.Enabled.Should().BeTrue();
 
-                var registry = host.RootServices.GetRequiredService<ModuleRegistry>();
-                var runtimeHost = registry.GetRuntimeHost(InProcessPerformanceFixtureModule.ModuleId)
+                var registry = host.RootServices.GetRequiredService<RegistrationCatalog>();
+                var runtimeHost = registry.GetRuntimeHost(InProcessPerformanceFixtureRegistration.SourceId)
                     .Should()
-                    .BeOfType<InProcessModuleHost>()
+                    .BeOfType<InProcessRegistrationHost>()
                     .Subject;
-                var module = registry.GetModule(InProcessPerformanceFixtureModule.ModuleId)
+                var module = registry.GetRegistration(InProcessPerformanceFixtureRegistration.SourceId)
                     .Should()
                     .NotBeNull()
                     .And
-                    .BeAssignableTo<ISharpClawCoreModule>()
+                    .BeAssignableTo<ISharpClawCoreRegistration>()
                     .Subject;
                 var seeded = await host.SeedChatAsync(
                     TestHarnessConstants.PlainProviderKey,
@@ -155,8 +155,8 @@ public sealed class InProcessModulePerformanceTests
         {
             RunRegistryLookup(0);
             await RunRuntimeScopeCapabilitiesAsync(0);
-            await ExecuteDirectToolAsync(InProcessPerformanceFixtureModule.NoopTool, 0);
-            await ExecuteDirectToolAsync(InProcessPerformanceFixtureModule.SpawnJobTool, 0);
+            await ExecuteDirectToolAsync(InProcessPerformanceFixtureRegistration.NoopTool, 0);
+            await ExecuteDirectToolAsync(InProcessPerformanceFixtureRegistration.SpawnJobTool, 0);
         }
 
         public async Task<InProcessCaseMeasurement> MeasureAsync(InProcessPerformanceCase testCase)
@@ -177,8 +177,8 @@ public sealed class InProcessModulePerformanceTests
                     RunRuntimeScopeCapabilitiesAsync(testCase.Variant),
                 InProcessPerformanceOperation.DirectToolDispatch =>
                     RunDirectToolDispatchAsync(testCase.Variant),
-                InProcessPerformanceOperation.ModuleSubmitsChildJob =>
-                    ExecuteDirectToolAsync(InProcessPerformanceFixtureModule.SpawnJobTool, testCase.Variant),
+                InProcessPerformanceOperation.RegistrationSubmitsChildJob =>
+                    ExecuteDirectToolAsync(InProcessPerformanceFixtureRegistration.SpawnJobTool, testCase.Variant),
                 _ => throw new InvalidOperationException(
                     $"Unsupported in-process performance operation '{testCase.Operation}'."),
             };
@@ -193,19 +193,19 @@ public sealed class InProcessModulePerformanceTests
         private void RunRegistryLookup(int variant)
         {
             var actionKey = variant % 2 == 0
-                ? InProcessPerformanceFixtureModule.NoopTool
-                : InProcessPerformanceFixtureModule.StorageTool;
+                ? InProcessPerformanceFixtureRegistration.NoopTool
+                : InProcessPerformanceFixtureRegistration.StorageTool;
 
             for (var i = 0; i < 1_000; i++)
             {
-                Registry.TryResolve(actionKey, out var moduleId, out var toolName).Should().BeTrue();
-                moduleId.Should().Be(InProcessPerformanceFixtureModule.ModuleId);
+                Registry.TryResolve(actionKey, out var SourceId, out var toolName).Should().BeTrue();
+                SourceId.Should().Be(InProcessPerformanceFixtureRegistration.SourceId);
                 toolName.Should().Be(actionKey);
-                Registry.GetModule(InProcessPerformanceFixtureModule.ModuleId).Should().NotBeNull();
-                Registry.GetRuntimeHost(InProcessPerformanceFixtureModule.ModuleId).Should().BeSameAs(RuntimeHost);
+                Registry.GetRegistration(InProcessPerformanceFixtureRegistration.SourceId).Should().NotBeNull();
+                Registry.GetRuntimeHost(InProcessPerformanceFixtureRegistration.SourceId).Should().BeSameAs(RuntimeHost);
                 Registry.FindStorageContract(
-                    InProcessPerformanceFixtureModule.ModuleId,
-                    InProcessPerformanceFixtureModule.StorageName).Should().NotBeNull();
+                    InProcessPerformanceFixtureRegistration.SourceId,
+                    InProcessPerformanceFixtureRegistration.StorageName).Should().NotBeNull();
             }
         }
 
@@ -214,11 +214,11 @@ public sealed class InProcessModulePerformanceTests
             for (var i = 0; i < 10; i++)
             {
                 using var scope = RuntimeHost.CreateScope();
-                var gateway = scope.ServiceProvider.GetRequiredService<IModuleStorageGateway>();
+                var gateway = scope.ServiceProvider.GetRequiredService<IScopedStorageGateway>();
                 gateway.ListContracts().Should().ContainSingle(contract =>
                     string.Equals(
-                        contract.ModuleId,
-                        InProcessPerformanceFixtureModule.ModuleId,
+                        contract.SourceId,
+                        InProcessPerformanceFixtureRegistration.SourceId,
                         StringComparison.Ordinal));
 
                 var core = scope.ServiceProvider.GetRequiredService<ISharpClawDataContext>();
@@ -226,7 +226,7 @@ public sealed class InProcessModulePerformanceTests
                 scope.ServiceProvider.GetRequiredService<IAgentJobController>().Should().NotBeNull();
                 scope.ServiceProvider.GetRequiredService<IAgentJobReader>().Should().NotBeNull();
 
-                var config = scope.ServiceProvider.GetRequiredService<IModuleConfigStore>();
+                var config = scope.ServiceProvider.GetRequiredService<IConfigurationStore>();
                 var key = $"perf-runtime-scope-{i:D2}";
                 var value = $"variant-{variant:D3}";
                 await config.SetAsync(key, value);
@@ -237,7 +237,7 @@ public sealed class InProcessModulePerformanceTests
         private async Task RunDirectToolDispatchAsync(int variant)
         {
             using var scope = RuntimeHost.CreateScope();
-            var restrictedScope = ModuleHostServiceAccess.CreateRestrictedScope(
+            var restrictedScope = RegistrationHostServiceAccess.CreateRestrictedScope(
                 scope.ServiceProvider,
                 Module.Id);
             var job = CreateJobContext(Guid.NewGuid());
@@ -247,7 +247,7 @@ public sealed class InProcessModulePerformanceTests
                 using var parameters = JsonDocument.Parse(
                     JsonSerializer.Serialize(new { variant = variant * 100 + i }, JsonOptions));
                 var result = await Module.ExecuteToolAsync(
-                    InProcessPerformanceFixtureModule.NoopTool,
+                    InProcessPerformanceFixtureRegistration.NoopTool,
                     parameters.RootElement,
                     job,
                     restrictedScope,
@@ -260,7 +260,7 @@ public sealed class InProcessModulePerformanceTests
         private async Task ExecuteDirectToolAsync(string toolName, int variant)
         {
             using var scope = RuntimeHost.CreateScope();
-            var restrictedScope = ModuleHostServiceAccess.CreateRestrictedScope(
+            var restrictedScope = RegistrationHostServiceAccess.CreateRestrictedScope(
                 scope.ServiceProvider,
                 Module.Id);
             using var parameters = JsonDocument.Parse(
@@ -281,47 +281,47 @@ public sealed class InProcessModulePerformanceTests
                 Seeded.Agent.Id,
                 Seeded.Channel.Id,
                 ResourceId: null,
-                ActionKey: InProcessPerformanceFixtureModule.NoopTool);
+                ActionKey: InProcessPerformanceFixtureRegistration.NoopTool);
 
         public async ValueTask DisposeAsync()
         {
             await _host.DisposeAsync();
         }
 
-        private static string CreateExternalModuleDirectory()
+        private static string CreateExternalRegistrationDirectory()
         {
-            var assemblyPath = typeof(InProcessPerformanceFixtureModule).Assembly.Location;
+            var assemblyPath = typeof(InProcessPerformanceFixtureRegistration).Assembly.Location;
             var sourceDir = Path.GetDirectoryName(assemblyPath)!;
-            var moduleDir = Path.Combine(
+            var registrationDir = Path.Combine(
                 TestContext.CurrentContext.WorkDirectory,
                 "inprocess-performance-modules",
                 Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(moduleDir);
+            Directory.CreateDirectory(registrationDir);
 
             foreach (var file in Directory.GetFiles(sourceDir, "*.dll"))
-                File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
+                File.Copy(file, Path.Combine(registrationDir, Path.GetFileName(file)), overwrite: true);
 
             foreach (var file in Directory.GetFiles(sourceDir, "*.deps.json"))
-                File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
+                File.Copy(file, Path.Combine(registrationDir, Path.GetFileName(file)), overwrite: true);
 
             File.WriteAllText(
-                Path.Combine(moduleDir, "module.json"),
+                Path.Combine(registrationDir, "package.json"),
                 $$"""
                 {
-                  "id": "{{InProcessPerformanceFixtureModule.ModuleId}}",
+                  "id": "{{InProcessPerformanceFixtureRegistration.SourceId}}",
                   "displayName": "Synthetic In-Process Performance",
                   "version": "1.0.0",
-                  "toolPrefix": "{{InProcessPerformanceFixtureModule.ToolPrefixValue}}",
+                  "toolPrefix": "{{InProcessPerformanceFixtureRegistration.ToolPrefixValue}}",
                   "runtime": "dotnet",
                   "hostMode": "in-process",
                   "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
-                  "moduleType": "{{typeof(InProcessPerformanceFixtureModule).FullName}}",
+                  "entryType": "{{typeof(InProcessPerformanceFixtureRegistration).FullName}}",
                   "minHostVersion": "0.0.0",
                   "executionTimeoutSeconds": 5
                 }
                 """);
 
-            return moduleDir;
+            return registrationDir;
         }
     }
 }
@@ -340,7 +340,7 @@ public enum InProcessPerformanceOperation
     RegistryLookup,
     RuntimeScopeCapabilities,
     DirectToolDispatch,
-    ModuleSubmitsChildJob,
+    RegistrationSubmitsChildJob,
 }
 
 public sealed record InProcessCaseMeasurement(

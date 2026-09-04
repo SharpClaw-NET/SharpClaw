@@ -10,37 +10,37 @@ namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
 [NonParallelizable]
-public sealed class ExternalModuleEnvironmentMutationTests
+public sealed class ExternalRegistrationEnvironmentMutationTests
 {
     [Test]
-    public async Task ExternalModulePath_UsesLowestUnusedIndexAndPreservesPartialEntries()
+    public async Task ExternalRegistrationPath_UsesLowestUnusedIndexAndPreservesPartialEntries()
     {
         await using var host = ChatHarnessHost.Create();
         var store = host.RootServices.GetRequiredService<ISecretDocumentStore>();
         await store.ReplaceDocumentAsync(
             "Unrelated=keep\n"
-            + "ExternalModules__0=scalar-partial\n"
-            + "ExternalModules__2__Unknown=reserved\n"
-            + "ExternalModules__4__Path__Nested=not-the-path-field\n"
-            + "ExternalModules__6__Path=\n");
+            + "ExternalRegistrations__0=scalar-partial\n"
+            + "ExternalRegistrations__2__Unknown=reserved\n"
+            + "ExternalRegistrations__4__Path__Nested=not-the-path-field\n"
+            + "ExternalRegistrations__6__Path=\n");
 
         string newPath = Path.Combine(host.InstanceRoot, "new-module");
-        await IgnoreMissingModuleAsync(host, newPath);
+        await IgnoreMissingRegistrationAsync(host, newPath);
 
         var settings = ReadSettings(await store.ReadDocumentAsync());
         settings.Should().Contain(new SupprocomSecretSetting("Unrelated", "keep"));
         settings.Should().Contain(new SupprocomSecretSetting(
-            "ExternalModules:0", "scalar-partial"));
+            "ExternalRegistrations:0", "scalar-partial"));
         settings.Should().Contain(new SupprocomSecretSetting(
-            "ExternalModules:1:Path", newPath));
+            "ExternalRegistrations:1:Path", newPath));
         settings.Should().Contain(new SupprocomSecretSetting(
-            "ExternalModules:1:Enabled", "false"));
+            "ExternalRegistrations:1:Enabled", "false"));
         settings.Should().Contain(new SupprocomSecretSetting(
-            "ExternalModules:2:Unknown", "reserved"));
+            "ExternalRegistrations:2:Unknown", "reserved"));
         settings.Should().Contain(new SupprocomSecretSetting(
-            "ExternalModules:4:Path:Nested", "not-the-path-field"));
+            "ExternalRegistrations:4:Path:Nested", "not-the-path-field"));
         settings.Should().Contain(new SupprocomSecretSetting(
-            "ExternalModules:6:Path", ""));
+            "ExternalRegistrations:6:Path", ""));
 
         await AssertProtectedAsync(host);
         var restarted = new SupprocomSecretFileStore(
@@ -50,15 +50,15 @@ public sealed class ExternalModuleEnvironmentMutationTests
                 host.RootServices.GetRequiredService<SharpClawInstancePaths>()));
         ReadSettings(await restarted.ReadDocumentAsync())
             .Should().Contain(new SupprocomSecretSetting(
-                "ExternalModules:1:Enabled", "false"));
+                "ExternalRegistrations:1:Enabled", "false"));
     }
 
     [Test]
-    public async Task ExternalModulePath_DoesNotDuplicateCanonicalPath()
+    public async Task ExternalRegistrationPath_DoesNotDuplicateCanonicalPath()
     {
         await using var host = ChatHarnessHost.Create();
         var store = host.RootServices.GetRequiredService<ISecretDocumentStore>();
-        string modulePath = Path.Combine(host.InstanceRoot, "duplicate-module");
+        string registrationPath = Path.Combine(host.InstanceRoot, "duplicate-module");
         string alternateSpelling = Path.Combine(
             host.InstanceRoot,
             ".",
@@ -66,10 +66,10 @@ public sealed class ExternalModuleEnvironmentMutationTests
             + Path.DirectorySeparatorChar;
 
         await store.ReplaceDocumentAsync(
-            $"ExternalModules__0__Path={alternateSpelling.Replace('\\', '/')}\n"
-            + "ExternalModules__0__Enabled=true\n");
+            $"ExternalRegistrations__0__Path={alternateSpelling.Replace('\\', '/')}\n"
+            + "ExternalRegistrations__0__Enabled=true\n");
 
-        await IgnoreMissingModuleAsync(host, modulePath);
+        await IgnoreMissingRegistrationAsync(host, registrationPath);
 
         var paths = ReadSettings(await store.ReadDocumentAsync())
             .Where(setting => setting.Key.EndsWith(":Path", StringComparison.OrdinalIgnoreCase))
@@ -79,7 +79,7 @@ public sealed class ExternalModuleEnvironmentMutationTests
     }
 
     [Test]
-    public async Task ExternalModulePath_ProviderPointerFailureLeavesPointerBytesUnchanged()
+    public async Task ExternalRegistrationPath_ProviderPointerFailureLeavesPointerBytesUnchanged()
     {
         await using var host = ChatHarnessHost.Create();
         var store = host.RootServices.GetRequiredService<ISecretDocumentStore>();
@@ -90,14 +90,14 @@ public sealed class ExternalModuleEnvironmentMutationTests
         byte[] before = File.ReadAllBytes(activePath);
 
         var exception = Assert.ThrowsAsync<SupprocomSecretsException>(
-            () => ExpectMissingModuleAsync(host, Path.Combine(host.InstanceRoot, "blocked-module")));
+            () => ExpectMissingRegistrationAsync(host, Path.Combine(host.InstanceRoot, "blocked-module")));
 
         exception!.Code.Should().NotBeNullOrWhiteSpace();
         File.ReadAllBytes(activePath).Should().Equal(before);
     }
 
     [Test]
-    public async Task ExternalModulePath_CancellationLeavesProtectedCiphertextUnchanged()
+    public async Task ExternalRegistrationPath_CancellationLeavesProtectedCiphertextUnchanged()
     {
         await using var host = ChatHarnessHost.Create();
         var store = host.RootServices.GetRequiredService<ISecretDocumentStore>();
@@ -110,7 +110,7 @@ public sealed class ExternalModuleEnvironmentMutationTests
         cancellation.Cancel();
 
         Assert.ThrowsAsync<OperationCanceledException>(
-            () => ExpectMissingModuleAsync(
+            () => ExpectMissingRegistrationAsync(
                 host,
                 Path.Combine(host.InstanceRoot, "cancelled-module"),
                 cancellation.Token));
@@ -121,7 +121,7 @@ public sealed class ExternalModuleEnvironmentMutationTests
     }
 
     [Test]
-    public async Task ExternalModulePath_ConcurrentLoadsPreserveBothEntries()
+    public async Task ExternalRegistrationPath_ConcurrentLoadsPreserveBothEntries()
     {
         await using var host = ChatHarnessHost.Create();
         var store = host.RootServices.GetRequiredService<ISecretDocumentStore>();
@@ -130,8 +130,8 @@ public sealed class ExternalModuleEnvironmentMutationTests
         string first = Path.Combine(host.InstanceRoot, "concurrent-one");
         string second = Path.Combine(host.InstanceRoot, "concurrent-two");
         await Task.WhenAll(
-            IgnoreMissingModuleAsync(host, first),
-            IgnoreMissingModuleAsync(host, second));
+            IgnoreMissingRegistrationAsync(host, first),
+            IgnoreMissingRegistrationAsync(host, second));
 
         var settings = ReadSettings(await store.ReadDocumentAsync());
         settings
@@ -147,24 +147,24 @@ public sealed class ExternalModuleEnvironmentMutationTests
         settings.Should().Contain(new SupprocomSecretSetting("Unrelated", "before"));
     }
 
-    private static async Task ExpectMissingModuleAsync(
+    private static async Task ExpectMissingRegistrationAsync(
         ChatHarnessHost host,
         string path,
         CancellationToken cancellationToken = default)
     {
         await host.Services
-            .GetRequiredService<ModuleService>()
+            .GetRequiredService<RegistrationService>()
             .LoadExternalFromAbsolutePathAsync(
                 path,
                 host.RootServices,
                 cancellationToken);
     }
 
-    private static async Task IgnoreMissingModuleAsync(ChatHarnessHost host, string path)
+    private static async Task IgnoreMissingRegistrationAsync(ChatHarnessHost host, string path)
     {
         try
         {
-            await ExpectMissingModuleAsync(host, path);
+            await ExpectMissingRegistrationAsync(host, path);
         }
         catch (DirectoryNotFoundException)
         {

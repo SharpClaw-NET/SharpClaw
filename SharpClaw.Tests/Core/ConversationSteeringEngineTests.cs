@@ -29,7 +29,7 @@ public sealed class ConversationSteeringEngineTests
             channelId,
             threadId,
             "  retry the build  ",
-            Source: " module_dev ",
+            Source: " registration_dev ",
             Category: " build ",
             Details: "  keep it scoped  ",
             ClientType: " worker "));
@@ -39,12 +39,12 @@ public sealed class ConversationSteeringEngineTests
         prepared.Role.Should().Be(ChatRoles.System);
         prepared.Origin.Should().Be(MessageOrigin.System);
         prepared.ClientType.Should().Be("worker");
-        prepared.Source.Should().Be("module_dev");
+        prepared.Source.Should().Be("registration_dev");
         prepared.Category.Should().Be("build");
         prepared.Content.Should().Be(string.Join(
             Environment.NewLine,
             ConversationSteeringEngine.ContentPrefix,
-            "Source: module_dev",
+            "Source: registration_dev",
             "Category: build",
             "Summary:",
             "retry the build",
@@ -54,7 +54,7 @@ public sealed class ConversationSteeringEngineTests
         var metadata = _engine.ParseMetadata(prepared.ProviderMetadataJson);
         metadata.Should().NotBeNull();
         metadata!.Kind.Should().Be(ConversationSteeringEngine.MetadataKind);
-        metadata.Source.Should().Be("module_dev");
+        metadata.Source.Should().Be("registration_dev");
         metadata.Category.Should().Be("build");
     }
 

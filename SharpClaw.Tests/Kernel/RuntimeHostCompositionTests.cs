@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Kernel;
@@ -28,11 +28,11 @@ public sealed class RuntimeHostCompositionTests
 {
     [Test]
     [NonParallelizable]
-    public async Task PackagedInProcessModule_ComposesHostGraphAndServesChat()
+    public async Task PackagedInProcessRegistration_ComposesHostGraphAndServesChat()
     {
-        var moduleRoot = AppContext.BaseDirectory;
-        Directory.Exists(moduleRoot).Should().BeTrue(
-            $"the test build must provide the normal Host module payload at '{moduleRoot}'");
+        var registrationRoot = AppContext.BaseDirectory;
+        Directory.Exists(registrationRoot).Should().BeTrue(
+            $"the test build must provide the normal Host module payload at '{registrationRoot}'");
 
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
@@ -40,21 +40,21 @@ public sealed class RuntimeHostCompositionTests
             {
                 ["Provider:Key"] = "sharpclaw-test",
                 ["Provider:Model"] = "test-harness-model",
-                ["Modules:sharpclaw_providers_anthropic"] = "false",
-                ["Modules:sharpclaw_providers_google"] = "false",
-                ["Modules:sharpclaw_providers_llamasharp"] = "false",
-                ["Modules:sharpclaw_providers_ollama"] = "false",
-                ["Modules:sharpclaw_providers_openai_compat"] = "false",
+                ["Packages:sharpclaw_providers_anthropic"] = "false",
+                ["Packages:sharpclaw_providers_google"] = "false",
+                ["Packages:sharpclaw_providers_llamasharp"] = "false",
+                ["Packages:sharpclaw_providers_ollama"] = "false",
+                ["Packages:sharpclaw_providers_openai_compat"] = "false",
             })
             .Build();
-        using var moduleSet = PackagedDotNetModuleSet.Load(
+        using var registrationSet = PackagedDotNetRegistrationSet.Load(
             [
-                Path.Combine(moduleRoot, "modules"),
-                Path.Combine(moduleRoot, "test-modules"),
+                Path.Combine(registrationRoot, "contributions"),
+                Path.Combine(registrationRoot, "test-contributions"),
             ],
             configuration);
-        moduleSet.Modules.Should().ContainSingle()
-            .Which.Identity.Id.Should().Be("sharpclaw_test_harness_in_process");
+        registrationSet.SourceIds.Should().ContainSingle()
+            .Which.Should().Be("sharpclaw_test_harness_in_process");
 
         var databaseOptions = new DatabaseProviderOptions
         {
@@ -78,7 +78,7 @@ public sealed class RuntimeHostCompositionTests
                 Key = new byte[32],
             },
             databaseOptions,
-            moduleSet.Modules);
+            registrationSet.Services);
 
         await using var app = builder.Build();
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
@@ -157,23 +157,24 @@ public sealed class RuntimeHostCompositionTests
             {
                 ["Provider:Key"] = "sharpclaw-test",
                 ["Provider:Model"] = "test-harness-model",
-                ["Modules:sharpclaw_providers_anthropic"] = "false",
-                ["Modules:sharpclaw_providers_google"] = "false",
-                ["Modules:sharpclaw_providers_llamasharp"] = "false",
-                ["Modules:sharpclaw_providers_ollama"] = "false",
-                ["Modules:sharpclaw_providers_openai_compat"] = "false",
+                ["Packages:sharpclaw_providers_anthropic"] = "false",
+                ["Packages:sharpclaw_providers_google"] = "false",
+                ["Packages:sharpclaw_providers_llamasharp"] = "false",
+                ["Packages:sharpclaw_providers_ollama"] = "false",
+                ["Packages:sharpclaw_providers_openai_compat"] = "false",
             })
             .Build();
-        using var moduleSet = PackagedDotNetModuleSet.Load(
+        using var registrationSet = PackagedDotNetRegistrationSet.Load(
             [
-                Path.Combine(AppContext.BaseDirectory, "modules"),
-                Path.Combine(AppContext.BaseDirectory, "test-modules"),
+                Path.Combine(AppContext.BaseDirectory, "contributions"),
+                Path.Combine(AppContext.BaseDirectory, "test-contributions"),
             ],
             configuration);
         var jobHandler = new JobProbeHandler();
-        var jobModule = new JobProbeModule(jobHandler);
-        var modules = moduleSet.Modules
-            .Append(jobModule)
+        var jobRegistration = new JobProbeRegistration(jobHandler);
+        var jobServices = SharpClawModuleCompiler.Compile(jobRegistration).Services;
+        var modules = registrationSet.Services
+            .Concat(jobServices)
             .ToArray();
         var databaseOptions = new DatabaseProviderOptions
         {
@@ -198,11 +199,11 @@ public sealed class RuntimeHostCompositionTests
             modules);
         builder.Services.AddSingleton(new KernelGraphCompileOptions
         {
-            ActionModuleCapabilityGrants = new Dictionary<
+            ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
             {
-                [jobModule.Identity.Id] = new Dictionary<
+                [jobRegistration.Identity.Id] = new Dictionary<
                     string,
                     ActionInterceptionCapabilities>(StringComparer.Ordinal)
                 {
@@ -349,7 +350,7 @@ public sealed class RuntimeHostCompositionTests
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new RequestContextProbe(expected: 2);
-        var module = new RequestContextProbeModule(probe);
+        var module = new RequestContextProbeRegistration(probe);
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -384,10 +385,10 @@ public sealed class RuntimeHostCompositionTests
             workspace.InstancePaths,
             new EncryptionOptions { Key = new byte[32] },
             databaseOptions,
-            [module]);
+            TestServiceGraph.Collect([module]));
         builder.Services.AddSingleton(new KernelGraphCompileOptions
         {
-            ActionModuleCapabilityGrants = new Dictionary<
+            ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
             {
@@ -543,10 +544,10 @@ public sealed class RuntimeHostCompositionTests
             })
             .Build();
 
-        using var moduleSet = PackagedDotNetModuleSet.Load(
-            Path.Combine(AppContext.BaseDirectory, "modules"),
+        using var registrationSet = PackagedDotNetRegistrationSet.Load(
+            Path.Combine(AppContext.BaseDirectory, "contributions"),
             configuration);
-        moduleSet.Modules.Select(module => module.Identity.Id)
+        registrationSet.SourceIds
             .Should().BeEquivalentTo(
                 [
                     "sharpclaw_providers_anthropic",
@@ -555,19 +556,13 @@ public sealed class RuntimeHostCompositionTests
                     "sharpclaw_providers_ollama",
                     "sharpclaw_providers_openai_compat",
                 ]);
-        var openAiModule = moduleSet.Modules.Single(module =>
-            module.Identity.Id == "sharpclaw_providers_openai_compat");
-        openAiModule.GetType().Assembly.GetName().Name.Should()
-            .Be("SharpClaw.Modules.Providers.OpenAICompatible");
-        Path.GetFullPath(openAiModule.GetType().Assembly.Location)
-            .Should()
-            .Be(Path.GetFullPath(Path.Combine(
+        File.Exists(Path.Combine(
                 AppContext.BaseDirectory,
-                "modules",
+                "contributions",
                 "sharpclaw_providers_openai_compat",
-                "SharpClaw.Modules.Providers.OpenAICompatible.dll")));
-        moduleSet.Modules.Should().NotContain(module =>
-            module.Identity.Id == "sharpclaw_test_harness_in_process");
+                "SharpClaw.Modules.Providers.OpenAICompatible.dll"))
+            .Should().BeTrue();
+        registrationSet.SourceIds.Should().NotContain("sharpclaw_test_harness_in_process");
 
         var databaseOptions = new DatabaseProviderOptions
         {
@@ -589,7 +584,7 @@ public sealed class RuntimeHostCompositionTests
             workspace.InstancePaths,
             new EncryptionOptions { Key = new byte[32] },
             databaseOptions,
-            moduleSet.Modules);
+            registrationSet.Services);
 
         await using var app = builder.Build();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
@@ -630,7 +625,7 @@ public sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task NormalHostPayload_RestartRemainsStatelessWithoutContextModule()
+    public async Task NormalHostPayload_RestartRemainsStatelessWithoutContextRegistration()
     {
         await using var providerServer = await FakeOpenAiServer.CreateAsync();
         using var workspace = new TemporaryWorkspace();
@@ -654,7 +649,7 @@ public sealed class RuntimeHostCompositionTests
             workspace,
             configuration,
             databaseOptions,
-            async app =>
+            async (app, _) =>
             {
                 using var client = new HttpClient
                 {
@@ -673,7 +668,7 @@ public sealed class RuntimeHostCompositionTests
             workspace,
             configuration,
             databaseOptions,
-            async app =>
+            async (app, _) =>
             {
                 await Task.CompletedTask;
                 app.Services.GetService<IConversationStore>().Should().BeNull();
@@ -704,10 +699,10 @@ public sealed class RuntimeHostCompositionTests
             workspace,
             configuration,
             databaseOptions,
-            async app =>
+            async (app, services) =>
             {
                 var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-                var store = ResolveLlamaLocalModelStore(adapter);
+                var store = ResolveLlamaLocalModelStore(adapter, services);
                 await InvokeLlamaPlaceholderAsync(store, modelId);
                 (await InvokeLlamaGetByModelIdAsync(store, modelId)).Should().NotBeNull();
             });
@@ -716,10 +711,11 @@ public sealed class RuntimeHostCompositionTests
             workspace,
             configuration,
             databaseOptions,
-            async app =>
+            async (app, services) =>
             {
                 var store = ResolveLlamaLocalModelStore(
-                    app.Services.GetRequiredService<RuntimeKernelAdapter>());
+                    app.Services.GetRequiredService<RuntimeKernelAdapter>(),
+                    services);
                 var record = await InvokeLlamaGetByModelIdAsync(store, modelId);
                 record.Should().NotBeNull();
                 record!.GetType().GetProperty("ModelId")!.GetValue(record).Should().Be(modelId);
@@ -728,7 +724,7 @@ public sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task ProductionJsonColdStore_RestartHasNoHistoryWithoutContextModule()
+    public async Task ProductionJsonColdStore_RestartHasNoHistoryWithoutContextRegistration()
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
@@ -736,11 +732,11 @@ public sealed class RuntimeHostCompositionTests
             {
                 ["Provider:Key"] = "sharpclaw-test",
                 ["Provider:Model"] = "test-harness-model",
-                ["Modules:sharpclaw_providers_anthropic"] = "false",
-                ["Modules:sharpclaw_providers_google"] = "false",
-                ["Modules:sharpclaw_providers_llamasharp"] = "false",
-                ["Modules:sharpclaw_providers_ollama"] = "false",
-                ["Modules:sharpclaw_providers_openai_compat"] = "false",
+                ["Packages:sharpclaw_providers_anthropic"] = "false",
+                ["Packages:sharpclaw_providers_google"] = "false",
+                ["Packages:sharpclaw_providers_llamasharp"] = "false",
+                ["Packages:sharpclaw_providers_ollama"] = "false",
+                ["Packages:sharpclaw_providers_openai_compat"] = "false",
             })
             .Build();
         var databaseOptions = new DatabaseProviderOptions
@@ -781,16 +777,16 @@ public sealed class RuntimeHostCompositionTests
     }
 
     [Test]
-    public void MissingConfiguredProviderFailsBeforeReadiness()
+    public async Task MissingConfiguredProviderFailsBeforeReadiness()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
         using var workspace = new TemporaryWorkspace();
-        using var moduleSet = PackagedDotNetModuleSet.Load(
+        using var registrationSet = PackagedDotNetRegistrationSet.Load(
             [
-                Path.Combine(AppContext.BaseDirectory, "modules"),
-                Path.Combine(AppContext.BaseDirectory, "test-modules"),
+                Path.Combine(AppContext.BaseDirectory, "contributions"),
+                Path.Combine(AppContext.BaseDirectory, "test-contributions"),
             ],
             configuration);
         var services = new ServiceCollection();
@@ -803,9 +799,9 @@ public sealed class RuntimeHostCompositionTests
             {
                 Provider = StorageMode.JsonFile,
             },
-            moduleSet.Modules);
+            registrationSet.Services);
 
-        using var provider = services.BuildServiceProvider();
+        await using var provider = services.BuildServiceProvider();
         var exception = FluentActions.Invoking(() =>
             provider.GetRequiredService<RuntimeKernelAdapter>())
             .Should().Throw<InvalidOperationException>();
@@ -814,37 +810,37 @@ public sealed class RuntimeHostCompositionTests
     }
 
     [Test]
-    public void DisabledPackagedInProcessModule_IsExcludedBeforeGraphCompilation()
+    public void DisabledPackagedInProcessRegistration_IsExcludedBeforeGraphCompilation()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Modules:sharpclaw_test_harness_in_process"] = "false",
-                ["Modules:sharpclaw_providers_anthropic"] = "false",
-                ["Modules:sharpclaw_providers_google"] = "false",
-                ["Modules:sharpclaw_providers_llamasharp"] = "false",
-                ["Modules:sharpclaw_providers_ollama"] = "false",
-                ["Modules:sharpclaw_providers_openai_compat"] = "false",
+                ["Packages:sharpclaw_test_harness_in_process"] = "false",
+                ["Packages:sharpclaw_providers_anthropic"] = "false",
+                ["Packages:sharpclaw_providers_google"] = "false",
+                ["Packages:sharpclaw_providers_llamasharp"] = "false",
+                ["Packages:sharpclaw_providers_ollama"] = "false",
+                ["Packages:sharpclaw_providers_openai_compat"] = "false",
             })
             .Build();
 
-        using var moduleSet = PackagedDotNetModuleSet.Load(
+        using var registrationSet = PackagedDotNetRegistrationSet.Load(
             [
-                Path.Combine(AppContext.BaseDirectory, "modules"),
-                Path.Combine(AppContext.BaseDirectory, "test-modules"),
+                Path.Combine(AppContext.BaseDirectory, "contributions"),
+                Path.Combine(AppContext.BaseDirectory, "test-contributions"),
             ],
             configuration);
 
-        moduleSet.Modules.Should().BeEmpty();
+        registrationSet.SourceIds.Should().BeEmpty();
     }
 
     [TestCase("null")]
     [TestCase("0")]
     [TestCase("\"false\"")]
-    public void PackagedModuleSet_RejectsNonBooleanEnabledValues(string enabledJson)
+    public void PackagedRegistrationSet_RejectsNonBooleanEnabledValues(string enabledJson)
     {
-        using var moduleRoot = new TemporaryModuleRoot();
-        moduleRoot.WriteManifest(
+        using var registrationRoot = new TemporaryRegistrationRoot();
+        registrationRoot.WriteManifest(
             "invalid-enabled",
             $$"""
             {
@@ -855,22 +851,22 @@ public sealed class RuntimeHostCompositionTests
               "runtime": "dotnet",
               "hostMode": "inprocess",
               "entryAssembly": "unused.dll",
-              "moduleType": "Unused.Module",
+              "entryType": "Unused.Module",
               "enabled": {{enabledJson}}
             }
             """);
 
-        var act = () => PackagedDotNetModuleSet.Load(
-            moduleRoot.Path,
+        var act = () => PackagedDotNetRegistrationSet.Load(
+            registrationRoot.Path,
             new ConfigurationBuilder().Build());
 
         act.Should().Throw<JsonException>();
     }
 
     [Test]
-    public void PackagedModuleSet_RejectsDuplicateManifestIdentityBeforeLoad()
+    public void PackagedRegistrationSet_RejectsDuplicateManifestIdentityBeforeLoad()
     {
-        using var moduleRoot = new TemporaryModuleRoot();
+        using var registrationRoot = new TemporaryRegistrationRoot();
         const string manifest = """
             {
               "id": "duplicate-module",
@@ -880,15 +876,15 @@ public sealed class RuntimeHostCompositionTests
               "runtime": "dotnet",
               "hostMode": "inprocess",
               "entryAssembly": "unused.dll",
-              "moduleType": "Unused.Module",
+              "entryType": "Unused.Module",
               "enabled": false
             }
             """;
-        moduleRoot.WriteManifest("first", manifest);
-        moduleRoot.WriteManifest("second", manifest);
+        registrationRoot.WriteManifest("first", manifest);
+        registrationRoot.WriteManifest("second", manifest);
 
-        var act = () => PackagedDotNetModuleSet.Load(
-            moduleRoot.Path,
+        var act = () => PackagedDotNetRegistrationSet.Load(
+            registrationRoot.Path,
             new ConfigurationBuilder().Build());
 
         act.Should().Throw<InvalidOperationException>()
@@ -926,14 +922,14 @@ public sealed class RuntimeHostCompositionTests
         DatabaseProviderOptions databaseOptions,
         Func<WebApplication, Task> operation)
     {
-        using var moduleSet = PackagedDotNetModuleSet.Load(
+        using var registrationSet = PackagedDotNetRegistrationSet.Load(
             [
-                Path.Combine(AppContext.BaseDirectory, "modules"),
-                Path.Combine(AppContext.BaseDirectory, "test-modules"),
+                Path.Combine(AppContext.BaseDirectory, "contributions"),
+                Path.Combine(AppContext.BaseDirectory, "test-contributions"),
             ],
             configuration);
-        moduleSet.Modules.Should().ContainSingle()
-            .Which.Identity.Id.Should().Be("sharpclaw_test_harness_in_process");
+        registrationSet.SourceIds.Should().ContainSingle()
+            .Which.Should().Be("sharpclaw_test_harness_in_process");
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -948,7 +944,7 @@ public sealed class RuntimeHostCompositionTests
             workspace.InstancePaths,
             new EncryptionOptions { Key = new byte[32] },
             databaseOptions,
-            moduleSet.Modules);
+            registrationSet.Services);
 
         await using var app = builder.Build();
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
@@ -975,12 +971,12 @@ public sealed class RuntimeHostCompositionTests
         TemporaryWorkspace workspace,
         IConfiguration configuration,
         DatabaseProviderOptions databaseOptions,
-        Func<WebApplication, Task> operation)
+        Func<WebApplication, IReadOnlyList<ServiceDescriptor>, Task> operation)
     {
-        using var moduleSet = PackagedDotNetModuleSet.Load(
-            Path.Combine(AppContext.BaseDirectory, "modules"),
+        using var registrationSet = PackagedDotNetRegistrationSet.Load(
+            Path.Combine(AppContext.BaseDirectory, "contributions"),
             configuration);
-        moduleSet.Modules.Select(module => module.Identity.Id)
+        registrationSet.SourceIds
             .Should().BeEquivalentTo(
                 [
                     "sharpclaw_providers_anthropic",
@@ -1003,7 +999,7 @@ public sealed class RuntimeHostCompositionTests
             workspace.InstancePaths,
             new EncryptionOptions { Key = new byte[32] },
             databaseOptions,
-            moduleSet.Modules);
+            registrationSet.Services);
 
         await using var app = builder.Build();
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
@@ -1016,7 +1012,7 @@ public sealed class RuntimeHostCompositionTests
         try
         {
             await app.StartAsync();
-            await operation(app);
+            await operation(app, registrationSet.Services);
         }
         finally
         {
@@ -1026,33 +1022,14 @@ public sealed class RuntimeHostCompositionTests
         }
     }
 
-    private static object ResolveLlamaLocalModelStore(RuntimeKernelAdapter adapter)
+    private static object ResolveLlamaLocalModelStore(
+        RuntimeKernelAdapter adapter,
+        IReadOnlyList<ServiceDescriptor> services)
     {
-        var modules = adapter.Graph.Modules.Modules;
-        var moduleIndex = -1;
-        for (var index = 0; index < modules.Count; index++)
-        {
-            if (modules[index].Identity.Id == "sharpclaw_providers_llamasharp")
-            {
-                moduleIndex = index;
-                break;
-            }
-        }
-
-        if (moduleIndex < 0)
-            throw new InvalidOperationException("The LlamaSharp module was not compiled into the graph.");
-
-        var serviceTypes = modules[moduleIndex].ServiceTypes;
-        Type? storeType = null;
-        for (var index = 0; index < serviceTypes.Count; index++)
-        {
-            if (serviceTypes[index].FullName ==
-                "SharpClaw.Modules.Providers.LlamaSharp.Services.LocalModelStore")
-            {
-                storeType = serviceTypes[index];
-                break;
-            }
-        }
+        var storeType = services
+            .Select(descriptor => descriptor.ServiceType)
+            .FirstOrDefault(type => type.FullName ==
+                "SharpClaw.Modules.Providers.LlamaSharp.Services.LocalModelStore");
 
         if (storeType is null)
             throw new InvalidOperationException("The LlamaSharp LocalModelStore was not registered.");
@@ -1143,20 +1120,19 @@ public sealed class RuntimeHostCompositionTests
         }
     }
 
-    private sealed class RequestContextProbeModule(RequestContextProbe probe) : ISharpClawModule
+    private sealed class RequestContextProbeRegistration(RequestContextProbe probe) : ISharpClawModule
     {
         private readonly RequestContextProvider _provider = new();
 
         public ModuleIdentity Identity { get; } =
             new("request-context-probe", "Request context probe", "context");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection module)
         {
-            module.Services.AddSingleton<IProviderPlugin>(_provider);
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton<RequestContextProbeInterceptor>();
-            module.Hooks
-                .For(new SharpClawActionKey("runtime.request.receive"))
+            module.AddSingleton<IProviderPlugin>(_provider);
+            module.AddSingleton(probe);
+            module.AddSingleton<RequestContextProbeInterceptor>();
+            module.OnAction(new SharpClawActionKey("runtime.request.receive"))
                 .Use<RequestContextProbeInterceptor>(
                     new HookOrdering(
                         "request-context-probe",
@@ -1168,16 +1144,16 @@ public sealed class RuntimeHostCompositionTests
         }
     }
 
-    private sealed class JobProbeModule(JobProbeHandler handler) : ISharpClawModule
+    private sealed class JobProbeRegistration(JobProbeHandler handler) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } = new(
             "jobs-http-probe",
             "Jobs HTTP probe",
             "jobs-http");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection module)
         {
-            module.Actions.Add(new ActionDescriptor<KernelActionEnvelope, object>(
+            module.AddAction(new ActionDescriptor<KernelActionEnvelope, object>(
                 JobProbeHandler.Action,
                 1,
                 "jobs-http-probe",
@@ -1192,8 +1168,14 @@ public sealed class RuntimeHostCompositionTests
                     TimeSpan.Zero,
                     "jobs-http-probe"),
                 null,
-                TimeSpan.FromSeconds(5)));
-            module.Services.AddSingleton<IJobHandler>(handler);
+                TimeSpan.FromSeconds(5))
+            {
+                SafePoints =
+                [
+                    ActionSafePoint.BeforeTerminal,
+                ],
+            });
+            module.AddSingleton<IJobHandler>(handler);
         }
     }
 
@@ -1301,9 +1283,9 @@ public sealed class RuntimeHostCompositionTests
         }
     }
 
-    private sealed class TemporaryModuleRoot : IDisposable
+    private sealed class TemporaryRegistrationRoot : IDisposable
     {
-        public TemporaryModuleRoot()
+        public TemporaryRegistrationRoot()
         {
             Path = System.IO.Path.Combine(
                 System.IO.Path.GetTempPath(),
@@ -1313,11 +1295,11 @@ public sealed class RuntimeHostCompositionTests
 
         public string Path { get; }
 
-        public void WriteManifest(string moduleDirectory, string json)
+        public void WriteManifest(string registrationDirectory, string json)
         {
-            var directory = System.IO.Path.Combine(Path, moduleDirectory);
+            var directory = System.IO.Path.Combine(Path, registrationDirectory);
             Directory.CreateDirectory(directory);
-            File.WriteAllText(System.IO.Path.Combine(directory, "module.json"), json);
+            File.WriteAllText(System.IO.Path.Combine(directory, "package.json"), json);
         }
 
         public void Dispose()

@@ -12,7 +12,7 @@ namespace SharpClaw.Tests.Architecture;
 /// the host pipeline.
 /// </summary>
 [TestFixture]
-public class ModuleDependencyGuardrailTests
+public class RegistrationDependencyGuardrailTests
 {
     public sealed record ProjectLocation(string Directory, string ProjectFile);
 
@@ -24,48 +24,48 @@ public class ModuleDependencyGuardrailTests
     ];
 
     [Test]
-    public void SharpClaw_assemblies_must_not_reference_module_payload_assemblies()
+    public void SharpClaw_assemblies_must_not_reference_registration_payload_assemblies()
     {
         var assemblies = new[]
         {
             typeof(SharpClaw.Runtime.Host.LocalRuntimeHost).Assembly,
             typeof(SharpClaw.Gateway.Configuration.GatewayEnvironment).Assembly,
-            typeof(ModuleDependencyGuardrailTests).Assembly,
+            typeof(RegistrationDependencyGuardrailTests).Assembly,
         };
 
-        var moduleReferences = assemblies
+        var registrationReferences = assemblies
             .SelectMany(assembly => assembly.GetReferencedAssemblies()
                 .Select(reference => new { Assembly = assembly.GetName().Name, Reference = reference.Name }))
             .Where(item => item.Reference is not null
                 && item.Reference.StartsWith("SharpClaw.Modules.", StringComparison.Ordinal))
             .ToList();
 
-        moduleReferences.Should().BeEmpty(
+        registrationReferences.Should().BeEmpty(
             "module NuGet packages are copied as runtime payloads and must not enter SharpClaw compiler reference graphs");
     }
 
     [Test]
-    public void Runtime_host_project_must_not_reference_extracted_module_source_projects()
+    public void Runtime_host_project_must_not_reference_extracted_registration_source_projects()
     {
         var apiProjectPath = FindFileFromTestAssembly("SharpClaw.Runtime/Host", "SharpClaw.Runtime.Host.csproj");
         var project = XDocument.Load(apiProjectPath);
 
-        var extractedModuleProjectNames = new[]
+        var extractedRegistrationProjectNames = new[]
         {
             "SharpClaw.Modules.AgentOrchestration.csproj",
             "SharpClaw.Modules.Metrics.csproj",
-            "SharpClaw.Modules.ModuleDev.csproj",
+            "SharpClaw.Modules.RegistrationDev.csproj",
         };
-        var extractedModuleReferences = project.Descendants("ProjectReference")
+        var extractedRegistrationReferences = project.Descendants("ProjectReference")
             .Where(reference =>
             {
                 var include = (string?)reference.Attribute("Include") ?? "";
-                return extractedModuleProjectNames.Any(name =>
+                return extractedRegistrationProjectNames.Any(name =>
                     include.Contains(name, StringComparison.OrdinalIgnoreCase));
             })
             .ToList();
 
-        extractedModuleReferences.Should().BeEmpty(
+        extractedRegistrationReferences.Should().BeEmpty(
             "extracted modules are consumed from NuGet package payloads, not source project references");
 
         var testHarnessReferences = project.Descendants("ProjectReference")
@@ -73,22 +73,16 @@ public class ModuleDependencyGuardrailTests
                 .Contains("SharpClaw.DefaultModules.TestHarness", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        testHarnessReferences.Should().NotBeEmpty(
-            "TestHarness modules remain in-repo as explicit test infrastructure");
-        foreach (var reference in testHarnessReferences)
-        {
-            reference.Element("ReferenceOutputAssembly")?.Value.Should().Be(
-                "false",
-                "in-repo TestHarness modules are payload fixtures and must not become Runtime.Host compiler references");
-        }
+        testHarnessReferences.Should().BeEmpty(
+            "test payload projects belong to the test graph and must not enter Runtime.Host");
     }
 
     [TestCaseSource(nameof(ProjectLocations))]
-    public void Module_payload_package_references_must_be_path_only(ProjectLocation projectLocation)
+    public void Registration_payload_package_references_must_be_path_only(ProjectLocation projectLocation)
     {
         var projectPath = FindFileFromTestAssembly(projectLocation.Directory, projectLocation.ProjectFile);
         var project = XDocument.Load(projectPath);
-        var packageReferences = GetModulePayloadPackageIds(project)
+        var packageReferences = GetRegistrationPayloadPackageIds(project)
             .Select(id => new
             {
                 Id = id,
@@ -147,11 +141,11 @@ public class ModuleDependencyGuardrailTests
     }
 
     [TestCaseSource(nameof(ProjectLocations))]
-    public void Module_payload_packages_must_not_contribute_compile_assets(ProjectLocation projectLocation)
+    public void Registration_payload_packages_must_not_contribute_compile_assets(ProjectLocation projectLocation)
     {
         var projectPath = FindFileFromTestAssembly(projectLocation.Directory, projectLocation.ProjectFile);
         var project = XDocument.Load(projectPath);
-        var packageIds = GetModulePayloadPackageIds(project).ToList();
+        var packageIds = GetRegistrationPayloadPackageIds(project).ToList();
         var assetsPath = FindAssetsPath(projectPath);
 
         File.Exists(assetsPath).Should().BeTrue("restore must produce project.assets.json before architecture tests run");
@@ -178,11 +172,11 @@ public class ModuleDependencyGuardrailTests
     }
 
     [TestCaseSource(nameof(ProjectLocations))]
-    public void Module_facing_package_graph_must_not_depend_on_sharpclaw_core(ProjectLocation projectLocation)
+    public void Registration_facing_package_graph_must_not_depend_on_sharpclaw_core(ProjectLocation projectLocation)
     {
         var projectPath = FindFileFromTestAssembly(projectLocation.Directory, projectLocation.ProjectFile);
         var project = XDocument.Load(projectPath);
-        var packageIds = GetModuleFacingPackageIds(project).ToList();
+        var packageIds = GetRegistrationFacingPackageIds(project).ToList();
         var assetsPath = FindAssetsPath(projectPath);
 
         File.Exists(assetsPath).Should().BeTrue("restore must produce project.assets.json before architecture tests run");
@@ -206,21 +200,21 @@ public class ModuleDependencyGuardrailTests
     }
 
     [Test]
-    public void In_repo_module_projects_must_not_reference_sharpclaw_core()
+    public void In_repo_registration_projects_must_not_reference_sharpclaw_core()
     {
         var solutionPath = FindFileFromTestAssembly(".", "SharpClaw.slnx");
         var solutionRoot = Path.GetDirectoryName(solutionPath)!;
         var solution = XDocument.Load(solutionPath);
-        var moduleProjectPaths = solution.Descendants("Project")
+        var registrationProjectPaths = solution.Descendants("Project")
             .Select(project => (string?)project.Attribute("Path"))
             .Where(path => path is not null
                 && path.Contains("SharpClaw.DefaultModules", StringComparison.OrdinalIgnoreCase))
             .Select(path => Path.Combine(solutionRoot, path!))
             .ToList();
 
-        moduleProjectPaths.Should().NotBeEmpty("the in-repo TestHarness modules are module payload fixtures");
+        registrationProjectPaths.Should().NotBeEmpty("the in-repo TestHarness modules are module payload fixtures");
 
-        foreach (var projectPath in moduleProjectPaths)
+        foreach (var projectPath in registrationProjectPaths)
         {
             var project = XDocument.Load(projectPath);
             var sharpClawCorePackageReferences = project.Descendants("PackageReference")
@@ -292,7 +286,7 @@ public class ModuleDependencyGuardrailTests
         return normalPath;
     }
 
-    private static IEnumerable<string> GetModulePayloadPackageIds(XDocument project)
+    private static IEnumerable<string> GetRegistrationPayloadPackageIds(XDocument project)
     {
         return project.Descendants("PackageReference")
             .Select(reference => (string?)reference.Attribute("Include"))
@@ -302,13 +296,13 @@ public class ModuleDependencyGuardrailTests
             .OrderBy(id => id, StringComparer.Ordinal);
     }
 
-    private static IEnumerable<string> GetModuleFacingPackageIds(XDocument project)
+    private static IEnumerable<string> GetRegistrationFacingPackageIds(XDocument project)
     {
         return project.Descendants("PackageReference")
             .Select(reference => (string?)reference.Attribute("Include"))
             .Where(id => id is not null
                 && (id.StartsWith("SharpClaw.Modules.", StringComparison.Ordinal)
-                    || string.Equals(id, "SharpClaw.ModuleHost.OutOfProcess", StringComparison.Ordinal)))
+                    || string.Equals(id, "SharpClaw.SidecarHost.OutOfProcess", StringComparison.Ordinal)))
             .Select(id => id!)
             .OrderBy(id => id, StringComparer.Ordinal);
     }

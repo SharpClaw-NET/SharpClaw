@@ -1,4 +1,4 @@
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 
@@ -10,7 +10,7 @@ internal static class RuntimeCliSession
         IReadOnlyList<string> rawArguments,
         RuntimeKernelAdapter runtimeKernel,
         DirectChatKernel kernel,
-        PackagedModuleApplicationRegistry applications,
+        PackagedApplicationRegistry applications,
         TextWriter output,
         TextWriter error,
         CancellationToken cancellationToken)
@@ -146,7 +146,7 @@ internal static class RuntimeCliSession
         RuntimeCliCommand command,
         RuntimeKernelAdapter runtimeKernel,
         DirectChatKernel kernel,
-        PackagedModuleApplicationRegistry applications,
+        PackagedApplicationRegistry applications,
         KernelActionExecutionContext executionContext,
         CancellationToken cancellationToken)
     {
@@ -159,19 +159,19 @@ internal static class RuntimeCliSession
         if (command.Name == "chat")
             return await ExecuteChatAsync(command, kernel, cancellationToken);
 
-        var moduleResult = await applications.TryInvokeCliAsync(
+        var registrationResult = await applications.TryInvokeCliAsync(
             command.Name,
             command.Arguments,
             runtimeKernel,
             executionContext,
             cancellationToken);
-        return moduleResult is null
+        return registrationResult is null
             ? RuntimeCliResult.Failure(
                 $"Unknown Runtime CLI command '{command.Name}'. Use '--cli help'.")
-            : FromModuleResult(moduleResult);
+            : FromRegistrationResult(registrationResult);
     }
 
-    private static RuntimeCliResult FromModuleResult(ModuleCliResult result)
+    private static RuntimeCliResult FromRegistrationResult(CliResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
         var output = string.Concat(result.Output

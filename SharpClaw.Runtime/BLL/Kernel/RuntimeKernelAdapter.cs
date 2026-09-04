@@ -4,7 +4,7 @@ using System.Threading.Channels;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.INF.Persistence;
@@ -16,16 +16,15 @@ namespace SharpClaw.Runtime.BLL.Kernel;
 public sealed class RuntimeKernelAdapter :
     IRuntimePersistenceActionBoundary,
     IRuntimeTransactionActionBoundary,
-    IRuntimeModuleActionBoundary,
     IRuntimeEventActionBoundary,
     IRuntimeEventPublisher
 {
-    private readonly KernelModuleRegistry _moduleRegistry;
+    private readonly IReadOnlyList<IServiceLifecycle> _lifecycleServices;
+    private readonly List<IServiceLifecycle> _startedServices = [];
     private readonly KernelActionDispatcher _actionDispatcher;
     private readonly KernelEventDispatcher _eventDispatcher;
     private readonly IKernelEventDeliverySink _eventDeliverySink;
     private readonly KernelJobsActionRunner _jobsActionRunner;
-    private readonly IReadOnlyList<RuntimeModuleContractCapture> _moduleContracts;
     private bool _started;
     private static readonly JsonSerializerOptions EventActionJsonOptions =
         new(JsonSerializerDefaults.General)
@@ -36,7 +35,8 @@ public sealed class RuntimeKernelAdapter :
     public RuntimeKernelAdapter(
         IConfiguration configuration,
         IServiceProvider hostServices,
-        IEnumerable<ISharpClawModule> modules,
+        KernelJobsBindings jobsBindings,
+        IEnumerable<IServiceLifecycle> lifecycleServices,
         SharpClawInstancePaths instancePaths,
         IRuntimeProviderClientFactory providerClientFactory,
         KernelGraphCompileOptions? graphCompileOptions = null,
@@ -46,33 +46,26 @@ public sealed class RuntimeKernelAdapter :
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(hostServices);
-        ArgumentNullException.ThrowIfNull(modules);
+        ArgumentNullException.ThrowIfNull(jobsBindings);
+        ArgumentNullException.ThrowIfNull(lifecycleServices);
         ArgumentNullException.ThrowIfNull(instancePaths);
         ArgumentNullException.ThrowIfNull(providerClientFactory);
 
-        _moduleRegistry = new KernelModuleRegistry();
-        var moduleContracts = new List<RuntimeModuleContractCapture>();
-        var jobsModule = new KernelJobsActionModule();
-        var orderedModules = modules
-            .OrderBy(value => value.Identity.Id, StringComparer.Ordinal)
-            .ToArray();
-        AddCapturedModule(jobsModule, moduleContracts);
-        AddCapturedModule(new RuntimeEventModule(), moduleContracts);
-        foreach (var module in orderedModules)
-            AddCapturedModule(module, moduleContracts);
-        _moduleContracts = moduleContracts.AsReadOnly();
-
-        Graph = _moduleRegistry.Compile(
+        _lifecycleServices = lifecycleServices.ToArray();
+        var graphBuilder = new KernelGraphBuilder();
+        jobsBindings.AddTo(graphBuilder);
+        RuntimeEventBindings.AddTo(graphBuilder);
+        Graph = graphBuilder.Compile(
             hostServices,
             AddRuntimeEventGrant(
-                MergeExternalModuleAuthority(graphCompileOptions, orderedModules),
-                jobsModule));
+                MergeExternalBehaviorAuthority(
+                    graphCompileOptions,
+                    hostServices.GetServices<IExternalBehaviorAuthority>()),
+                jobsBindings));
         RuntimeProviderActionManifest.Validate(Graph);
         RuntimeToolActionManifest.Validate(Graph);
         RuntimePersistenceActionManifest.Validate(Graph);
         RuntimeTransactionActionManifest.Validate(Graph);
-        RuntimeModuleActionManifest.Validate(Graph);
-        RuntimeModuleContractManifest.Validate(Graph, _moduleContracts);
         RuntimeEventActionManifest.Validate(Graph);
         _eventDeliverySink = eventDeliverySink ?? new InMemoryEventDeliverySink(supportsDurable: true);
         _eventDispatcher = new KernelEventDispatcher(Graph, _eventDeliverySink);
@@ -88,12 +81,9 @@ public sealed class RuntimeKernelAdapter :
             repeatEvidenceAuthority: repeatEvidenceAuthority,
             externalAuthorityRegistry: externalAuthorityRegistry);
         _jobsActionRunner = new KernelJobsActionRunner(Graph, _actionDispatcher);
-        DispatchModuleCompositionActions();
-        var graphPlugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
+        var plugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
             ?.ToArray()
             ?? [];
-        var hostPlugins = hostServices.GetServices<IProviderPlugin>().ToArray();
-        var plugins = graphPlugins.Concat(hostPlugins).ToArray();
         ValidateConfiguredProviders(configuration, plugins);
         var providerClient = providerClientFactory.Create(configuration, plugins);
         var conversationResolver = ResolveConversationResolver(Graph);
@@ -118,8 +108,6 @@ public sealed class RuntimeKernelAdapter :
     internal KernelActionDispatcher CoreActionDispatcher => _actionDispatcher;
 
     internal KernelJobsActionRunner JobsActionRunner => _jobsActionRunner;
-
-    internal IReadOnlyList<RuntimeModuleContractCapture> ModuleContracts => _moduleContracts;
 
     public async ValueTask<RuntimeEventPublishResult> PublishAsync(
         RuntimeEventPayload payload,
@@ -195,7 +183,7 @@ public sealed class RuntimeKernelAdapter :
                                     null,
                                     Guid.NewGuid(),
                                     DateTimeOffset.UtcNow,
-                                    RuntimeEventDefinitions.ModuleId,
+                                    RuntimeEventDefinitions.SourceId,
                                     eventPayload),
                                 deliveryInvocation.Delivery,
                                 deliveryCt,
@@ -501,130 +489,6 @@ public sealed class RuntimeKernelAdapter :
             cancellationToken);
     }
 
-    public async ValueTask<TResult> RunModuleActionAsync<TResult>(
-        SharpClawActionKey actionKey,
-        object? payload,
-        Func<object?, CancellationToken, ValueTask<TResult>> terminal,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(terminal);
-        if (!RuntimeModuleActionManifest.Contains(actionKey))
-        {
-            throw new ArgumentException(
-                $"Action '{actionKey.Value}' is not a published Runtime module action.",
-                nameof(actionKey));
-        }
-
-        var executionContext = CreateHostExecutionContext();
-        try
-        {
-            var terminalState = 0;
-            var terminalResult = new TaskCompletionSource<TResult>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-            var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
-                executionContext,
-                Graph.GetStandardAction(actionKey),
-                new KernelActionEnvelope(actionKey, payload),
-                async (envelope, actionCancellationToken) =>
-                {
-                    if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
-                    {
-                        var repeated = await terminalResult.Task;
-                        return repeated is null
-                            ? throw new KernelActionExecutionException(
-                                $"Module action '{actionKey.Value}' returned a null repeated result.")
-                            : repeated;
-                    }
-
-                    try
-                    {
-                        var value = await terminal(envelope.Action.Payload, actionCancellationToken);
-                        if (value is null)
-                        {
-                            throw new KernelActionExecutionException(
-                                $"Module action '{actionKey.Value}' returned a null result.");
-                        }
-
-                        terminalResult.TrySetResult(value);
-                        return value;
-                    }
-                    catch (Exception exception)
-                    {
-                        terminalResult.TrySetException(exception);
-                        throw;
-                    }
-                },
-                Graph.ActionSnapshot,
-                cancellationToken);
-
-            if (Volatile.Read(ref terminalState) == 0)
-            {
-                throw new KernelActionExecutionException(
-                    $"Module action '{actionKey.Value}' completed without running its terminal.");
-            }
-
-            if (result is not TResult typedResult)
-            {
-                throw new KernelActionExecutionException(
-                    $"Module action '{actionKey.Value}' returned an invalid result type.");
-            }
-
-            return typedResult;
-        }
-        catch (KernelActionCancelledException exception)
-        {
-            await DispatchModuleLifecycleOutcomeAsync(
-                new SharpClawActionKey("module.lifecycle.cancel"),
-                payload,
-                executionContext,
-                exception);
-            ExceptionDispatchInfo.Capture(exception).Throw();
-            throw;
-        }
-        catch (OperationCanceledException exception)
-        {
-            await DispatchModuleLifecycleOutcomeAsync(
-                new SharpClawActionKey("module.lifecycle.cancel"),
-                payload,
-                executionContext,
-                exception);
-            ExceptionDispatchInfo.Capture(exception).Throw();
-            throw;
-        }
-        catch (Exception exception)
-        {
-            await DispatchModuleLifecycleOutcomeAsync(
-                new SharpClawActionKey("module.lifecycle.fail"),
-                payload,
-                executionContext,
-                exception);
-            ExceptionDispatchInfo.Capture(exception).Throw();
-            throw;
-        }
-    }
-
-    private async ValueTask DispatchModuleLifecycleOutcomeAsync(
-        SharpClawActionKey actionKey,
-        object? payload,
-        KernelActionExecutionContext executionContext,
-        Exception originalException)
-    {
-        try
-        {
-            await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
-                executionContext,
-                Graph.GetStandardAction(actionKey),
-                new KernelActionEnvelope(actionKey, payload),
-                static (_, _) => ValueTask.FromResult<object>(true),
-                Graph.ActionSnapshot,
-                CancellationToken.None);
-        }
-        catch (Exception outcomeException)
-        {
-            throw new AggregateException(originalException, outcomeException);
-        }
-    }
-
     internal async ValueTask<TResult> RunRequestAsync<TRequest, TResult>(
         KernelActionExecutionContext executionContext,
         TRequest request,
@@ -923,7 +787,7 @@ public sealed class RuntimeKernelAdapter :
                 $"Security action '{actionKey.Value}' returned an invalid result type.");
         }
 
-        // A module can restrict the host decision, but it cannot grant authority
+        // An interceptor can restrict the host decision, but it cannot grant authority
         // when the host decision did not allow the request.
         return baseAllowed && actionAllowed;
     }
@@ -945,7 +809,7 @@ public sealed class RuntimeKernelAdapter :
             RuntimeLifecycleActionCatalog.StartConfigure,
             hostVersion,
             executionContext,
-            ct => StartModulesThroughActionsAsync(
+            ct => StartParticipantsAsync(
                 hostVersion,
                 effectiveFeatures,
                 ct),
@@ -965,11 +829,11 @@ public sealed class RuntimeKernelAdapter :
         var prepare = onPrepare ?? (static _ => ValueTask.CompletedTask);
         var completion = onComplete ?? (static _ => ValueTask.CompletedTask);
         var prepareInvoked = false;
-        var moduleStopInvoked = 0;
+        var participantStopInvoked = 0;
         var completionInvoked = false;
         ExceptionDispatchInfo? failure = null;
 
-        async ValueTask PrepareHostAndModulesAsync(CancellationToken _)
+        async ValueTask PrepareHostAndParticipantsAsync(CancellationToken _)
         {
             prepareInvoked = true;
             ExceptionDispatchInfo? prepareFailure = null;
@@ -982,11 +846,11 @@ public sealed class RuntimeKernelAdapter :
                 prepareFailure = ExceptionDispatchInfo.Capture(exception);
             }
 
-            if (Interlocked.Exchange(ref moduleStopInvoked, 1) == 0)
+            if (Interlocked.Exchange(ref participantStopInvoked, 1) == 0)
             {
                 try
                 {
-                    await StopModulesThroughActionsAsync(CancellationToken.None);
+                    await StopParticipantsAsync(CancellationToken.None);
                 }
                 catch (Exception exception)
                 {
@@ -1011,7 +875,7 @@ public sealed class RuntimeKernelAdapter :
                     RuntimeLifecycleActionCatalog.StopPrepare,
                     null,
                     executionContext,
-                    PrepareHostAndModulesAsync,
+                    PrepareHostAndParticipantsAsync,
                     cancellationToken);
             }
             catch (Exception exception)
@@ -1024,7 +888,7 @@ public sealed class RuntimeKernelAdapter :
                 {
                     try
                     {
-                        await PrepareHostAndModulesAsync(CancellationToken.None);
+                        await PrepareHostAndParticipantsAsync(CancellationToken.None);
                     }
                     catch (Exception exception)
                     {
@@ -1087,102 +951,55 @@ public sealed class RuntimeKernelAdapter :
             cancellationToken);
     }
 
-    private async ValueTask StartModulesThroughActionsAsync(
+    private async ValueTask StartParticipantsAsync(
         string hostVersion,
         ExtensionFeatureSet features,
         CancellationToken cancellationToken)
     {
-        foreach (var module in _moduleRegistry.Modules)
+        try
         {
-            var context = new ModuleStartContext(
-                module.Identity,
-                hostVersion,
-                Graph.ActionSnapshot.ContractHash,
-                features);
-            var started = await RunModuleActionAsync(
-                new SharpClawActionKey("module.start"),
-                context,
-                async (payload, ct) =>
-                {
-                    if (payload is not ModuleStartContext effectiveContext)
-                    {
-                        throw new KernelActionExecutionException(
-                            "The module.start action returned an invalid ModuleStartContext replacement.");
-                    }
-
-                    await module.StartAsync(effectiveContext, ct);
-                    return true;
-                },
-                cancellationToken);
-            if (!started)
+            foreach (var service in _lifecycleServices)
             {
-                throw new KernelActionExecutionException(
-                    $"Module '{module.Identity.Id}' did not start successfully.");
+                var context = new ServiceStartContext(
+                    hostVersion,
+                    Graph.ActionSnapshot.ContractHash,
+                    features);
+                await service.StartAsync(context, cancellationToken);
+                _startedServices.Add(service);
             }
+        }
+        catch (Exception startException)
+        {
+            try
+            {
+                await StopParticipantsAsync(CancellationToken.None);
+            }
+            catch (Exception stopException)
+            {
+                throw new AggregateException(startException, stopException);
+            }
+
+            ExceptionDispatchInfo.Capture(startException).Throw();
+            throw;
         }
     }
 
-    private async ValueTask StopModulesThroughActionsAsync(CancellationToken cancellationToken)
+    private async ValueTask StopParticipantsAsync(CancellationToken cancellationToken)
     {
-        for (var index = _moduleRegistry.Modules.Count - 1; index >= 0; index--)
+        ExceptionDispatchInfo? failure = null;
+        for (var index = _startedServices.Count - 1; index >= 0; index--)
         {
-            var module = _moduleRegistry.Modules[index];
-            var stopped = await RunModuleActionAsync(
-                new SharpClawActionKey("module.stop"),
-                module.Identity,
-                async (_, ct) =>
-                {
-                    await module.StopAsync(ct);
-                    return true;
-                },
-                cancellationToken);
-            if (!stopped)
+            try
             {
-                throw new KernelActionExecutionException(
-                    $"Module '{module.Identity.Id}' did not stop successfully.");
+                await _startedServices[index].StopAsync(cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                failure ??= ExceptionDispatchInfo.Capture(exception);
             }
         }
-    }
-
-    private void DispatchModuleCompositionActions()
-    {
-        foreach (var module in _moduleRegistry.Modules)
-        {
-            var invocation = new RuntimeModuleActionInvocation(
-                module.Identity.Id,
-                "composition");
-            foreach (var actionName in new[]
-            {
-                "module.discover",
-                "module.validate",
-                "module.configure",
-            })
-            {
-                var allowed = RunModuleActionAsync(
-                        new SharpClawActionKey(actionName),
-                        invocation,
-                        static (_, _) => new ValueTask<bool>(true))
-                    .GetAwaiter()
-                    .GetResult();
-                if (!allowed)
-                {
-                    throw new KernelGraphCompilationException(
-                        $"Module action '{actionName}' rejected module '{module.Identity.Id}'.");
-                }
-            }
-        }
-
-        var graphAllowed = RunModuleActionAsync(
-                new SharpClawActionKey("module.graph.compile"),
-                new RuntimeModuleActionInvocation("<graph>", "composition"),
-                static (_, _) => new ValueTask<bool>(true))
-            .GetAwaiter()
-            .GetResult();
-        if (!graphAllowed)
-        {
-            throw new KernelGraphCompilationException(
-                "The module.graph.compile action rejected the compiled graph.");
-        }
+        _startedServices.Clear();
+        failure?.Throw();
     }
 
     private static KernelActionExecutionContext CreateHostExecutionContext(
@@ -1196,9 +1013,9 @@ public sealed class RuntimeKernelAdapter :
 
     private static KernelGraphCompileOptions AddRuntimeEventGrant(
         KernelGraphCompileOptions? options,
-        KernelJobsActionModule jobsModule)
+        KernelJobsBindings jobsBindings)
     {
-        var actionModuleGrants = options?.ActionModuleCapabilityGrants is { } existingActionGrants
+        var actionRegistrationGrants = options?.ActionRegistrationCapabilityGrants is { } existingActionGrants
             ? existingActionGrants.ToDictionary(
                 pair => pair.Key,
                 pair => (IReadOnlyDictionary<string, ActionInterceptionCapabilities>)
@@ -1210,9 +1027,9 @@ public sealed class RuntimeKernelAdapter :
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(
                 StringComparer.Ordinal);
-        actionModuleGrants[jobsModule.Identity.Id] = jobsModule.Grants;
+        actionRegistrationGrants[KernelJobsBindings.SourceId] = jobsBindings.Grants;
 
-        var eventModuleGrants = options?.EventModuleCapabilityGrants is { } existing
+        var eventRegistrationGrants = options?.EventRegistrationCapabilityGrants is { } existing
             ? existing.ToDictionary(
                 pair => pair.Key,
                 pair => (IReadOnlyDictionary<string, EventInterceptionCapabilities>)
@@ -1224,8 +1041,8 @@ public sealed class RuntimeKernelAdapter :
                 string,
                 IReadOnlyDictionary<string, EventInterceptionCapabilities>>(
                 StringComparer.Ordinal);
-        var runtimeEventGrant = eventModuleGrants.TryGetValue(
-            RuntimeEventDefinitions.ModuleId,
+        var runtimeEventGrant = eventRegistrationGrants.TryGetValue(
+            RuntimeEventDefinitions.SourceId,
             out var configuredGrant)
             ? new Dictionary<string, EventInterceptionCapabilities>(
                 configuredGrant,
@@ -1234,7 +1051,7 @@ public sealed class RuntimeKernelAdapter :
                 StringComparer.Ordinal);
         runtimeEventGrant[RuntimeEventDefinitions.CommittedKey.Value] =
             RuntimeEventDefinitions.Committed.Capabilities;
-        eventModuleGrants[RuntimeEventDefinitions.ModuleId] = runtimeEventGrant;
+        eventRegistrationGrants[RuntimeEventDefinitions.SourceId] = runtimeEventGrant;
 
         return new KernelGraphCompileOptions
         {
@@ -1243,11 +1060,11 @@ public sealed class RuntimeKernelAdapter :
             SupportedEventCapabilities = options?.SupportedEventCapabilities
                 ?? new KernelGraphCompileOptions().SupportedEventCapabilities,
             ActionCapabilityGrants = options?.ActionCapabilityGrants,
-            ActionModuleCapabilityGrants = actionModuleGrants,
+            ActionRegistrationCapabilityGrants = actionRegistrationGrants,
             EventCapabilityGrants = options?.EventCapabilityGrants,
-            EventModuleCapabilityGrants = eventModuleGrants,
+            EventRegistrationCapabilityGrants = eventRegistrationGrants,
             SensitiveActionApprovals = (options?.SensitiveActionApprovals ?? [])
-                .Concat(jobsModule.Approvals)
+                .Concat(jobsBindings.Approvals)
                 .ToArray(),
             ExternalSensitiveActionApprovals = options?.ExternalSensitiveActionApprovals ?? [],
             SensitiveEventApprovals = options?.SensitiveEventApprovals ?? [],
@@ -1257,25 +1074,22 @@ public sealed class RuntimeKernelAdapter :
         };
     }
 
-    private static KernelGraphCompileOptions MergeExternalModuleAuthority(
+    private static KernelGraphCompileOptions MergeExternalBehaviorAuthority(
         KernelGraphCompileOptions? options,
-        IReadOnlyList<ISharpClawModule> modules)
+        IEnumerable<IExternalBehaviorAuthority> authorities)
     {
         var defaults = new KernelGraphCompileOptions();
-        var actionModuleGrants = CopyActionModuleGrants(options?.ActionModuleCapabilityGrants);
-        var eventModuleGrants = CopyEventModuleGrants(options?.EventModuleCapabilityGrants);
+        var actionRegistrationGrants = CopyActionRegistrationGrants(options?.ActionRegistrationCapabilityGrants);
+        var eventRegistrationGrants = CopyEventRegistrationGrants(options?.EventRegistrationCapabilityGrants);
         var actionApprovals = new HashSet<KernelExternalSensitiveActionApproval>(
             options?.ExternalSensitiveActionApprovals ?? []);
         var eventApprovals = new HashSet<KernelExternalSensitiveEventApproval>(
             options?.ExternalSensitiveEventApprovals ?? []);
 
-        foreach (var module in modules)
+        foreach (var external in authorities)
         {
-            if (module is not IAuthorizedExternalModule external)
-                continue;
-
-            ValidateExternalModuleIdentity(module.Identity, external);
-            var moduleActionGrants = actionModuleGrants.TryGetValue(module.Identity.Id, out var existingActions)
+            ValidateExternalAuthority(external);
+            var contributionActionGrants = actionRegistrationGrants.TryGetValue(external.SourceId, out var existingActions)
                 ? new Dictionary<string, ActionInterceptionCapabilities>(existingActions, StringComparer.Ordinal)
                 : new Dictionary<string, ActionInterceptionCapabilities>(StringComparer.Ordinal);
             foreach (var grantGroup in external.Authorization.ActionGrants
@@ -1285,24 +1099,24 @@ public sealed class RuntimeKernelAdapter :
                 if (grants.Length != 1)
                 {
                     throw new KernelGraphCompilationException(
-                        $"External module '{module.Identity.Id}' has conflicting grants for action '{grantGroup.Key}'.");
+                        $"External source '{external.SourceId}' has conflicting grants for action '{grantGroup.Key}'.");
                 }
 
                 var grant = grants[0];
-                MergeActionGrant(module.Identity.Id, moduleActionGrants, grant);
+                MergeActionGrant(external.SourceId, contributionActionGrants, grant);
                 if (grant.SensitiveApproved)
                 {
                     AddExternalActionApprovals(
-                        module.Identity.Id,
+                        external.SourceId,
                         grant,
                         external.Discovery.Actions,
                         external.Discovery.ActionDefinitions,
                         actionApprovals);
                 }
             }
-            actionModuleGrants[module.Identity.Id] = moduleActionGrants;
+            actionRegistrationGrants[external.SourceId] = contributionActionGrants;
 
-            var moduleEventGrants = eventModuleGrants.TryGetValue(module.Identity.Id, out var existingEvents)
+            var contributionEventGrants = eventRegistrationGrants.TryGetValue(external.SourceId, out var existingEvents)
                 ? new Dictionary<string, EventInterceptionCapabilities>(existingEvents, StringComparer.Ordinal)
                 : new Dictionary<string, EventInterceptionCapabilities>(StringComparer.Ordinal);
             foreach (var grantGroup in external.Authorization.EventGrants
@@ -1312,21 +1126,21 @@ public sealed class RuntimeKernelAdapter :
                 if (grants.Length != 1)
                 {
                     throw new KernelGraphCompilationException(
-                        $"External module '{module.Identity.Id}' has conflicting grants for event '{grantGroup.Key}'.");
+                        $"External source '{external.SourceId}' has conflicting grants for event '{grantGroup.Key}'.");
                 }
 
                 var grant = grants[0];
-                MergeEventGrant(module.Identity.Id, moduleEventGrants, grant);
+                MergeEventGrant(external.SourceId, contributionEventGrants, grant);
                 if (grant.SensitiveApproved)
                 {
                     AddExternalEventApprovals(
-                        module.Identity.Id,
+                        external.SourceId,
                         grant,
                         external.Discovery.Events,
                         eventApprovals);
                 }
             }
-            eventModuleGrants[module.Identity.Id] = moduleEventGrants;
+            eventRegistrationGrants[external.SourceId] = contributionEventGrants;
         }
 
         return new KernelGraphCompileOptions
@@ -1336,9 +1150,9 @@ public sealed class RuntimeKernelAdapter :
             SupportedEventCapabilities = options?.SupportedEventCapabilities
                 ?? defaults.SupportedEventCapabilities,
             ActionCapabilityGrants = options?.ActionCapabilityGrants,
-            ActionModuleCapabilityGrants = actionModuleGrants,
+            ActionRegistrationCapabilityGrants = actionRegistrationGrants,
             EventCapabilityGrants = options?.EventCapabilityGrants,
-            EventModuleCapabilityGrants = eventModuleGrants,
+            EventRegistrationCapabilityGrants = eventRegistrationGrants,
             SensitiveActionApprovals = options?.SensitiveActionApprovals ?? [],
             ExternalSensitiveActionApprovals = actionApprovals.ToArray(),
             SensitiveEventApprovals = options?.SensitiveEventApprovals ?? [],
@@ -1348,7 +1162,7 @@ public sealed class RuntimeKernelAdapter :
     }
 
     private static Dictionary<string, IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
-        CopyActionModuleGrants(
+        CopyActionRegistrationGrants(
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, ActionInterceptionCapabilities>>? source) =>
         source?.ToDictionary(
             pair => pair.Key,
@@ -1359,7 +1173,7 @@ public sealed class RuntimeKernelAdapter :
             StringComparer.Ordinal);
 
     private static Dictionary<string, IReadOnlyDictionary<string, EventInterceptionCapabilities>>
-        CopyEventModuleGrants(
+        CopyEventRegistrationGrants(
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, EventInterceptionCapabilities>>? source) =>
         source?.ToDictionary(
             pair => pair.Key,
@@ -1369,20 +1183,18 @@ public sealed class RuntimeKernelAdapter :
         ?? new Dictionary<string, IReadOnlyDictionary<string, EventInterceptionCapabilities>>(
             StringComparer.Ordinal);
 
-    private static void ValidateExternalModuleIdentity(
-        ModuleIdentity identity,
-        IAuthorizedExternalModule external)
+    private static void ValidateExternalAuthority(IExternalBehaviorAuthority external)
     {
-        if (!string.Equals(identity.Id, external.Authorization.ModuleId, StringComparison.Ordinal)
-            || !string.Equals(identity.Id, external.Discovery.ModuleId, StringComparison.Ordinal))
+        if (!string.Equals(external.SourceId, external.Authorization.SourceId, StringComparison.Ordinal)
+            || !string.Equals(external.SourceId, external.Discovery.SourceId, StringComparison.Ordinal))
         {
             throw new KernelGraphCompilationException(
-                $"External module '{identity.Id}' has inconsistent discovery or authorization identity.");
+                $"External source '{external.SourceId}' has inconsistent discovery or authorization identity.");
         }
     }
 
     private static void MergeActionGrant(
-        string moduleId,
+        string SourceId,
         IDictionary<string, ActionInterceptionCapabilities> target,
         ActionCapabilityGrant grant)
     {
@@ -1390,13 +1202,13 @@ public sealed class RuntimeKernelAdapter :
             && existing != grant.Capabilities)
         {
             throw new KernelGraphCompilationException(
-                $"External module '{moduleId}' conflicts with the configured grant for action '{grant.ActionKey.Value}'.");
+                $"External contribution '{SourceId}' conflicts with the configured grant for action '{grant.ActionKey.Value}'.");
         }
         target[grant.ActionKey.Value] = grant.Capabilities;
     }
 
     private static void MergeEventGrant(
-        string moduleId,
+        string SourceId,
         IDictionary<string, EventInterceptionCapabilities> target,
         EventCapabilityGrant grant)
     {
@@ -1404,13 +1216,13 @@ public sealed class RuntimeKernelAdapter :
             && existing != grant.Capabilities)
         {
             throw new KernelGraphCompilationException(
-                $"External module '{moduleId}' conflicts with the configured grant for event '{grant.EventKey.Value}'.");
+                $"External contribution '{SourceId}' conflicts with the configured grant for event '{grant.EventKey.Value}'.");
         }
         target[grant.EventKey.Value] = grant.Capabilities;
     }
 
     private static void AddExternalActionApprovals(
-        string moduleId,
+        string SourceId,
         ActionCapabilityGrant grant,
         IReadOnlyList<SidecarActionSubscription> subscriptions,
         IReadOnlyList<SidecarActionDefinition> definitions,
@@ -1426,7 +1238,7 @@ public sealed class RuntimeKernelAdapter :
             foreach (var subscription in matches)
             {
                 approvals.Add(new KernelExternalSensitiveActionApproval(
-                    moduleId,
+                    SourceId,
                     grant.ActionKey,
                     grant.ActionVersion,
                     subscription.InputSchema,
@@ -1441,11 +1253,11 @@ public sealed class RuntimeKernelAdapter :
         if (definitionMatches.Length != 1)
         {
             throw new KernelGraphCompilationException(
-                $"External module '{moduleId}' has no discovered schema for sensitive action '{grant.ActionKey.Value}'.");
+                $"External contribution '{SourceId}' has no discovered schema for sensitive action '{grant.ActionKey.Value}'.");
         }
 
         approvals.Add(new KernelExternalSensitiveActionApproval(
-            moduleId,
+            SourceId,
             grant.ActionKey,
             grant.ActionVersion,
             definitionMatches[0].InputSchema,
@@ -1453,7 +1265,7 @@ public sealed class RuntimeKernelAdapter :
     }
 
     private static void AddExternalEventApprovals(
-        string moduleId,
+        string SourceId,
         EventCapabilityGrant grant,
         IReadOnlyList<SidecarEventSubscription> subscriptions,
         ISet<KernelExternalSensitiveEventApproval> approvals)
@@ -1466,68 +1278,36 @@ public sealed class RuntimeKernelAdapter :
         if (matches.Length == 0)
         {
             throw new KernelGraphCompilationException(
-                $"External module '{moduleId}' has no discovered schema for sensitive event '{grant.EventKey.Value}'.");
+                $"External contribution '{SourceId}' has no discovered schema for sensitive event '{grant.EventKey.Value}'.");
         }
 
         foreach (var subscription in matches)
         {
             approvals.Add(new KernelExternalSensitiveEventApproval(
-                moduleId,
+                SourceId,
                 grant.EventKey,
                 grant.EventVersion,
                 subscription.PayloadSchema));
         }
     }
 
-    private void AddCapturedModule(
-        ISharpClawModule module,
-        ICollection<RuntimeModuleContractCapture> captures)
-    {
-        var capture = new RuntimeModuleContractCapture(module.Identity.Id);
-        captures.Add(capture);
-        _moduleRegistry.Add(new RuntimeModuleContractModule(module, capture));
-    }
-
     private static IConversationResolver ResolveConversationResolver(KernelGraph graph) =>
-        graph.Modules.BoundConversationResolver
-        ?? (graph.Modules.ConversationResolver is { } resolverType
-            ? (IConversationResolver)(graph.GetService(resolverType)
-                ?? throw new KernelGraphCompilationException(
-                    $"Conversation resolver '{resolverType.FullName}' is not registered."))
-            : new StatelessConversationResolver());
+        graph.Services.ConversationResolver ?? new StatelessConversationResolver();
 
     private static IConversationStore ResolveConversationStore(KernelGraph graph)
     {
-        if (graph.Modules.BoundConversationResolver is null
-            && graph.Modules.ConversationResolver is null)
+        if (graph.Services.ConversationResolver is null)
             return new StatelessConversationStore();
 
-        if (graph.Modules.BoundConversationStore is { } boundStore)
-            return boundStore;
-
-        var moduleOwnsStore = graph.Modules.Modules
-            .SelectMany(module => module.ServiceTypes)
-            .Contains(typeof(IConversationStore));
-        if (!moduleOwnsStore)
-        {
-            throw new KernelGraphCompilationException(
-                "The Context module must register its IConversationStore in the compiled module graph.");
-        }
-
-        return graph.GetService(typeof(IConversationStore)) as IConversationStore
+        return graph.Services.ConversationStore
             ?? throw new KernelGraphCompilationException(
-                "The Context module IConversationStore could not be resolved from the compiled graph.");
+                "A configured conversation resolver requires one IConversationStore service.");
     }
 
     private static IChatProfileResolver ResolveProfileResolver(
         KernelGraph graph,
         IConfiguration configuration) =>
-        graph.Modules.BoundProfileResolver
-        ?? (graph.Modules.ProfileResolver is { } resolverType
-            ? (IChatProfileResolver)(graph.GetService(resolverType)
-                ?? throw new KernelGraphCompilationException(
-                    $"Chat profile resolver '{resolverType.FullName}' is not registered."))
-            : new FixedChatProfileResolver(CreateProfile(configuration)));
+        graph.Services.ProfileResolver ?? new FixedChatProfileResolver(CreateProfile(configuration));
 
     private static ChatProfile CreateProfile(IConfiguration configuration)
     {
@@ -1555,7 +1335,7 @@ public sealed class RuntimeKernelAdapter :
         if (duplicateProviderKeys.Length > 0)
         {
             throw new InvalidOperationException(
-                "Duplicate provider registrations were found: "
+                "Duplicate provider keys were found: "
                 + string.Join(", ", duplicateProviderKeys));
         }
 
@@ -1573,7 +1353,7 @@ public sealed class RuntimeKernelAdapter :
                 StringComparison.OrdinalIgnoreCase)))
         {
             throw new InvalidOperationException(
-                $"Configured provider '{providerKey}' is not registered by an enabled in-process module.");
+                $"Configured provider '{providerKey}' is not available in the active service graph.");
         }
     }
 

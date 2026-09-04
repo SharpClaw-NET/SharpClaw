@@ -72,7 +72,7 @@ public sealed class HeaderTagProcessorTests
             })
             .Build();
 
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         var services = new ServiceCollection().BuildServiceProvider();
         var clientFactory = new ProviderApiClientFactory(
             Array.Empty<IProviderPlugin>(),

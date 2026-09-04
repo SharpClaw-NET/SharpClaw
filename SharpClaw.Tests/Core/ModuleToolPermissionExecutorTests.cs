@@ -2,18 +2,18 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Core;
 
 [TestFixture]
-public sealed class ModuleToolPermissionExecutorTests
+public sealed class RegistrationToolPermissionExecutorTests
 {
     [Test]
     public async Task ExecuteAsync_WhenPerResourceToolHasNoResourceId_DeniesAndTraces()
     {
-        var registry = CreateRegistry(new ModuleToolPermission(
+        var registry = CreateRegistry(new RegistrationToolPermission(
             IsPerResource: true,
             Check: DirectApprove));
         var traces = new List<string>();
@@ -38,7 +38,7 @@ public sealed class ModuleToolPermissionExecutorTests
     [Test]
     public async Task ExecuteAsync_WhenDirectCheckIsConfigured_ReturnsDirectResult()
     {
-        var registry = CreateRegistry(new ModuleToolPermission(
+        var registry = CreateRegistry(new RegistrationToolPermission(
             IsPerResource: true,
             Check: DirectApprove));
         var resourceId = Guid.NewGuid();
@@ -60,7 +60,7 @@ public sealed class ModuleToolPermissionExecutorTests
     [Test]
     public async Task ExecuteAsync_WhenDelegateIsConfigured_ReturnsHostResult()
     {
-        var registry = CreateRegistry(new ModuleToolPermission(
+        var registry = CreateRegistry(new RegistrationToolPermission(
             IsPerResource: true,
             Check: null,
             DelegateTo: "CanRun"));
@@ -103,7 +103,7 @@ public sealed class ModuleToolPermissionExecutorTests
     [Test]
     public async Task ExecuteAsync_WhenDelegateIsUnrecognized_Denies()
     {
-        var registry = CreateRegistry(new ModuleToolPermission(
+        var registry = CreateRegistry(new RegistrationToolPermission(
             IsPerResource: false,
             Check: null,
             DelegateTo: "UnknownDelegate"));
@@ -122,13 +122,13 @@ public sealed class ModuleToolPermissionExecutorTests
             "Module tool 'run' delegates to 'UnknownDelegate' which is not a recognised permission check method.");
     }
 
-    private static ModuleToolPermissionExecutor CreateExecutor() =>
-        new(new ModuleToolPermissionPlanner());
+    private static RegistrationToolPermissionExecutor CreateExecutor() =>
+        new(new RegistrationToolPermissionPlanner());
 
-    private static ModuleRegistry CreateRegistry(ModuleToolPermission permission)
+    private static RegistrationCatalog CreateRegistry(RegistrationToolPermission permission)
     {
-        var registry = new ModuleRegistry();
-        registry.Register(new TestModule(permission));
+        var registry = new RegistrationCatalog();
+        registry.Register(new TestRegistration(permission));
         return registry;
     }
 
@@ -149,10 +149,10 @@ public sealed class ModuleToolPermissionExecutorTests
         return doc.RootElement.Clone();
     }
 
-    private sealed class TestModule(ModuleToolPermission permission)
-        : ISharpClawCoreModule
+    private sealed class TestRegistration(RegistrationToolPermission permission)
+        : ISharpClawCoreRegistration
     {
-        public string Id => "test_module";
+        public string Id => "test_registration";
         public string DisplayName => "Test Module";
         public string ToolPrefix => "test";
 
@@ -160,7 +160,7 @@ public sealed class ModuleToolPermissionExecutorTests
         {
         }
 
-        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() =>
+        public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() =>
         [
             new(
                 "run",

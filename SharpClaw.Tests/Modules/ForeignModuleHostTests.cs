@@ -3,30 +3,30 @@ using System.Net.Sockets;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class ForeignModuleHostTests
+public sealed class ForeignRegistrationHostTests
 {
     [Test]
     public async Task StartAsyncLaunchesSidecarAndPassesStartupEnvironment()
     {
         using var workspace = TestWorkspace.Create();
-        await using var host = await ForeignModuleHost.StartAsync(
+        await using var host = await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace, "normal"));
 
         host.ProcessId.Should().BeGreaterThan(0);
-        host.Handshake.ModuleId.Should().Be("sample_dotnet_module");
-        host.Handshake.Runtime.Should().Be(ModuleManifestRuntimeInfo.DotNet);
-        host.Endpoints.Should().Contain(e => e.RoutePattern == "/modules/sample/ping");
-        host.CapturedOutput.StandardOutput.Should().Contain($"moduleDir={workspace.ModuleDir}");
+        host.Handshake.SourceId.Should().Be("sample_dotnet_registration");
+        host.Handshake.Runtime.Should().Be(PackageRuntimeInfo.DotNet);
+        host.Endpoints.Should().Contain(e => e.RoutePattern == "/contributions/sample/ping");
+        host.CapturedOutput.StandardOutput.Should().Contain($"registrationDir={workspace.ModuleDir}");
         host.CapturedOutput.StandardOutput.Should().Contain($"dataDir={workspace.DataDir}");
         host.CapturedOutput.StandardOutput.Should().Contain("token=run-token");
-        host.CapturedOutput.StandardOutput.Should().Contain("moduleId=sample_dotnet_module");
+        host.CapturedOutput.StandardOutput.Should().Contain("SourceId=sample_dotnet_registration");
         host.CapturedOutput.StandardOutput.Should().Contain("runtime=dotnet");
 
         await host.Module.InitializeAsync(host.Services, CancellationToken.None);
@@ -42,7 +42,7 @@ public sealed class ForeignModuleHostTests
     {
         using var workspace = TestWorkspace.Create();
         await using var hostServices = new ServiceCollection().BuildServiceProvider();
-        await using var host = await ForeignModuleHost.StartAsync(
+        await using var host = await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace, "normal") with
@@ -63,13 +63,13 @@ public sealed class ForeignModuleHostTests
             StartupTimeout = TimeSpan.FromSeconds(2),
         };
 
-        var act = async () => await ForeignModuleHost.StartAsync(
+        var act = async () => await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             options);
 
         var ex = await act.Should()
-            .ThrowAsync<ForeignModuleStartupException>();
+            .ThrowAsync<ForeignRegistrationStartupException>();
         ex.Which.Message.Should().Contain("exited with code 23 before readiness");
         ex.Which.Output.StandardOutput.Should().Contain("sidecar stdout before early exit");
         ex.Which.Output.StandardError.Should().Contain("sidecar stderr before early exit");
@@ -84,13 +84,13 @@ public sealed class ForeignModuleHostTests
             StartupTimeout = TimeSpan.FromMilliseconds(500),
         };
 
-        var act = async () => await ForeignModuleHost.StartAsync(
+        var act = async () => await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             options);
 
         var ex = await act.Should()
-            .ThrowAsync<ForeignModuleStartupException>();
+            .ThrowAsync<ForeignRegistrationStartupException>();
         ex.Which.Message.Should().Contain("did not become ready within");
         ex.Which.Output.StandardOutput.Should().Contain("ENV|");
     }
@@ -99,7 +99,7 @@ public sealed class ForeignModuleHostTests
     public async Task ShutdownKillsSidecarThatDoesNotExitAfterShutdownHook()
     {
         using var workspace = TestWorkspace.Create();
-        await using var host = await ForeignModuleHost.StartAsync(
+        await using var host = await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace, "ignore-shutdown") with
@@ -112,17 +112,17 @@ public sealed class ForeignModuleHostTests
         host.HasExited.Should().BeTrue();
     }
 
-    private static ModuleManifest Manifest() =>
+    private static PackageManifest Manifest() =>
         new(
-            "sample_dotnet_module",
+            "sample_dotnet_registration",
             "Sample .NET Module",
             "1.0.0",
             "sdm",
             "SharpClaw.TestFixtures.ForeignSidecar.dll",
             "0.0.0");
 
-    private static ModuleManifestRuntimeInfo RuntimeInfo() =>
-        ModuleManifestRuntimeInfo.FromJson("""
+    private static PackageRuntimeInfo RuntimeInfo() =>
+        PackageRuntimeInfo.FromJson("""
         {
           "runtime": "dotnet",
           "hostMode": "sidecar",
@@ -130,18 +130,18 @@ public sealed class ForeignModuleHostTests
         }
         """);
 
-    private static ForeignModuleHostLaunchOptions CreateLaunchOptions(
+    private static ForeignRegistrationHostLaunchOptions CreateLaunchOptions(
         TestWorkspace workspace,
         string mode)
     {
         var helperPath = ResolveSidecarHelperPath();
-        return new ForeignModuleHostLaunchOptions
+        return new ForeignRegistrationHostLaunchOptions
         {
             ExecutablePath = "dotnet",
             Arguments = [helperPath, "--mode", mode],
             WorkingDirectory = Path.GetDirectoryName(helperPath),
             ModuleDirectory = workspace.ModuleDir,
-            ModuleDataDirectory = workspace.DataDir,
+            RegistrationDataDirectory = workspace.DataDir,
             ControlAddress = new Uri($"http://127.0.0.1:{GetFreeTcpPort()}"),
             ControlToken = "run-token",
             StartupTimeout = TimeSpan.FromSeconds(5),

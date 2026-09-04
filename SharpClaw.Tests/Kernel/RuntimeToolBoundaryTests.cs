@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -46,35 +46,12 @@ public sealed class RuntimeToolBoundaryTests
             .SelectMany(path => File.ReadLines(path)
                 .Select((line, index) => (Path: path, Line: index + 1, Text: line)))
             .Where(entry => entry.Text.Contains("IToolHandler", StringComparison.Ordinal))
-            .Where(entry => !(
-                string.Equals(
-                    Path.GetFileName(entry.Path),
-                    "RuntimeModuleStorageContractProvider.cs",
-                    StringComparison.Ordinal)
-                && entry.Text.Contains(
-                    "where THandler : IToolHandler",
-                    StringComparison.Ordinal)))
-            .Where(entry => !(
-                string.Equals(
-                    Path.GetFileName(entry.Path),
-                    "RuntimeModuleContractManifest.cs",
-                    StringComparison.Ordinal)
-                && entry.Text.Contains(
-                    "IToolHandler handler",
-                    StringComparison.Ordinal)))
             .Select(entry => $"{entry.Path}:{entry.Line}")
             .ToArray();
 
         offenders.Should().BeEmpty(
             "Core UnifiedToolPipeline owns handler resolution and invocation");
 
-        File.ReadAllText(Path.Combine(
-                sourceRoot,
-                "SharpClaw.Runtime",
-                "BLL",
-                "Kernel",
-                "RuntimeModuleContractManifest.cs"))
-            .Should().Contain("Bound.AddTool(descriptor, handler, handlerId)");
     }
 
     [Test]
@@ -205,7 +182,7 @@ public sealed class RuntimeToolBoundaryTests
         ToolProvider provider,
         IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
     {
-        var moduleId = "tool-boundary-test";
+        var SourceId = "tool-boundary-test";
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -221,11 +198,11 @@ public sealed class RuntimeToolBoundaryTests
                 StringComparer.Ordinal);
         var options = new KernelGraphCompileOptions
         {
-            ActionModuleCapabilityGrants = new Dictionary<
+            ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
             {
-                [moduleId] = grants,
+                [SourceId] = grants,
             },
             SensitiveActionApprovals = RuntimeProviderActionManifest.Required
                 .Select(key =>
@@ -236,7 +213,7 @@ public sealed class RuntimeToolBoundaryTests
                         typeof(KernelActionEnvelope),
                         typeof(object));
                     return new KernelSensitiveActionApproval(
-                        moduleId,
+                        SourceId,
                         key,
                         descriptor.Version,
                         types.ActionType.AssemblyQualifiedName!,
@@ -249,10 +226,9 @@ public sealed class RuntimeToolBoundaryTests
                 .ToArray(),
         };
 
-        return new RuntimeKernelAdapter(
+        return RuntimeKernelAdapterTestFactory.Create(
             configuration,
-            new ServiceCollection().BuildServiceProvider(),
-            [new ToolModule(moduleId, probe, provider)],
+            [new ToolRegistration(SourceId, probe, provider)],
             workspace.Paths,
             new ToolProviderFactory(provider),
             options,
@@ -320,29 +296,29 @@ public sealed class RuntimeToolBoundaryTests
         }
     }
 
-    private sealed class ToolModule(
-        string moduleId,
+    private sealed class ToolRegistration(
+        string SourceId,
         ToolProbe probe,
         ToolProvider provider) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
-            new(moduleId, "Tool boundary test", "tool-boundary");
+            new(SourceId, "Tool boundary test", "tool-boundary");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection module)
         {
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton(provider);
-            module.Services.AddSingleton<ToolInterceptor>();
-            module.Services.AddSingleton<ToolHandler>();
-            module.Services.AddSingleton<IProviderPlugin>(provider);
-            module.Tools.Add<ToolHandler>(new ToolDescriptor(
+            module.AddSingleton(probe);
+            module.AddSingleton(provider);
+            module.AddSingleton<ToolInterceptor>();
+            module.AddSingleton<ToolHandler>();
+            module.AddSingleton<IProviderPlugin>(provider);
+            module.AddTool<ToolHandler>(new ToolDescriptor(
                 "tool-boundary",
                 "Runs the K08 boundary test tool.",
                 ToolSchemas.EmptyObject));
             foreach (var action in RuntimeToolActionManifest.Required.Concat(
                          RuntimeProviderActionManifest.Required))
             {
-                module.Hooks.For(action).Use<ToolInterceptor>(new HookOrdering(
+                module.OnAction(action).Use<ToolInterceptor>(new HookOrdering(
                     $"tool-boundary-{action.Value}",
                     HookPriority.Normal,
                     [],
@@ -353,7 +329,7 @@ public sealed class RuntimeToolBoundaryTests
         }
 
         public ValueTask StartAsync(
-            ModuleStartContext context,
+            ServiceStartContext context,
             CancellationToken cancellationToken) =>
             ValueTask.CompletedTask;
 

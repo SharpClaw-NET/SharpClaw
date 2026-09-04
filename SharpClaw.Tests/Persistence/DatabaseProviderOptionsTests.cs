@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.INF;
 using SharpClaw.Runtime.INF.Persistence;
-using SharpClaw.Runtime.INF.Persistence.Modules;
+using SharpClaw.Runtime.INF.Persistence.Registrations;
 
 namespace SharpClaw.Tests.Persistence;
 
@@ -138,12 +138,12 @@ public sealed class DatabaseProviderOptionsTests
 
         using var provider = services.BuildServiceProvider();
         var registeredOptions = provider.GetRequiredService<DatabaseProviderOptions>();
-        var moduleOptions = provider.GetRequiredService<ModuleDbContextOptions>();
+        var registrationOptions = provider.GetRequiredService<RegistrationDbContextOptions>();
 
         registeredOptions.Provider.Should().Be(StorageMode.SQLite);
         registeredOptions.SQLite.CommandTimeoutSeconds.Should().Be(23);
-        moduleOptions.StorageMode.Should().Be(StorageMode.SQLite);
-        moduleOptions.ConnectionString.Should().Be("Data Source=:memory:");
+        registrationOptions.StorageMode.Should().Be(StorageMode.SQLite);
+        registrationOptions.ConnectionString.Should().Be("Data Source=:memory:");
     }
 
     [TestCase(
@@ -179,7 +179,7 @@ public sealed class DatabaseProviderOptionsTests
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
 
         db.Database.ProviderName.Should().Be(expectedProvider);
-        provider.GetRequiredService<ModuleDbContextOptions>().StorageMode
+        provider.GetRequiredService<RegistrationDbContextOptions>().StorageMode
             .Should().Be(mode);
     }
 
@@ -211,7 +211,7 @@ public sealed class DatabaseProviderOptionsTests
             var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
 
             db.Database.ProviderName.Should().Contain("JSONColdStore");
-            provider.GetRequiredService<ModuleDbContextOptions>().StorageMode
+            provider.GetRequiredService<RegistrationDbContextOptions>().StorageMode
                 .Should().Be(StorageMode.JsonFile);
         }
         finally
@@ -222,13 +222,13 @@ public sealed class DatabaseProviderOptionsTests
     }
 
     [Test]
-    public void ModuleDbContextFactory_AppliesSharedSqliteCommandTimeout()
+    public void RegistrationDbContextFactory_AppliesSharedSqliteCommandTimeout()
     {
-        var registry = new RuntimeModuleDbContextRegistry();
-        registry.Register(new RuntimeModuleDbContextRegistration(
-            "test_module",
-            typeof(ConfiguredModuleDbContext),
-            [typeof(ConfiguredModuleEntity)]));
+        var registry = new RuntimeRegistrationDbContextRegistry();
+        registry.Register(new RuntimeRegistrationDbContextRegistration(
+            "test_registration",
+            typeof(ConfiguredRegistrationDbContext),
+            [typeof(ConfiguredRegistrationEntity)]));
         var options = new DatabaseProviderOptions
         {
             Provider = StorageMode.SQLite,
@@ -238,9 +238,9 @@ public sealed class DatabaseProviderOptionsTests
                 CommandTimeoutSeconds = 17,
             },
         };
-        var factory = new ModuleDbContextFactory(
+        var factory = new RegistrationDbContextFactory(
             registry,
-            new ModuleDbContextOptions
+            new RegistrationDbContextOptions
             {
                 StorageMode = StorageMode.SQLite,
                 ConnectionString = "Data Source=:memory:",
@@ -248,7 +248,7 @@ public sealed class DatabaseProviderOptionsTests
             options,
             LoggerFactory.Create(_ => { }));
 
-        using var db = (ConfiguredModuleDbContext)factory.CreateDbContext(typeof(ConfiguredModuleDbContext));
+        using var db = (ConfiguredRegistrationDbContext)factory.CreateDbContext(typeof(ConfiguredRegistrationDbContext));
 
         db.Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.Sqlite");
         db.Database.GetCommandTimeout().Should().Be(17);
@@ -259,13 +259,13 @@ public sealed class DatabaseProviderOptionsTests
             .AddInMemoryCollection(values.Select(value => new KeyValuePair<string, string?>(value.Key, value.Value)))
             .Build();
 
-    private sealed class ConfiguredModuleDbContext(DbContextOptions<ConfiguredModuleDbContext> options)
+    private sealed class ConfiguredRegistrationDbContext(DbContextOptions<ConfiguredRegistrationDbContext> options)
         : DbContext(options)
     {
-        public DbSet<ConfiguredModuleEntity> Entities => Set<ConfiguredModuleEntity>();
+        public DbSet<ConfiguredRegistrationEntity> Entities => Set<ConfiguredRegistrationEntity>();
     }
 
-    private sealed class ConfiguredModuleEntity
+    private sealed class ConfiguredRegistrationEntity
     {
         public Guid Id { get; set; }
         public string Name { get; set; } = "";

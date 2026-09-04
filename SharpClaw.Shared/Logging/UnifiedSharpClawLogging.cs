@@ -257,26 +257,26 @@ public sealed class SharpClawOwnedStoreRetention : IAsyncDisposable
     }
 }
 
-public enum SharpClawModuleHostKind
+public enum SharpClawRegistrationHostKind
 {
     RuntimeInProcess,
     RuntimeSidecar,
     Gateway,
 }
 
-public sealed record SharpClawModuleLogContext(
-    string ModuleId,
-    string? ModuleVersion,
-    SharpClawModuleHostKind HostKind,
+public sealed record SharpClawRegistrationLogContext(
+    string SourceId,
+    string? RegistrationVersion,
+    SharpClawRegistrationHostKind HostKind,
     Guid BootId);
 
 public static class SharpClawLogOwnership
 {
-    private static readonly AsyncLocal<SharpClawModuleLogContext?> CurrentContext = new();
+    private static readonly AsyncLocal<SharpClawRegistrationLogContext?> CurrentContext = new();
 
-    public static SharpClawModuleLogContext? Current => CurrentContext.Value;
+    public static SharpClawRegistrationLogContext? Current => CurrentContext.Value;
 
-    public static IDisposable Push(SharpClawModuleLogContext context)
+    public static IDisposable Push(SharpClawRegistrationLogContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         var previous = CurrentContext.Value;
@@ -284,30 +284,30 @@ public static class SharpClawLogOwnership
         return new Scope(previous);
     }
 
-    private sealed class Scope(SharpClawModuleLogContext? previous) : IDisposable
+    private sealed class Scope(SharpClawRegistrationLogContext? previous) : IDisposable
     {
         public void Dispose() => CurrentContext.Value = previous;
     }
 }
 
-public sealed class SharpClawModuleLoggerFactory(
+public sealed class SharpClawRegistrationLoggerFactory(
     ILoggerFactory hostFactory,
-    SharpClawModuleLogContext context) : ILoggerFactory
+    SharpClawRegistrationLogContext context) : ILoggerFactory
 {
     public MsLogger CreateLogger(string categoryName) =>
-        new ModuleLogger(hostFactory.CreateLogger(categoryName), context);
+        new RegistrationLogger(hostFactory.CreateLogger(categoryName), context);
 
     public void AddProvider(ILoggerProvider provider) =>
         throw new InvalidOperationException(
-            "Module logger factories cannot add providers to the host logging pipeline.");
+            "Registration logger factories cannot add providers to the host logging pipeline.");
 
     public void Dispose()
     {
     }
 
-    private sealed class ModuleLogger(
+    private sealed class RegistrationLogger(
         MsLogger inner,
-        SharpClawModuleLogContext context) : MsLogger
+        SharpClawRegistrationLogContext context) : MsLogger
     {
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull =>
@@ -507,10 +507,10 @@ internal static class SharpClawLogNormalizer
 {
     private static readonly string[] TrustedPropertyNames =
     [
-        "SharpClaw.ModuleId",
-        "SharpClaw.ModuleVersion",
-        "SharpClaw.ModuleHostKind",
-        "SharpClaw.ModuleBootId",
+        "SharpClaw.SourceId",
+        "SharpClaw.RegistrationVersion",
+        "SharpClaw.RegistrationHostKind",
+        "SharpClaw.RegistrationBootId",
     ];
 
     public static DurableRecordWrite Normalize(
@@ -568,20 +568,20 @@ internal static class SharpClawLogNormalizer
 
         if (ownership is not null)
         {
-            AddProperty(properties, "SharpClaw.ModuleId", ownership.ModuleId, trusted: true);
+            AddProperty(properties, "SharpClaw.SourceId", ownership.SourceId, trusted: true);
             AddProperty(
                 properties,
-                "SharpClaw.ModuleVersion",
-                ownership.ModuleVersion ?? "unknown",
+                "SharpClaw.RegistrationVersion",
+                ownership.RegistrationVersion ?? "unknown",
                 trusted: true);
             AddProperty(
                 properties,
-                "SharpClaw.ModuleHostKind",
+                "SharpClaw.RegistrationHostKind",
                 ownership.HostKind.ToString(),
                 trusted: true);
             AddProperty(
                 properties,
-                "SharpClaw.ModuleBootId",
+                "SharpClaw.RegistrationBootId",
                 ownership.BootId.ToString("D"),
                 trusted: true);
         }
@@ -955,7 +955,7 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
             var ownership = SharpClawLogOwnership.Current;
             var stream = ownership is null
                 ? _processStream
-                : DurableStreamKey.Module(ownership.ModuleId, ownership.BootId);
+                : DurableStreamKey.Registration(ownership.SourceId, ownership.BootId);
             var item = new DispatchItem(
                 stream,
                 record,

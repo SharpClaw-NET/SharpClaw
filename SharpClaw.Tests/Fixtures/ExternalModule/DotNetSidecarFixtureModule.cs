@@ -1,24 +1,25 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
+using SharpClaw.ModuleSDK;
 
-namespace SharpClaw.TestFixtures.ExternalModule;
+namespace SharpClaw.TestFixtures.ExternalRegistration;
 
-public sealed class DotNetSidecarFixtureModule : ISharpClawModule
+public sealed class DotNetSidecarFixtureRegistration : ISharpClawModule
 {
-    public const string ModuleId = "synthetic_dotnet_sidecar";
+    public const string SourceId = "synthetic_dotnet_sidecar";
     public const string ToolPrefixValue = "sds";
     public const string JobTool = "dotnet_sidecar_echo";
     public const string InlineTool = "dotnet_sidecar_inline";
 
-    public ModuleIdentity Identity { get; } = new(ModuleId, ".NET sidecar fixture", ToolPrefixValue);
+    public ModuleIdentity Identity { get; } = new(SourceId, ".NET sidecar fixture", ToolPrefixValue);
 
-    public void Configure(ISharpClawModuleBuilder module)
+    public void ConfigureServices(IServiceCollection services)
     {
-        module.Services.AddSingleton<DotNetSidecarToolHandler>();
-        module.Tools.Add<DotNetSidecarToolHandler>(
+        services.AddSingleton<DotNetSidecarToolHandler>();
+        services.AddTool<DotNetSidecarToolHandler>(
             new ToolDescriptor(JobTool, ".NET sidecar echo tool.", ToolSchemas.EmptyObject));
-        module.Tools.Add<DotNetSidecarToolHandler>(
+        services.AddTool<DotNetSidecarToolHandler>(
             new ToolDescriptor(InlineTool, ".NET sidecar inline tool.", ToolSchemas.EmptyObject));
     }
 }

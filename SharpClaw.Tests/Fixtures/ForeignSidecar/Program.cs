@@ -14,18 +14,18 @@ if (mode == "early-exit")
     return 23;
 }
 
-var moduleDir = ReadEnv("SHARPCLAW_MODULE_DIR");
+var registrationDir = ReadEnv("SHARPCLAW_MODULE_DIR");
 var dataDir = ReadEnv("SHARPCLAW_MODULE_DATA_DIR");
 var controlAddress = ReadEnv("SHARPCLAW_CONTROL_ADDRESS");
 var token = ReadEnv("SHARPCLAW_CONTROL_TOKEN");
-var moduleId = ReadEnv("SHARPCLAW_MODULE_ID");
+var SourceId = ReadEnv("SHARPCLAW_MODULE_ID");
 var runtime = ReadEnv("SHARPCLAW_MODULE_RUNTIME");
 var hostCapabilitiesAddress = Environment.GetEnvironmentVariable("SHARPCLAW_HOST_CAPABILITIES_ADDRESS");
 var hostCapabilitiesToken = Environment.GetEnvironmentVariable("SHARPCLAW_HOST_CAPABILITIES_TOKEN");
 var toolPrefix = Environment.GetEnvironmentVariable("SHARPCLAW_TEST_TOOL_PREFIX") ?? "sdm";
 
 Console.WriteLine(
-    $"ENV|moduleDir={moduleDir}|dataDir={dataDir}|control={controlAddress}|token={token}|moduleId={moduleId}|runtime={runtime}|hostCapabilities={hostCapabilitiesAddress}|hostCapabilitiesToken={hostCapabilitiesToken}");
+    $"ENV|registrationDir={registrationDir}|dataDir={dataDir}|control={controlAddress}|token={token}|SourceId={SourceId}|runtime={runtime}|hostCapabilities={hostCapabilitiesAddress}|hostCapabilitiesToken={hostCapabilitiesToken}");
 Console.Out.Flush();
 
 if (mode == "never-ready")
@@ -82,7 +82,7 @@ async Task HandleAsync(TcpClient client)
                 await WriteJsonAsync(stream, new
                 {
                     protocolVersion = 1,
-                    moduleId,
+                    SourceId,
                     toolPrefix,
                     runtime,
                     runtimeVersion = "test-runtime",
@@ -93,7 +93,7 @@ async Task HandleAsync(TcpClient client)
                         "inlineTools",
                         "streamingTools",
                         "protocolContracts",
-                        "moduleContributionDescriptors",
+                        "registrationContributionDescriptors",
                         "frontendContributions",
                         "lifecycleHooks",
                         "providerPlugins",
@@ -109,31 +109,31 @@ async Task HandleAsync(TcpClient client)
                         new
                         {
                             method = "GET",
-                            routePattern = "/modules/sample/ping",
+                            routePattern = "/contributions/sample/ping",
                             responseMode = "json",
                         },
                         new
                         {
                             method = "POST",
-                            routePattern = "/modules/sample/echo",
+                            routePattern = "/contributions/sample/echo",
                             responseMode = "json",
                         },
                         new
                         {
                             method = "GET",
-                            routePattern = "/modules/sample/static/hello.txt",
+                            routePattern = "/contributions/sample/static/hello.txt",
                             responseMode = "static",
                         },
                         new
                         {
                             method = "GET",
-                            routePattern = "/modules/sample/stream",
+                            routePattern = "/contributions/sample/stream",
                             responseMode = "stream",
                         },
                         new
                         {
                             method = "GET",
-                            routePattern = "/modules/sample/ws",
+                            routePattern = "/contributions/sample/ws",
                             responseMode = "websocket",
                         },
                     },
@@ -244,15 +244,15 @@ async Task HandleAsync(TcpClient client)
                         new
                         {
                             id = "sample.settings",
-                            moduleId,
+                            SourceId,
                             point = "SettingsPage",
                             builderKey = "sample-list",
                             label = "Sample Foreign",
-                            requiredModuleId = moduleId,
+                            RequiredOwnerId = SourceId,
                             order = 10,
                             list = new
                             {
-                                listInternalApiPath = "/modules/sample/ping",
+                                listInternalApiPath = "/contributions/sample/ping",
                                 emptyText = "No sample resources.",
                                 columns = new[]
                                 {
@@ -269,7 +269,7 @@ async Task HandleAsync(TcpClient client)
                     {
                         new
                         {
-                            moduleId,
+                            SourceId,
                             storageName = "sample_records",
                             operations = new[]
                             {
@@ -320,7 +320,7 @@ async Task HandleAsync(TcpClient client)
                         {
                             providerKey = "sample-foreign-provider",
                             displayName = "Sample Foreign Provider",
-                            ownerModuleId = moduleId,
+                            OwnerId = SourceId,
                             requiresEndpoint = true,
                             supportsAutomaticEndpointDiscovery = true,
                             isSeedable = true,
@@ -615,7 +615,7 @@ async Task HandleAsync(TcpClient client)
                 });
                 break;
 
-            case "/modules/sample/ping":
+            case "/contributions/sample/ping":
                 await WriteJsonAsync(stream, new
                 {
                     ok = true,
@@ -625,7 +625,7 @@ async Task HandleAsync(TcpClient client)
                 }, ("X-Sidecar", "yes"));
                 break;
 
-            case "/modules/sample/echo":
+            case "/contributions/sample/echo":
                 await WriteJsonAsync(stream, new
                 {
                     method = request.Method,
@@ -636,7 +636,7 @@ async Task HandleAsync(TcpClient client)
                 });
                 break;
 
-            case "/modules/sample/static/hello.txt":
+            case "/contributions/sample/static/hello.txt":
                 await WriteTextAsync(
                     stream,
                     200,
@@ -645,7 +645,7 @@ async Task HandleAsync(TcpClient client)
                     "text/plain");
                 break;
 
-            case "/modules/sample/stream":
+            case "/contributions/sample/stream":
                 await WriteNdjsonAsync(
                     stream,
                     new { delta = "first:" },
@@ -653,7 +653,7 @@ async Task HandleAsync(TcpClient client)
                     new { isFinal = true });
                 break;
 
-            case "/modules/sample/ws":
+            case "/contributions/sample/ws":
                 await HandleWebSocketEchoAsync(stream, request);
                 break;
 

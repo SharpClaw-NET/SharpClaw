@@ -1,6 +1,6 @@
 # SharpClaw Module: Module Development Kit
 
-> **Module ID:** `sharpclaw_module_dev`
+> **Module ID:** `sharpclaw_registration_dev`
 > **Display Name:** Module Development Kit
 > **Version:** 1.0.0
 > **Tool Prefix:** `mdk`
@@ -14,7 +14,7 @@
 
 | Setting | Value |
 |---------|-------|
-| **.env key** | `Modules:sharpclaw_module_dev` |
+| **.env key** | `Modules:sharpclaw_registration_dev` |
 | **Default** | ❌ **Disabled** (not listed in default `.env`) |
 | **Prerequisites** | none for core MDK tools |
 | **Platform** | All |
@@ -36,8 +36,8 @@ fallbacks.
 **Runtime toggle** (no restart required):
 
 ```
-module disable sharpclaw_module_dev
-module enable sharpclaw_module_dev
+module disable sharpclaw_registration_dev
+module enable sharpclaw_registration_dev
 ```
 
 See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
@@ -93,14 +93,14 @@ when sent to the model — for example, `scaffold_module` becomes
 ### mdk_scaffold_module
 
 Generate a complete module project from a specification. Creates
-`.csproj`, module class, `module.json`, and optional tool stubs in
-`external-modules/{module_id}/`.
+`.csproj`, module class, `package.json`, and optional tool stubs in
+`external-modules/{registration_id}/`.
 
 **Parameters:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `module_id` | string | yes | Module ID (`^[a-z][a-z0-9_]{0,39}$`) |
+| `registration_id` | string | yes | Module ID (`^[a-z][a-z0-9_]{0,39}$`) |
 | `display_name` | string | yes | Human-readable name |
 | `tool_prefix` | string | yes | Tool prefix (`^[a-z][a-z0-9]{0,19}$`) |
 | `description` | string | no | Module description |
@@ -116,7 +116,7 @@ Each tool stub object:
 
 **Permission:** Global — requires `CanScaffoldModules` flag.
 
-**Returns:** JSON with `moduleDir` path and list of created files.
+**Returns:** JSON with `registrationDir` path and list of created files.
 
 ---
 
@@ -130,7 +130,7 @@ extensions are permitted.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `module_id` | string | yes | Target module ID |
+| `registration_id` | string | yes | Target module ID |
 | `relative_path` | string | yes | Path relative to module root (e.g. `Services/MyService.cs`) |
 | `content` | string | yes | Full file content |
 
@@ -149,7 +149,7 @@ truncation.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `module_id` | string | yes | Target module ID |
+| `registration_id` | string | yes | Target module ID |
 | `relative_path` | string | yes | Path relative to module root |
 | `max_lines` | integer | no | Truncation limit (default: 500) |
 
@@ -167,7 +167,7 @@ List the file tree of a module workspace, with optional glob filtering.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `module_id` | string | yes | Target module ID |
+| `registration_id` | string | yes | Target module ID |
 | `include_pattern` | string | no | Glob filter (default: `**/*`) |
 
 **Permission:** Global — requires `CanWriteModuleFiles` flag.
@@ -185,7 +185,7 @@ diagnostics (errors, warnings) and the output DLL path on success.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `module_id` | string | yes | Module to build |
+| `registration_id` | string | yes | Module to build |
 | `configuration` | string | no | `Debug` (default) or `Release` |
 
 **Permission:** Global — requires `CanBuildModules` flag.
@@ -207,11 +207,11 @@ automatically reloads it (drain → unload → reload).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `module_id` | string | yes | Module ID |
+| `registration_id` | string | yes | Module ID |
 
 **Permission:** Global — requires `CanLoadModules` flag.
 
-**Returns:** JSON load result from `ModuleService`.
+**Returns:** JSON load result from `RegistrationService`.
 
 ---
 
@@ -225,11 +225,11 @@ is unloaded.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `module_id` | string | yes | Module ID |
+| `registration_id` | string | yes | Module ID |
 
 **Permission:** Global — requires `CanLoadModules` flag.
 
-**Returns:** JSON with `moduleId` and `unloaded: true`.
+**Returns:** JSON with `SourceId` and `unloaded: true`.
 
 ---
 
@@ -320,7 +320,7 @@ in-context by the chat pipeline.
 ### mdk_describe_module_system
 
 Return a concise reference card of the SharpClaw module contract:
-`ISharpClawModule` interface, tool definitions, permissions, contract
+`IKernelRegistrationSource` interface, tool definitions, permissions, contract
 system, manifest format, and hot-loading mechanics.
 
 **Parameters:** none
@@ -384,7 +384,7 @@ The MDK does not export any contracts.
 
 ### Workspace sandbox
 
-- All file operations are scoped to `external-modules/{module_id}/`.
+- All file operations are scoped to `external-modules/{registration_id}/`.
 - Module IDs are validated against `^[a-z][a-z0-9_]{0,39}$`.
 - Relative paths are validated: no traversal (`..`), no absolute paths,
   no null bytes, no reserved Windows device names (CON, PRN, NUL, etc.).
@@ -414,11 +414,11 @@ meaning they can be cleanly unloaded without restarting the host.
 
 ```json
 {
-  "id": "sharpclaw_module_dev",
+  "id": "sharpclaw_registration_dev",
   "displayName": "Module Development Kit",
   "version": "1.0.0",
   "toolPrefix": "mdk",
-  "entryAssembly": "SharpClaw.Modules.ModuleDev",
+  "entryAssembly": "SharpClaw.Modules.RegistrationDev",
   "minHostVersion": "1.0.0",
   "description": "Autonomous module authoring, building, hot-loading, and development introspection tools.",
   "platforms": null,
@@ -426,7 +426,7 @@ meaning they can be cleanly unloaded without restarting the host.
   "requires": [
     {
       "contractName": "window_management",
-      "serviceType": "SharpClaw.Contracts.Modules.Contracts.IWindowManager",
+      "serviceType": "SharpClaw.Contracts.Kernel.Contracts.IWindowManager",
       "optional": true
     }
   ]

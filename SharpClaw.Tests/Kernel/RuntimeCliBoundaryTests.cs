@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -43,9 +43,8 @@ public sealed class RuntimeCliBoundaryTests
     public async Task Local_cli_help_runs_parse_select_execute_output_and_complete_once()
     {
         using var workspace = new TemporaryWorkspace();
-        using var hostServices = new ServiceCollection().BuildServiceProvider();
         var probe = new CliProbe();
-        var adapter = CreateAdapter(workspace, hostServices, probe);
+        var adapter = CreateAdapter(workspace, probe);
 
         await adapter.StartAsync("k04-test");
         try
@@ -56,7 +55,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "help"],
                 adapter,
                 adapter.Kernel,
-                PackagedModuleApplicationRegistry.Empty,
+                PackagedApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None);
@@ -77,9 +76,8 @@ public sealed class RuntimeCliBoundaryTests
     public async Task Local_cli_unknown_command_runs_failure_output_and_completion()
     {
         using var workspace = new TemporaryWorkspace();
-        using var hostServices = new ServiceCollection().BuildServiceProvider();
         var probe = new CliProbe();
-        var adapter = CreateAdapter(workspace, hostServices, probe);
+        var adapter = CreateAdapter(workspace, probe);
 
         await adapter.StartAsync("k04-test");
         try
@@ -90,7 +88,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "unknown"],
                 adapter,
                 adapter.Kernel,
-                PackagedModuleApplicationRegistry.Empty,
+                PackagedApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None);
@@ -117,9 +115,8 @@ public sealed class RuntimeCliBoundaryTests
     public async Task Local_cli_parse_failure_runs_failure_output_without_exposing_exception_text()
     {
         using var workspace = new TemporaryWorkspace();
-        using var hostServices = new ServiceCollection().BuildServiceProvider();
         var probe = new CliProbe();
-        var adapter = CreateAdapter(workspace, hostServices, probe);
+        var adapter = CreateAdapter(workspace, probe);
 
         await adapter.StartAsync("k04-test");
         try
@@ -130,7 +127,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli"],
                 adapter,
                 adapter.Kernel,
-                PackagedModuleApplicationRegistry.Empty,
+                PackagedApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None);
@@ -153,9 +150,8 @@ public sealed class RuntimeCliBoundaryTests
     public async Task Local_cli_cancellation_runs_cancel_and_output_with_the_same_context()
     {
         using var workspace = new TemporaryWorkspace();
-        using var hostServices = new ServiceCollection().BuildServiceProvider();
         var probe = new CliProbe();
-        var adapter = CreateAdapter(workspace, hostServices, probe);
+        var adapter = CreateAdapter(workspace, probe);
 
         await adapter.StartAsync("k04-test");
         try
@@ -169,7 +165,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "help"],
                 adapter,
                 adapter.Kernel,
-                PackagedModuleApplicationRegistry.Empty,
+                PackagedApplicationRegistry.Empty,
                 output,
                 error,
                 cancellation.Token);
@@ -191,12 +187,11 @@ public sealed class RuntimeCliBoundaryTests
     public async Task Local_cli_typed_action_cancellation_runs_cancel_and_output_without_failure()
     {
         using var workspace = new TemporaryWorkspace();
-        using var hostServices = new ServiceCollection().BuildServiceProvider();
         var probe = new CliProbe
         {
             CancelAction = RuntimeCliActionCatalog.Execute.Value,
         };
-        var adapter = CreateAdapter(workspace, hostServices, probe);
+        var adapter = CreateAdapter(workspace, probe);
 
         await adapter.StartAsync("k04-test");
         try
@@ -207,7 +202,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "help"],
                 adapter,
                 adapter.Kernel,
-                PackagedModuleApplicationRegistry.Empty,
+                PackagedApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None);
@@ -234,14 +229,13 @@ public sealed class RuntimeCliBoundaryTests
     public async Task Local_cli_action_cancellation_reaches_in_flight_chat_without_caller_cancellation()
     {
         using var workspace = new TemporaryWorkspace();
-        using var hostServices = new ServiceCollection().BuildServiceProvider();
         using var actionCancellation = new CancellationTokenSource();
         var probe = new CliProbe
         {
             BlockChatUntilCancellation = true,
             ExecuteCancellationSource = actionCancellation,
         };
-        var adapter = CreateAdapter(workspace, hostServices, probe);
+        var adapter = CreateAdapter(workspace, probe);
 
         await adapter.StartAsync("k04-test");
         try
@@ -252,7 +246,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "chat", "cancel me"],
                 adapter,
                 adapter.Kernel,
-                PackagedModuleApplicationRegistry.Empty,
+                PackagedApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None).AsTask();
@@ -285,9 +279,8 @@ public sealed class RuntimeCliBoundaryTests
     public async Task Concurrent_cli_sessions_use_distinct_root_contexts_without_a_second_dispatcher()
     {
         using var workspace = new TemporaryWorkspace();
-        using var hostServices = new ServiceCollection().BuildServiceProvider();
         var probe = new CliProbe();
-        var adapter = CreateAdapter(workspace, hostServices, probe);
+        var adapter = CreateAdapter(workspace, probe);
 
         await adapter.StartAsync("k04-test");
         try
@@ -300,7 +293,7 @@ public sealed class RuntimeCliBoundaryTests
                     ["--cli", "help"],
                     runtimeKernel,
                     runtimeKernel.Kernel,
-                    PackagedModuleApplicationRegistry.Empty,
+                    PackagedApplicationRegistry.Empty,
                     output,
                     error,
                     CancellationToken.None);
@@ -425,16 +418,15 @@ public sealed class RuntimeCliBoundaryTests
 
     private static RuntimeKernelAdapter CreateAdapter(
         TemporaryWorkspace workspace,
-        IServiceProvider hostServices,
         CliProbe probe)
     {
         var provider = new CliProvider(probe);
-        var moduleId = "k04-cli-test";
+        var SourceId = "k04-cli-test";
         var grants = RuntimeCliActionCatalog.All.ToDictionary(
             action => action.Value,
             action => KernelActionCatalog.DescriptorFor(action).Capabilities,
             StringComparer.Ordinal);
-        return new RuntimeKernelAdapter(
+        return RuntimeKernelAdapterTestFactory.Create(
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
@@ -442,17 +434,16 @@ public sealed class RuntimeCliBoundaryTests
                     ["Provider:Model"] = "k04-model",
                 })
             .Build(),
-            hostServices,
-            [new CliModule(provider, probe)],
+            [new CliRegistration(provider, probe)],
             workspace.CreateInstancePaths(),
             new CliProviderFactory(provider),
             new KernelGraphCompileOptions
             {
-                ActionModuleCapabilityGrants = new Dictionary<
+                ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
                     IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
                 {
-                    [moduleId] = grants,
+                    [SourceId] = grants,
                 },
             });
     }
@@ -585,21 +576,21 @@ public sealed class RuntimeCliBoundaryTests
         }
     }
 
-    private sealed class CliModule(
+    private sealed class CliRegistration(
         IProviderPlugin provider,
         CliProbe probe) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
             new("k04-cli-test", "K04 CLI test", "k04");
 
-        public void Configure(ISharpClawModuleBuilder module)
+        public void ConfigureServices(IServiceCollection module)
         {
-            module.Services.AddSingleton<IProviderPlugin>(provider);
-            module.Services.AddSingleton(probe);
-            module.Services.AddSingleton<CliInterceptor>();
+            module.AddSingleton<IProviderPlugin>(provider);
+            module.AddSingleton(probe);
+            module.AddSingleton<CliInterceptor>();
             foreach (var action in RuntimeCliActionCatalog.All)
             {
-                module.Hooks.For(action).Use<CliInterceptor>(new HookOrdering(
+                module.OnAction(action).Use<CliInterceptor>(new HookOrdering(
                     $"k04-cli-{action.Value}",
                     HookPriority.Normal,
                     [],
@@ -609,7 +600,7 @@ public sealed class RuntimeCliBoundaryTests
             }
         }
 
-        public ValueTask StartAsync(ModuleStartContext context, CancellationToken cancellationToken) =>
+        public ValueTask StartAsync(ServiceStartContext context, CancellationToken cancellationToken) =>
             ValueTask.CompletedTask;
 
         public ValueTask StopAsync(CancellationToken cancellationToken) =>

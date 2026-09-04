@@ -4,7 +4,7 @@ using System.Text.Json;
 using Microsoft.UI;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Services;
 using Windows.ApplicationModel.DataTransfer;
 

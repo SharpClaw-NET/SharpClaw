@@ -10,12 +10,12 @@ using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.BLL.Services;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Tests.Kernel;
 using SharpClaw.Runtime.INF.Persistence.Modules;
-using SharpClaw.TestFixtures.ExternalModule;
+using SharpClaw.TestFixtures.ExternalRegistration;
 using SharpClaw.Tests.TestHarness;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Core.Modules;
@@ -32,11 +32,11 @@ public sealed class BundledDotNetSidecarDefaultTests
     {
         var loader = ModuleLoader.DiscoverBundled();
 
-        loader.IsManifestOnlyBundledModule(TestHarnessConstants.OutOfProcessModuleId).Should().BeTrue();
-        loader.GetBundledModule(TestHarnessConstants.OutOfProcessModuleId)
+        loader.IsManifestOnlyBundledRegistration(TestHarnessConstants.OutOfProcessRegistrationId).Should().BeTrue();
+        loader.GetBundledRegistration(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
             .NotBeNull();
-        loader.IsManifestOnlyBundledModule("sharpclaw_agent_orchestration")
+        loader.IsManifestOnlyBundledRegistration("sharpclaw_agent_orchestration")
             .Should()
             .BeTrue("agent orchestration no longer has sidecar readiness blockers");
     }
@@ -47,14 +47,14 @@ public sealed class BundledDotNetSidecarDefaultTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Modules:ForceInProcessDotNetSidecars"] = "true",
+                ["Packages:ForceInProcessDotNetSidecars"] = "true",
             })
             .Build();
 
         var loader = ModuleLoader.DiscoverBundled(configuration);
 
-        loader.IsManifestOnlyBundledModule(TestHarnessConstants.OutOfProcessModuleId).Should().BeTrue();
-        loader.GetBundledModule(TestHarnessConstants.OutOfProcessModuleId)
+        loader.IsManifestOnlyBundledRegistration(TestHarnessConstants.OutOfProcessRegistrationId).Should().BeTrue();
+        loader.GetBundledRegistration(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
             .NotBeNull();
     }
@@ -65,14 +65,14 @@ public sealed class BundledDotNetSidecarDefaultTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [DotNetModuleHostingModeOptions.ConfigKey] = "in-process",
+                [DotNetRegistrationHostingModeOptions.ConfigKey] = "in-process",
             })
             .Build();
 
         var loader = ModuleLoader.DiscoverBundled(configuration);
 
-        loader.IsManifestOnlyBundledModule(TestHarnessConstants.OutOfProcessModuleId).Should().BeTrue();
-        loader.GetBundledModule(TestHarnessConstants.OutOfProcessModuleId)
+        loader.IsManifestOnlyBundledRegistration(TestHarnessConstants.OutOfProcessRegistrationId).Should().BeTrue();
+        loader.GetBundledRegistration(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
             .NotBeNull(
                 "discovery remains manifest-only; enabling the module chooses the runtime host");
@@ -82,21 +82,21 @@ public sealed class BundledDotNetSidecarDefaultTests
     public async Task ManifestOnlyBundledSidecarReportsRuntimeDetailsAfterEnable()
     {
         var loader = ModuleLoader.DiscoverBundled();
-        loader.IsManifestOnlyBundledModule(TestHarnessConstants.OutOfProcessModuleId).Should().BeTrue();
-        await using var harness = ModuleServiceHarness.Create(moduleLoader: loader);
+        loader.IsManifestOnlyBundledRegistration(TestHarnessConstants.OutOfProcessRegistrationId).Should().BeTrue();
+        await using var harness = RegistrationServiceHarness.Create(registrationLoader: loader);
 
-        var response = await harness.ModuleService.EnableAsync(
-            TestHarnessConstants.OutOfProcessModuleId,
+        var response = await harness.RegistrationService.EnableAsync(
+            TestHarnessConstants.OutOfProcessRegistrationId,
             harness.RootServices,
             CancellationToken.None);
 
         response.Enabled.Should().BeTrue();
-        harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessModuleId)
+        harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
-            .BeAssignableTo<IForeignModuleRuntimeHost>();
+            .BeAssignableTo<IForeignRegistrationRuntimeHost>();
 
-        var detail = await harness.ModuleService.GetDetailAsync(
-            TestHarnessConstants.OutOfProcessModuleId,
+        var detail = await harness.RegistrationService.GetDetailAsync(
+            TestHarnessConstants.OutOfProcessRegistrationId,
             CancellationToken.None);
 
         detail.Should().NotBeNull();
@@ -105,23 +105,23 @@ public sealed class BundledDotNetSidecarDefaultTests
     }
 
     [Test]
-    public async Task BundledModuleWithSidecarHostModeRegistersThroughForeignRuntimeHost()
+    public async Task BundledRegistrationWithSidecarHostModeRegistersThroughForeignRuntimeHost()
     {
-        await using var harness = ModuleServiceHarness.Create();
+        await using var harness = RegistrationServiceHarness.Create();
 
-        var response = await harness.ModuleService.EnableAsync(
-            TestHarnessConstants.OutOfProcessModuleId,
+        var response = await harness.RegistrationService.EnableAsync(
+            TestHarnessConstants.OutOfProcessRegistrationId,
             harness.RootServices,
             CancellationToken.None);
 
         response.Enabled.Should().BeTrue();
-        var runtimeHost = harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessModuleId);
-        runtimeHost.Should().BeAssignableTo<IForeignModuleRuntimeHost>();
-        harness.Registry.IsExternal(TestHarnessConstants.OutOfProcessModuleId)
+        var runtimeHost = harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessRegistrationId);
+        runtimeHost.Should().BeAssignableTo<IForeignRegistrationRuntimeHost>();
+        harness.Registry.IsExternal(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
             .BeFalse("bundled sidecars have runtime hosts without becoming user-loaded external modules");
 
-        var module = harness.Registry.GetModule(TestHarnessConstants.OutOfProcessModuleId);
+        var module = harness.Registry.GetRegistration(TestHarnessConstants.OutOfProcessRegistrationId);
         module.Should().NotBeNull();
         module.Should().NotBeNull();
 
@@ -140,29 +140,29 @@ public sealed class BundledDotNetSidecarDefaultTests
 
         result.Should().Be("default sidecar");
 
-        await harness.ModuleService.DisableAsync(TestHarnessConstants.OutOfProcessModuleId, CancellationToken.None);
-        harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessModuleId).Should().BeNull();
-        harness.Registry.GetModule(TestHarnessConstants.OutOfProcessModuleId).Should().BeNull();
+        await harness.RegistrationService.DisableAsync(TestHarnessConstants.OutOfProcessRegistrationId, CancellationToken.None);
+        harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessRegistrationId).Should().BeNull();
+        harness.Registry.GetRegistration(TestHarnessConstants.OutOfProcessRegistrationId).Should().BeNull();
     }
 
     [Test]
-    public async Task SidecarOnlyModeKeepsReadinessCleanBundledModulesOutOfProcess()
+    public async Task SidecarOnlyModeKeepsReadinessCleanBundledRegistrationsOutOfProcess()
     {
-        await using var harness = ModuleServiceHarness.Create(new Dictionary<string, string?>
+        await using var harness = RegistrationServiceHarness.Create(new Dictionary<string, string?>
         {
-            [DotNetModuleHostingModeOptions.ConfigKey] = "sidecar-only",
+            [DotNetRegistrationHostingModeOptions.ConfigKey] = "sidecar-only",
         });
 
-        var response = await harness.ModuleService.EnableAsync(
-            TestHarnessConstants.OutOfProcessModuleId,
+        var response = await harness.RegistrationService.EnableAsync(
+            TestHarnessConstants.OutOfProcessRegistrationId,
             harness.RootServices,
             CancellationToken.None);
 
         response.Enabled.Should().BeTrue();
-        harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessModuleId)
+        harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
-            .BeAssignableTo<IForeignModuleRuntimeHost>();
-        harness.Registry.GetModule(TestHarnessConstants.OutOfProcessModuleId)
+            .BeAssignableTo<IForeignRegistrationRuntimeHost>();
+        harness.Registry.GetRegistration(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
             .NotBeNull();
     }
@@ -172,28 +172,28 @@ public sealed class BundledDotNetSidecarDefaultTests
     {
         var settings = new Dictionary<string, string?>
         {
-            [DotNetModuleHostingModeOptions.ConfigKey] = "in-process",
+            [DotNetRegistrationHostingModeOptions.ConfigKey] = "in-process",
         };
         var configuration = BuildConfiguration(settings);
-        await using var harness = ModuleServiceHarness.Create(
+        await using var harness = RegistrationServiceHarness.Create(
             settings,
-            moduleLoader: ModuleLoader.DiscoverBundled(configuration));
+            registrationLoader: ModuleLoader.DiscoverBundled(configuration));
 
-        var response = await harness.ModuleService.EnableAsync(
-            TestHarnessConstants.OutOfProcessModuleId,
+        var response = await harness.RegistrationService.EnableAsync(
+            TestHarnessConstants.OutOfProcessRegistrationId,
             harness.RootServices,
             CancellationToken.None);
 
         response.Enabled.Should().BeTrue();
-        var runtimeHost = harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessModuleId)
+        var runtimeHost = harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
-            .BeAssignableTo<IForeignModuleRuntimeHost>()
+            .BeAssignableTo<IForeignRegistrationRuntimeHost>()
             .Subject;
-        var module = harness.Registry.GetModule(TestHarnessConstants.OutOfProcessModuleId);
+        var module = harness.Registry.GetRegistration(TestHarnessConstants.OutOfProcessRegistrationId);
         module.Should().NotBeNull();
-        module!.Id.Should().Be(TestHarnessConstants.OutOfProcessModuleId);
+        module!.Id.Should().Be(TestHarnessConstants.OutOfProcessRegistrationId);
         module.Should().NotBeNull();
-        harness.Registry.IsExternal(TestHarnessConstants.OutOfProcessModuleId).Should().BeFalse();
+        harness.Registry.IsExternal(TestHarnessConstants.OutOfProcessRegistrationId).Should().BeFalse();
 
         using var parameters = JsonDocument.Parse("""{"result":"in-process tool"}""");
         var result = await module!.ExecuteToolAsync(
@@ -212,88 +212,88 @@ public sealed class BundledDotNetSidecarDefaultTests
     }
 
     [Test]
-    public async Task InProcessTestHarnessLoadsThroughPayloadModuleDirectory()
+    public async Task InProcessTestHarnessLoadsThroughPayloadRegistrationDirectory()
     {
-        await using var harness = ModuleServiceHarness.Create(new Dictionary<string, string?>
+        await using var harness = RegistrationServiceHarness.Create(new Dictionary<string, string?>
         {
-            [DotNetModuleHostingModeOptions.ConfigKey] = "in-process",
+            [DotNetRegistrationHostingModeOptions.ConfigKey] = "in-process",
         });
-        var moduleDir = Path.Combine(
+        var registrationDir = Path.Combine(
             TestContext.CurrentContext.TestDirectory,
-            "test-modules",
-            TestHarnessConstants.InProcessModuleId);
+            "test-contributions",
+            TestHarnessConstants.InProcessRegistrationId);
 
-        Directory.Exists(moduleDir).Should().BeTrue(
+        Directory.Exists(registrationDir).Should().BeTrue(
             "the in-process TestHarness payload must be copied for module-boundary tests");
 
-        var response = await harness.ModuleService.LoadExternalFromAbsolutePathAsync(
-            moduleDir,
+        var response = await harness.RegistrationService.LoadExternalFromAbsolutePathAsync(
+            registrationDir,
             harness.RootServices,
             CancellationToken.None,
             persistDisabledEnvEntry: false);
 
         response.Enabled.Should().BeTrue();
-        var runtimeHost = harness.Registry.GetRuntimeHost(TestHarnessConstants.InProcessModuleId)
+        var runtimeHost = harness.Registry.GetRuntimeHost(TestHarnessConstants.InProcessRegistrationId)
             .Should()
-            .BeOfType<InProcessModuleHost>()
+            .BeOfType<InProcessRegistrationHost>()
             .Subject;
-        harness.Registry.GetModule(TestHarnessConstants.InProcessModuleId)
+        harness.Registry.GetRegistration(TestHarnessConstants.InProcessRegistrationId)
             .Should()
             .NotBeNull();
 
         using var scope = runtimeHost.CreateScope();
-        var gateway = scope.ServiceProvider.GetRequiredService<IModuleStorageGateway>();
+        var gateway = scope.ServiceProvider.GetRequiredService<IScopedStorageGateway>();
         gateway.ListContracts().Should().OnlyContain(contract =>
-            string.Equals(contract.ModuleId, TestHarnessConstants.InProcessModuleId, StringComparison.Ordinal));
+            string.Equals(contract.SourceId, TestHarnessConstants.InProcessRegistrationId, StringComparison.Ordinal));
     }
 
     [Test]
-    public async Task InProcessStorageGatewayRejectsOtherModuleStorageRequests()
+    public async Task InProcessStorageGatewayRejectsOtherScopedStorageRequests()
     {
-        await using var harness = ModuleServiceHarness.Create(new Dictionary<string, string?>
+        await using var harness = RegistrationServiceHarness.Create(new Dictionary<string, string?>
         {
-            [DotNetModuleHostingModeOptions.ConfigKey] = "in-process",
+            [DotNetRegistrationHostingModeOptions.ConfigKey] = "in-process",
         });
-        var moduleDir = CreateExternalModuleDirectory(
-            typeof(InProcessStorageFixtureModule),
-            InProcessStorageFixtureModule.ModuleId,
+        var registrationDir = CreateExternalRegistrationDirectory(
+            typeof(InProcessStorageFixtureRegistration),
+            InProcessStorageFixtureRegistration.SourceId,
             "Synthetic In-Process Storage",
-            InProcessStorageFixtureModule.ToolPrefixValue);
+            InProcessStorageFixtureRegistration.ToolPrefixValue);
 
-        var response = await harness.ModuleService.LoadExternalFromAbsolutePathAsync(
-            moduleDir,
+        var response = await harness.RegistrationService.LoadExternalFromAbsolutePathAsync(
+            registrationDir,
             harness.RootServices,
             CancellationToken.None,
             persistDisabledEnvEntry: false);
 
         response.Enabled.Should().BeTrue();
-        var runtimeHost = harness.Registry.GetRuntimeHost(InProcessStorageFixtureModule.ModuleId)
+        var runtimeHost = harness.Registry.GetRuntimeHost(InProcessStorageFixtureRegistration.SourceId)
             .Should()
-            .BeOfType<InProcessModuleHost>()
+            .BeOfType<InProcessRegistrationHost>()
             .Subject;
 
         using var scope = runtimeHost.CreateScope();
-        var gateway = scope.ServiceProvider.GetRequiredService<IModuleStorageGateway>();
+        var gateway = scope.ServiceProvider.GetRequiredService<IScopedStorageGateway>();
         gateway.ListContracts().Should().NotBeEmpty();
         gateway.ListContracts().Should().OnlyContain(contract =>
-            string.Equals(contract.ModuleId, InProcessStorageFixtureModule.ModuleId, StringComparison.Ordinal));
-        scope.ServiceProvider.GetServices<IModuleStorageGateway>().Should().ContainSingle(
+            string.Equals(contract.SourceId, InProcessStorageFixtureRegistration.SourceId, StringComparison.Ordinal));
+        scope.ServiceProvider.GetServices<IScopedStorageGateway>().Should().ContainSingle(
             "module-owned fake gateway registrations are replaced by the host-owned wrapper");
         scope.ServiceProvider.GetService<SharpClawDbContext>().Should().BeNull(
             "in-process modules must not receive the raw host DbContext");
 
-        var restricted = ModuleHostServiceAccess.CreateRestrictedScope(
+        var restricted = RegistrationHostServiceAccess.CreateRestrictedScope(
             scope.ServiceProvider,
-            InProcessStorageFixtureModule.ModuleId);
+            InProcessStorageFixtureRegistration.SourceId);
         var blockedRawDb = () => restricted.GetRequiredService<SharpClawDbContext>();
         blockedRawDb.Should().Throw<InvalidOperationException>()
             .WithMessage("*blocked service*SharpClawDbContext*");
 
         using var parameters = JsonDocument.Parse("{}");
         var act = async () => await gateway.InvokeAsync(
-            TestHarnessConstants.OutOfProcessModuleId,
-            InProcessStorageFixtureModule.StorageName,
-            ModuleStorageOperations.List,
+            TestHarnessConstants.OutOfProcessRegistrationId,
+            InProcessStorageFixtureRegistration.StorageName,
+            ScopedStorageOperations.List,
             parameters.RootElement,
             CancellationToken.None);
 
@@ -302,64 +302,64 @@ public sealed class BundledDotNetSidecarDefaultTests
     }
 
     [Test]
-    public async Task SidecarManifestBundledModulesRegisterThroughForeignRuntimeHost()
+    public async Task SidecarManifestBundledRegistrationsRegisterThroughForeignRuntimeHost()
     {
         var loader = ModuleLoader.DiscoverBundled();
-        var bundledModules = loader.GetAllBundled()
-            .Where(module => loader.IsManifestOnlyBundledModule(module.Id))
+        var bundledRegistrations = loader.GetAllBundled()
+            .Where(module => loader.IsManifestOnlyBundledRegistration(module.Id))
             .OrderBy(module => module.Id, StringComparer.Ordinal)
             .ToArray();
-        bundledModules.Select(module => module.Id).Should().Equal(
+        bundledRegistrations.Select(module => module.Id).Should().Equal(
         [
             "sharpclaw_agent_orchestration",
             "sharpclaw_editor_common",
             "sharpclaw_metrics",
-            "sharpclaw_module_dev",
+            "sharpclaw_registration_dev",
             "sharpclaw_providers_anthropic",
             "sharpclaw_providers_google",
             "sharpclaw_providers_llamasharp",
             "sharpclaw_providers_ollama",
             "sharpclaw_providers_openai_compat",
-            TestHarnessConstants.OutOfProcessModuleId,
+            TestHarnessConstants.OutOfProcessRegistrationId,
             "sharpclaw_vs2026_editor",
             "sharpclaw_vscode_editor",
         ]);
-        await using var harness = ModuleServiceHarness.Create(moduleLoader: loader);
-        var enabledModuleIds = new List<string>();
+        await using var harness = RegistrationServiceHarness.Create(registrationLoader: loader);
+        var enabledRegistrationIds = new List<string>();
 
         try
         {
-            foreach (var bundledModule in bundledModules)
+            foreach (var bundledRegistration in bundledRegistrations)
             {
-                var response = await harness.ModuleService.EnableAsync(
-                    bundledModule.Id,
+                var response = await harness.RegistrationService.EnableAsync(
+                    bundledRegistration.Id,
                     harness.RootServices,
                     CancellationToken.None);
 
-                enabledModuleIds.Add(bundledModule.Id);
+                enabledRegistrationIds.Add(bundledRegistration.Id);
                 response.Enabled.Should().BeTrue();
-                harness.Registry.GetRuntimeHost(bundledModule.Id)
+                harness.Registry.GetRuntimeHost(bundledRegistration.Id)
                     .Should()
-                    .BeAssignableTo<IForeignModuleRuntimeHost>(
-                        $"module '{bundledModule.Id}' declares sidecar host mode");
-                harness.Registry.GetModule(bundledModule.Id)
+                    .BeAssignableTo<IForeignRegistrationRuntimeHost>(
+                        $"module '{bundledRegistration.Id}' declares sidecar host mode");
+                harness.Registry.GetRegistration(bundledRegistration.Id)
                     .Should()
-                    .NotBeSameAs(bundledModule);
+                    .NotBeSameAs(bundledRegistration);
             }
         }
         finally
         {
-            foreach (var moduleId in enabledModuleIds.AsEnumerable().Reverse())
-                await harness.ModuleService.DisableAsync(moduleId, CancellationToken.None);
+            foreach (var SourceId in enabledRegistrationIds.AsEnumerable().Reverse())
+                await harness.RegistrationService.DisableAsync(SourceId, CancellationToken.None);
         }
     }
 
     [Test]
     public async Task SidecarProviderPluginsAreVisibleThroughParentFactoryOnlyWhileEnabled()
     {
-        await using var harness = ModuleServiceHarness.Create();
+        await using var harness = RegistrationServiceHarness.Create();
 
-        var response = await harness.ModuleService.EnableAsync(
+        var response = await harness.RegistrationService.EnableAsync(
             "sharpclaw_providers_openai_compat",
             harness.RootServices,
             CancellationToken.None);
@@ -367,14 +367,14 @@ public sealed class BundledDotNetSidecarDefaultTests
         response.Enabled.Should().BeTrue();
         harness.Registry.GetRuntimeHost("sharpclaw_providers_openai_compat")
             .Should()
-            .BeAssignableTo<IForeignModuleRuntimeHost>();
+            .BeAssignableTo<IForeignRegistrationRuntimeHost>();
 
         var factory = harness.Root.GetRequiredService<ProviderApiClientFactory>();
         factory.IsAvailable("openai").Should().BeTrue();
-        factory.GetPlugin("openai")!.OwnerModuleId.Should().Be("sharpclaw_providers_openai_compat");
+        factory.GetPlugin("openai")!.OwnerId.Should().Be("sharpclaw_providers_openai_compat");
         factory.GetPlugin("custom")!.RequiresEndpoint.Should().BeTrue();
 
-        await harness.ModuleService.DisableAsync(
+        await harness.RegistrationService.DisableAsync(
             "sharpclaw_providers_openai_compat",
             CancellationToken.None);
 
@@ -384,9 +384,9 @@ public sealed class BundledDotNetSidecarDefaultTests
     [Test]
     public async Task EditorCommonSidecarAdvertisesEditorWebSocketEndpoint()
     {
-        await using var harness = ModuleServiceHarness.Create();
+        await using var harness = RegistrationServiceHarness.Create();
 
-        var response = await harness.ModuleService.EnableAsync(
+        var response = await harness.RegistrationService.EnableAsync(
             "sharpclaw_editor_common",
             harness.RootServices,
             CancellationToken.None);
@@ -394,7 +394,7 @@ public sealed class BundledDotNetSidecarDefaultTests
         response.Enabled.Should().BeTrue();
         var runtimeHost = harness.Registry.GetRuntimeHost("sharpclaw_editor_common")
             .Should()
-            .BeAssignableTo<IForeignModuleRuntimeHost>()
+            .BeAssignableTo<IForeignRegistrationRuntimeHost>()
             .Subject;
 
         runtimeHost.Endpoints.Should().Contain(endpoint =>
@@ -402,7 +402,7 @@ public sealed class BundledDotNetSidecarDefaultTests
             && string.Equals(endpoint.RoutePattern, "/editor/ws", StringComparison.Ordinal)
             && string.Equals(
                 endpoint.ResponseMode,
-                ForeignModuleEndpointResponseMode.WebSocket,
+                ForeignEndpointResponseMode.WebSocket,
                 StringComparison.Ordinal));
     }
 
@@ -411,14 +411,14 @@ public sealed class BundledDotNetSidecarDefaultTests
     {
         var settings = new Dictionary<string, string?>
         {
-            [DotNetModuleHostingModeOptions.ConfigKey] = "sidecar-only",
+            [DotNetRegistrationHostingModeOptions.ConfigKey] = "sidecar-only",
         };
         var configuration = BuildConfiguration(settings);
-        await using var harness = ModuleServiceHarness.Create(
+        await using var harness = RegistrationServiceHarness.Create(
             settings,
-            moduleLoader: ModuleLoader.DiscoverBundled(configuration));
+            registrationLoader: ModuleLoader.DiscoverBundled(configuration));
 
-        var response = await harness.ModuleService.EnableAsync(
+        var response = await harness.RegistrationService.EnableAsync(
             "sharpclaw_agent_orchestration",
             harness.RootServices,
             CancellationToken.None);
@@ -426,8 +426,8 @@ public sealed class BundledDotNetSidecarDefaultTests
         response.Enabled.Should().BeTrue();
         harness.Registry.GetRuntimeHost("sharpclaw_agent_orchestration")
             .Should()
-            .BeAssignableTo<IForeignModuleRuntimeHost>();
-        harness.Registry.GetModule("sharpclaw_agent_orchestration")
+            .BeAssignableTo<IForeignRegistrationRuntimeHost>();
+        harness.Registry.GetRegistration("sharpclaw_agent_orchestration")
             .Should()
             .NotBeNull();
     }
@@ -435,49 +435,49 @@ public sealed class BundledDotNetSidecarDefaultTests
     [Test]
     public async Task LegacyForceInProcessSettingNoLongerOverridesSidecarManifest()
     {
-        await using var harness = ModuleServiceHarness.Create(new Dictionary<string, string?>
+        await using var harness = RegistrationServiceHarness.Create(new Dictionary<string, string?>
         {
-            ["Modules:ForceInProcessDotNetSidecars"] = "true",
+            ["Packages:ForceInProcessDotNetSidecars"] = "true",
         });
 
-        var response = await harness.ModuleService.EnableAsync(
-            TestHarnessConstants.OutOfProcessModuleId,
+        var response = await harness.RegistrationService.EnableAsync(
+            TestHarnessConstants.OutOfProcessRegistrationId,
             harness.RootServices,
             CancellationToken.None);
 
         response.Enabled.Should().BeTrue();
-        harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessModuleId)
+        harness.Registry.GetRuntimeHost(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
-            .BeAssignableTo<IForeignModuleRuntimeHost>();
-        harness.Registry.GetModule(TestHarnessConstants.OutOfProcessModuleId)
+            .BeAssignableTo<IForeignRegistrationRuntimeHost>();
+        harness.Registry.GetRegistration(TestHarnessConstants.OutOfProcessRegistrationId)
             .Should()
             .NotBeNull();
     }
 
     [Test]
-    public async Task ExternalDotNetModuleWithoutSidecarHostModeIsRejected()
+    public async Task ExternalDotNetRegistrationWithoutSidecarHostModeIsRejected()
     {
-        await using var harness = ModuleServiceHarness.Create();
-        var moduleDir = Path.Combine(
+        await using var harness = RegistrationServiceHarness.Create();
+        var registrationDir = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
             "external-dotnet-hosting-mode",
             Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(moduleDir);
+        Directory.CreateDirectory(registrationDir);
         await File.WriteAllTextAsync(
-            Path.Combine(moduleDir, "module.json"),
+            Path.Combine(registrationDir, "package.json"),
             """
             {
               "id": "synthetic_external_inprocess",
               "displayName": "Synthetic External In Process",
               "version": "1.0.0",
               "toolPrefix": "sei",
-              "entryAssembly": "SharpClaw.TestFixtures.ExternalModule.dll",
+              "entryAssembly": "SharpClaw.TestFixtures.ExternalRegistration.dll",
               "minHostVersion": "0.0.0"
             }
             """);
 
-        var act = async () => await harness.ModuleService.LoadExternalFromAbsolutePathAsync(
-            moduleDir,
+        var act = async () => await harness.RegistrationService.LoadExternalFromAbsolutePathAsync(
+            registrationDir,
             harness.RootServices,
             CancellationToken.None,
             persistDisabledEnvEntry: false);
@@ -486,57 +486,57 @@ public sealed class BundledDotNetSidecarDefaultTests
             .ThrowAsync<InvalidOperationException>()
             .WithMessage("*must declare \"hostMode\": \"sidecar\"*");
 
-        harness.Registry.GetModule("synthetic_external_inprocess").Should().BeNull();
+        harness.Registry.GetRegistration("synthetic_external_inprocess").Should().BeNull();
     }
 
     [Test]
-    public async Task ExternalDotNetModuleWithoutSidecarHostModeLoadsWhenInProcessModeIsForced()
+    public async Task ExternalDotNetRegistrationWithoutSidecarHostModeLoadsWhenInProcessModeIsForced()
     {
-        await using var harness = ModuleServiceHarness.Create(new Dictionary<string, string?>
+        await using var harness = RegistrationServiceHarness.Create(new Dictionary<string, string?>
         {
-            [DotNetModuleHostingModeOptions.ConfigKey] = "in-process",
+            [DotNetRegistrationHostingModeOptions.ConfigKey] = "in-process",
         });
-        var moduleDir = CreateExternalModuleDirectory(
-            typeof(SyntheticExternalLifecycleModule),
-            SyntheticExternalLifecycleModule.ModuleId,
+        var registrationDir = CreateExternalRegistrationDirectory(
+            typeof(SyntheticExternalLifecycleRegistration),
+            SyntheticExternalLifecycleRegistration.SourceId,
             "Synthetic External Lifecycle",
-            SyntheticExternalLifecycleModule.ToolPrefixValue);
+            SyntheticExternalLifecycleRegistration.ToolPrefixValue);
 
-        var response = await harness.ModuleService.LoadExternalFromAbsolutePathAsync(
-            moduleDir,
+        var response = await harness.RegistrationService.LoadExternalFromAbsolutePathAsync(
+            registrationDir,
             harness.RootServices,
             CancellationToken.None,
             persistDisabledEnvEntry: false);
 
-        response.ModuleId.Should().Be(SyntheticExternalLifecycleModule.ModuleId);
-        harness.Registry.IsExternal(SyntheticExternalLifecycleModule.ModuleId).Should().BeTrue();
-        var runtimeHost = harness.Registry.GetRuntimeHost(SyntheticExternalLifecycleModule.ModuleId)
+        response.SourceId.Should().Be(SyntheticExternalLifecycleRegistration.SourceId);
+        harness.Registry.IsExternal(SyntheticExternalLifecycleRegistration.SourceId).Should().BeTrue();
+        var runtimeHost = harness.Registry.GetRuntimeHost(SyntheticExternalLifecycleRegistration.SourceId)
             .Should()
-            .BeOfType<InProcessModuleHost>()
+            .BeOfType<InProcessRegistrationHost>()
             .Subject;
-        var module = harness.Registry.GetModule(SyntheticExternalLifecycleModule.ModuleId);
+        var module = harness.Registry.GetRegistration(SyntheticExternalLifecycleRegistration.SourceId);
         module.Should().NotBeNull();
 
         using var scope = runtimeHost.CreateScope();
         using var parameters = JsonDocument.Parse("""{"value":"forced"}""");
         var result = await module!.ExecuteToolAsync(
-            SyntheticExternalLifecycleModule.JobTool,
+            SyntheticExternalLifecycleRegistration.JobTool,
             parameters.RootElement,
             new AgentJobContext(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
                 Guid.NewGuid(),
                 ResourceId: null,
-                ActionKey: SyntheticExternalLifecycleModule.JobTool),
+                ActionKey: SyntheticExternalLifecycleRegistration.JobTool),
             scope.ServiceProvider,
             CancellationToken.None);
 
         result.Should().Be("external job forced");
     }
 
-    private sealed class ModuleServiceHarness : IAsyncDisposable
+    private sealed class RegistrationServiceHarness : IAsyncDisposable
     {
-        private ModuleServiceHarness(
+        private RegistrationServiceHarness(
             ServiceProvider root,
             AsyncServiceScope scope,
             string instanceRoot)
@@ -550,13 +550,13 @@ public sealed class BundledDotNetSidecarDefaultTests
         public AsyncServiceScope Scope { get; }
         public string InstanceRoot { get; }
         public IServiceProvider RootServices => Root;
-        public ModuleService ModuleService => Scope.ServiceProvider.GetRequiredService<ModuleService>();
-        public ModuleRegistry Registry => Root.GetRequiredService<ModuleRegistry>();
+        public RegistrationService RegistrationService => Scope.ServiceProvider.GetRequiredService<RegistrationService>();
+        public RegistrationCatalog Registry => Root.GetRequiredService<RegistrationCatalog>();
 
-        public static ModuleServiceHarness Create(
+        public static RegistrationServiceHarness Create(
             Dictionary<string, string?>? configurationOverrides = null,
-            ISharpClawCoreModule[]? modules = null,
-            ModuleLoader? moduleLoader = null)
+            ISharpClawCoreRegistration[]? modules = null,
+            ModuleLoader? registrationLoader = null)
         {
             var instanceRoot = Path.Combine(
                 TestContext.CurrentContext.WorkDirectory,
@@ -574,7 +574,7 @@ public sealed class BundledDotNetSidecarDefaultTests
 
             var configurationValues = new Dictionary<string, string?>
             {
-                ["Modules:OutOfProcessModuleHostPath"] = ResolveOutOfProcessModuleHostPath(),
+                ["Packages:OutOfProcessSidecarHostPath"] = ResolveOutOfProcessRegistrationHostPath(),
             };
             if (configurationOverrides is not null)
             {
@@ -597,17 +597,17 @@ public sealed class BundledDotNetSidecarDefaultTests
                 options.UseInMemoryDatabase(
                     "BundledSidecarDefault_" + Guid.NewGuid().ToString("N"),
                     new InMemoryDatabaseRoot()));
-            var loader = moduleLoader
+            var loader = registrationLoader
                 ?? (modules is not null
                     ? new ModuleLoader(modules)
                     : ModuleLoader.DiscoverBundled(configuration));
             services.AddSingleton(loader);
-            services.AddSingleton<ModuleRegistry>();
-            services.AddSingleton<IModuleStorageContractProvider>(sp => sp.GetRequiredService<ModuleRegistry>());
+            services.AddSingleton<RegistrationCatalog>();
+            services.AddSingleton<IStorageContractProvider>(sp => sp.GetRequiredService<RegistrationCatalog>());
             services.AddSingleton<ProviderApiClientFactory>();
-            services.AddSingleton<RuntimeModuleDbContextRegistry>();
-            services.AddSingleton<ModulePersistenceRegistrationFactory>();
-            services.AddSingleton(new ModuleDbContextOptions
+            services.AddSingleton<RuntimeRegistrationDbContextRegistry>();
+            services.AddSingleton<RegistrationPersistenceRegistrationFactory>();
+            services.AddSingleton(new RegistrationDbContextOptions
             {
                 StorageMode = StorageMode.SQLite,
                 ConnectionString = "Data Source=:memory:",
@@ -617,49 +617,46 @@ public sealed class BundledDotNetSidecarDefaultTests
                 Key = new byte[32],
                 EncryptProviderKeys = false,
             });
-            services.AddSingleton<IModuleDbContextFactory, ModuleDbContextFactory>();
+            services.AddSingleton<IOwnedDbContextFactory, RegistrationDbContextFactory>();
             services.AddSingleton<ChatCache>();
-            services.AddSingleton<ModuleEventDispatcher>(sp => new ModuleEventDispatcher(
+            services.AddSingleton<RegistrationEventDispatcher>(sp => new RegistrationEventDispatcher(
                 sp,
                 sp.GetRequiredService<IConfiguration>(),
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ModuleEventDispatcher>>()));
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RegistrationEventDispatcher>>()));
             services.AddSingleton<ISharpClawEventSinkRegistry>(
-                sp => sp.GetRequiredService<ModuleEventDispatcher>());
-            services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
+                sp => sp.GetRequiredService<RegistrationEventDispatcher>());
+            services.AddScoped<IScopedStorageGateway, ScopedStorageGateway>();
             services.AddSingleton<IRuntimeTransactionActionBoundary, TestRuntimeTransactionActionBoundary>();
-            services.AddSingleton<IRuntimeModuleActionBoundary, TestRuntimeModuleActionBoundary>();
             services.AddScoped<IRuntimeTransactionActionRunnerAccessor,
                 RuntimeTransactionActionRunnerAccessor>();
             services.AddScoped<IRuntimeTransactionActionRunner, RuntimeTransactionActionRunner>();
-            services.AddScoped<IRuntimeModuleActionBoundaryAccessor,
-                RuntimeModuleActionBoundaryAccessor>();
-            services.AddScoped<ModuleService>();
+            services.AddScoped<RegistrationService>();
 
             var root = services.BuildServiceProvider();
             root.GetRequiredService<ModuleLoader>().LoadAllManifests()
                 .Should()
-                .ContainKey(TestHarnessConstants.OutOfProcessModuleId);
+                .ContainKey(TestHarnessConstants.OutOfProcessRegistrationId);
 
-            return new ModuleServiceHarness(root, root.CreateAsyncScope(), instanceRoot);
+            return new RegistrationServiceHarness(root, root.CreateAsyncScope(), instanceRoot);
         }
 
         public async ValueTask DisposeAsync()
         {
             var loader = Root.GetRequiredService<ModuleLoader>();
-            var runtimeBackedModuleIds = Registry.GetAllModules()
+            var runtimeBackedRegistrationIds = Registry.GetAllPackages()
                 .Select(module => module.Id)
-                .Where(moduleId => Registry.GetRuntimeHost(moduleId) is not null)
+                .Where(SourceId => Registry.GetRuntimeHost(SourceId) is not null)
                 .ToArray();
 
-            foreach (var moduleId in runtimeBackedModuleIds)
+            foreach (var SourceId in runtimeBackedRegistrationIds)
             {
-                if (Registry.GetModule(moduleId) is null)
+                if (Registry.GetRegistration(SourceId) is null)
                     continue;
 
-                if (Registry.IsExternal(moduleId))
-                    await ModuleService.UnloadExternalAsync(moduleId, CancellationToken.None);
-                else if (loader.IsDefaultModule(moduleId))
-                    await ModuleService.DisableAsync(moduleId, CancellationToken.None);
+                if (Registry.IsExternal(SourceId))
+                    await RegistrationService.UnloadExternalAsync(SourceId, CancellationToken.None);
+                else if (loader.IsDefaultRegistration(SourceId))
+                    await RegistrationService.DisableAsync(SourceId, CancellationToken.None);
             }
 
             foreach (var runtimeHost in Registry.GetRuntimeHosts())
@@ -684,53 +681,53 @@ public sealed class BundledDotNetSidecarDefaultTests
             .AddInMemoryCollection(values)
             .Build();
 
-    private static string ResolveOutOfProcessModuleHostPath()
+    private static string ResolveOutOfProcessRegistrationHostPath()
     {
         var hostPath = Path.Combine(
             TestContext.CurrentContext.TestDirectory,
-            "SharpClaw.ModuleHost.OutOfProcess.dll");
+            "SharpClaw.SidecarHost.OutOfProcess.dll");
 
         File.Exists(hostPath).Should().BeTrue(
             $"shared .NET sidecar host package payload must be copied to test output before tests run: '{hostPath}'");
         return hostPath;
     }
 
-    private static string CreateExternalModuleDirectory(
-        Type moduleType,
-        string moduleId,
+    private static string CreateExternalRegistrationDirectory(
+        Type entryType,
+        string SourceId,
         string displayName,
         string toolPrefix)
     {
-        var assemblyPath = moduleType.Assembly.Location;
+        var assemblyPath = entryType.Assembly.Location;
         var sourceDir = Path.GetDirectoryName(assemblyPath)!;
-        var moduleDir = Path.Combine(
+        var registrationDir = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
             "external-inprocess-modules",
             Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(moduleDir);
+        Directory.CreateDirectory(registrationDir);
 
         foreach (var file in Directory.GetFiles(sourceDir, "*.dll"))
-            File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
+            File.Copy(file, Path.Combine(registrationDir, Path.GetFileName(file)), overwrite: true);
 
         foreach (var file in Directory.GetFiles(sourceDir, "*.deps.json"))
-            File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
+            File.Copy(file, Path.Combine(registrationDir, Path.GetFileName(file)), overwrite: true);
 
         File.WriteAllText(
-            Path.Combine(moduleDir, "module.json"),
+            Path.Combine(registrationDir, "package.json"),
             $$"""
             {
-              "id": "{{moduleId}}",
+              "id": "{{SourceId}}",
               "displayName": "{{displayName}}",
               "version": "1.0.0",
               "toolPrefix": "{{toolPrefix}}",
               "runtime": "dotnet",
               "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
-              "type": "{{moduleType.FullName}}",
+              "type": "{{entryType.FullName}}",
               "minHostVersion": "0.0.0"
             }
             """);
 
-        return moduleDir;
+        return registrationDir;
     }
 
     private static string ResolveRepoRoot()

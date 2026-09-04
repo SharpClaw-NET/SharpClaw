@@ -2,7 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Modules;
@@ -13,11 +13,11 @@ namespace SharpClaw.Tests.Core;
 public sealed class ChatInlineToolExecutorTests
 {
     [Test]
-    public async Task ExecuteAsync_WhenToolAllowed_InvokesModuleThroughRestrictedScope()
+    public async Task ExecuteAsync_WhenToolAllowed_InvokesRegistrationThroughRestrictedScope()
     {
-        var module = new InlineModule(permission: null);
+        var module = new InlineRegistration(permission: null);
         var registry = CreateRegistry(module);
-        var metrics = new ModuleMetricsCollector();
+        var metrics = new PackageMetricsCollector();
         var provider = CreateProvider();
         var executor = new ChatInlineToolExecutor(metrics);
         var agentId = Guid.NewGuid();
@@ -33,11 +33,11 @@ public sealed class ChatInlineToolExecutorTests
 
         result.ToolResult.Should().Be($"pong:7:{agentId:D}:{channelId:D}:call-1");
         result.Succeeded.Should().BeTrue();
-        result.ModuleInvoked.Should().BeTrue();
-        provider.GetRequiredService<ModuleExecutionContext>()
-            .ModuleId
+        result.RegistrationInvoked.Should().BeTrue();
+        provider.GetRequiredService<RegistrationExecutionContext>()
+            .SourceId
             .Should()
-            .Be("test_module");
+            .Be("test_registration");
 
         var snapshot = metrics.GetToolMetrics("test_ping");
         snapshot.Should().NotBeNull();
@@ -48,12 +48,12 @@ public sealed class ChatInlineToolExecutorTests
     [Test]
     public async Task ExecuteAsync_WhenPermissionIsDeclared_CachesHostVerdict()
     {
-        var module = new InlineModule(CreatePermission());
+        var module = new InlineRegistration(CreatePermission());
         var registry = CreateRegistry(module);
         var permissionCache =
             new Dictionary<ChatInlineToolPermissionCacheKey, AgentActionResult>();
         var checkCount = 0;
-        var executor = new ChatInlineToolExecutor(new ModuleMetricsCollector());
+        var executor = new ChatInlineToolExecutor(new PackageMetricsCollector());
         var provider = CreateProvider();
         var request = Request(
             new ChatToolCall("call-1", "ping", """{"value":7}"""),
@@ -76,11 +76,11 @@ public sealed class ChatInlineToolExecutorTests
     }
 
     [Test]
-    public async Task ExecuteAsync_WhenPermissionDenied_DoesNotInvokeModule()
+    public async Task ExecuteAsync_WhenPermissionDenied_DoesNotInvokeRegistration()
     {
-        var module = new InlineModule(CreatePermission());
+        var module = new InlineRegistration(CreatePermission());
         var registry = CreateRegistry(module);
-        var metrics = new ModuleMetricsCollector();
+        var metrics = new PackageMetricsCollector();
         var executor = new ChatInlineToolExecutor(metrics);
 
         var result = await executor.ExecuteAsync(
@@ -94,16 +94,16 @@ public sealed class ChatInlineToolExecutorTests
                     AgentActionResult.Denied("no"))));
 
         result.ToolResult.Should().Be("Error: permission denied for inline tool 'ping': no");
-        result.ModuleInvoked.Should().BeFalse();
+        result.RegistrationInvoked.Should().BeFalse();
         module.Calls.Should().Be(0);
         metrics.GetToolMetrics("test_ping").Should().BeNull();
     }
 
     [Test]
-    public async Task ExecuteAsync_WhenArgumentsAreMalformed_DoesNotInvokeModule()
+    public async Task ExecuteAsync_WhenArgumentsAreMalformed_DoesNotInvokeRegistration()
     {
-        var module = new InlineModule(permission: null);
-        var executor = new ChatInlineToolExecutor(new ModuleMetricsCollector());
+        var module = new InlineRegistration(permission: null);
+        var executor = new ChatInlineToolExecutor(new PackageMetricsCollector());
 
         var result = await executor.ExecuteAsync(
             Request(
@@ -114,19 +114,19 @@ public sealed class ChatInlineToolExecutorTests
                 CreateProvider()));
 
         result.ToolResult.Should().Be("Error: malformed tool arguments JSON.");
-        result.ModuleInvoked.Should().BeFalse();
+        result.RegistrationInvoked.Should().BeFalse();
         module.Calls.Should().Be(0);
     }
 
     [Test]
-    public async Task ExecuteAsync_WhenModuleThrows_ReturnsErrorAndRecordsFailure()
+    public async Task ExecuteAsync_WhenRegistrationThrows_ReturnsErrorAndRecordsFailure()
     {
-        var module = new InlineModule(permission: null)
+        var module = new InlineRegistration(permission: null)
         {
             ThrowOnExecute = true
         };
         var registry = CreateRegistry(module);
-        var metrics = new ModuleMetricsCollector();
+        var metrics = new PackageMetricsCollector();
         var executor = new ChatInlineToolExecutor(metrics);
 
         var result = await executor.ExecuteAsync(
@@ -138,7 +138,7 @@ public sealed class ChatInlineToolExecutorTests
                 CreateProvider()));
 
         result.ToolResult.Should().Be("Error executing inline tool 'ping': boom");
-        result.ModuleInvoked.Should().BeTrue();
+        result.RegistrationInvoked.Should().BeTrue();
         result.Succeeded.Should().BeFalse();
         result.Exception.Should().BeOfType<InvalidOperationException>();
 
@@ -152,7 +152,7 @@ public sealed class ChatInlineToolExecutorTests
         ChatToolCall toolCall,
         Guid agentId,
         Guid channelId,
-        ModuleRegistry registry,
+        RegistrationCatalog registry,
         IServiceProvider provider,
         IDictionary<ChatInlineToolPermissionCacheKey, AgentActionResult>? permissionCache = null,
         Func<ChatInlineToolPermissionCheck, CancellationToken, Task<AgentActionResult>>? checkPermission = null) =>
@@ -172,18 +172,18 @@ public sealed class ChatInlineToolExecutorTests
         var services = new ServiceCollection();
         services.AddSingleton<AllowedService>();
         services.AddSingleton<BlockedService>();
-        services.AddSingleton<ModuleExecutionContext>();
+        services.AddSingleton<RegistrationExecutionContext>();
         return services.BuildServiceProvider();
     }
 
-    private static ModuleRegistry CreateRegistry(InlineModule module)
+    private static RegistrationCatalog CreateRegistry(InlineRegistration module)
     {
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         registry.Register(module);
         return registry;
     }
 
-    private static ModuleToolPermission CreatePermission() =>
+    private static RegistrationToolPermission CreatePermission() =>
         new(
             IsPerResource: false,
             Check: (_, _, _, _) => Task.FromResult(Approved()));
@@ -199,12 +199,12 @@ public sealed class ChatInlineToolExecutorTests
         return doc.RootElement.Clone();
     }
 
-    private sealed class InlineModule(ModuleToolPermission? permission)
-        : ISharpClawCoreModule
+    private sealed class InlineRegistration(RegistrationToolPermission? permission)
+        : ISharpClawCoreRegistration
     {
         public int Calls { get; private set; }
         public bool ThrowOnExecute { get; init; }
-        public string Id => "test_module";
+        public string Id => "test_registration";
         public string DisplayName => "Test Module";
         public string ToolPrefix => "test";
 
@@ -212,9 +212,9 @@ public sealed class ChatInlineToolExecutorTests
         {
         }
 
-        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
+        public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() => [];
 
-        public IReadOnlyList<ModuleInlineToolDefinition> GetInlineToolDefinitions() =>
+        public IReadOnlyList<RegistrationInlineToolDefinition> GetInlineToolDefinitions() =>
         [
             new(
                 "ping",

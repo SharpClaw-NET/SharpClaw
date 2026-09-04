@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AssemblyName>SharpClaw.DefaultPackages.TestHarness.OutOfProcess</AssemblyName>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <DefineConstants>$(DefineConstants);TEST_HARNESS_OUT_OF_PROCESS</DefineConstants>
   </PropertyGroup>
@@ -17,12 +18,13 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.ModuleSDK" />
     <PackageReference Include="SharpClaw.Providers.Common" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="module.json"
-             Link="modules\sharpclaw_test_harness_out_of_process\module.json"
+    <Content Include="package.json"
+             Link="contributions\sharpclaw_test_harness_out_of_process\package.json"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

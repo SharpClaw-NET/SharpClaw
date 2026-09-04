@@ -1,4 +1,4 @@
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 
 namespace SharpClaw.Runtime.BLL.Kernel;
@@ -169,7 +169,7 @@ public interface IRuntimeEventPublisher
 
 internal static class RuntimeEventDefinitions
 {
-    public const string ModuleId = "sharpclaw.runtime.events";
+    public const string SourceId = "sharpclaw.runtime.events";
     public static readonly SharpClawEventKey CommittedKey = new("runtime.event");
 
     public static EventDescriptor<RuntimeEventPayload> Committed { get; } =
@@ -190,15 +190,11 @@ internal static class RuntimeEventDefinitions
         };
 }
 
-internal sealed class RuntimeEventModule : ISharpClawModule
+internal static class RuntimeEventBindings
 {
-    public ModuleIdentity Identity { get; } = new(
-        RuntimeEventDefinitions.ModuleId,
-        "SharpClaw Runtime Events",
-        "runtime-events");
-
-    public void Configure(ISharpClawModuleBuilder module)
+    public static void AddTo(KernelGraphBuilder builder)
     {
-        module.Events.Add(RuntimeEventDefinitions.Committed);
+        ArgumentNullException.ThrowIfNull(builder);
+        builder.AddEvent(RuntimeEventDefinitions.Committed, RuntimeEventDefinitions.SourceId);
     }
 }

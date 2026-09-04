@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 
 namespace SharpClaw.Runtime.BLL.Kernel;
 
 /// <summary>
-/// Delivers Runtime events through the action boundary and the existing module
+/// Delivers Runtime events through the action boundary and the existing registration
 /// storage record collection. Action lifecycle observations stay bounded in memory.
 /// </summary>
 public sealed class RuntimeEventDeliverySink(IServiceScopeFactory scopeFactory)

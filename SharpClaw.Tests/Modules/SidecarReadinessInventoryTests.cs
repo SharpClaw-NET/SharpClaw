@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Sidecar;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Modules.Sidecar;
 
 namespace SharpClaw.Tests.Modules;
@@ -10,12 +10,12 @@ namespace SharpClaw.Tests.Modules;
 [TestFixture]
 public sealed class SidecarReadinessInventoryTests
 {
-    private static readonly string[] ExpectedPackagedModuleDlls =
+    private static readonly string[] ExpectedPackagedRegistrationDlls =
     [
         "SharpClaw.Modules.AgentOrchestration.dll",
         "SharpClaw.Modules.EditorCommon.dll",
         "SharpClaw.Modules.Metrics.dll",
-        "SharpClaw.Modules.ModuleDev.dll",
+        "SharpClaw.Modules.RegistrationDev.dll",
         "SharpClaw.Modules.Providers.Anthropic.dll",
         "SharpClaw.Modules.Providers.Google.dll",
         "SharpClaw.Modules.Providers.LlamaSharp.dll",
@@ -30,7 +30,7 @@ public sealed class SidecarReadinessInventoryTests
         ["sharpclaw_agent_orchestration"] = [],
         ["sharpclaw_editor_common"] = [],
         ["sharpclaw_metrics"] = [],
-        ["sharpclaw_module_dev"] = [],
+        ["sharpclaw_registration_dev"] = [],
         ["sharpclaw_providers_anthropic"] = [],
         ["sharpclaw_providers_google"] = [],
         ["sharpclaw_providers_llamasharp"] = [],
@@ -41,45 +41,45 @@ public sealed class SidecarReadinessInventoryTests
     };
 
     [Test]
-    public void BundledSidecarReadinessInventoryIncludesEveryBundledModule()
+    public void BundledSidecarReadinessInventoryIncludesEveryBundledRegistration()
     {
-        var reports = AnalyzeBundledModules();
+        var reports = AnalyzeBundledRegistrations();
         var expectedBlockerKeys = ExpectedBlockerKeys();
 
-        reports.Select(report => report.ModuleId)
+        reports.Select(report => report.SourceId)
             .Should()
             .Equal(expectedBlockerKeys.Keys.Order(StringComparer.Ordinal));
 
-        reports.Should().OnlyContain(report => !string.IsNullOrWhiteSpace(report.ModuleType));
+        reports.Should().OnlyContain(report => !string.IsNullOrWhiteSpace(report.EntryType));
         reports.Should().OnlyContain(report => !string.IsNullOrWhiteSpace(report.AssemblyName));
     }
 
     [Test]
     public void BundledSidecarReadinessInventoryCapturesKnownProtocolGaps()
     {
-        var reports = AnalyzeBundledModules();
+        var reports = AnalyzeBundledRegistrations();
         var expected = ExpectedBlockerKeys().ToDictionary(
             pair => pair.Key,
             pair => string.Join("|", pair.Value.Order(StringComparer.Ordinal)),
             StringComparer.Ordinal);
         var actual = reports.ToDictionary(
-            report => report.ModuleId,
+            report => report.SourceId,
             report => string.Join("|", report.Blockers.Select(finding => finding.Key).Order(StringComparer.Ordinal)),
             StringComparer.Ordinal);
 
         actual.Should().Equal(expected);
         reports.Where(report => report.IsReadyForSidecarDefault)
-            .Select(report => report.ModuleId)
+            .Select(report => report.SourceId)
             .Should()
-            .Equal(ExpectedReadyModuleIds());
+            .Equal(ExpectedReadyRegistrationIds());
     }
 
     [Test]
-    public void BundledModulesOptedIntoSidecarHostModeMustBeReadinessClean()
+    public void BundledRegistrationsOptedIntoSidecarHostModeMustBeReadinessClean()
     {
-        var reports = AnalyzeBundledModules()
-            .ToDictionary(report => report.ModuleId, StringComparer.Ordinal);
-        var sidecarModuleIds = LoadBundledManifests()
+        var reports = AnalyzeBundledRegistrations()
+            .ToDictionary(report => report.SourceId, StringComparer.Ordinal);
+        var sidecarRegistrationIds = LoadBundledManifests()
             .Where(entry => entry.RuntimeInfo.IsSidecarHostMode)
             .Select(entry => entry.Manifest.Id)
             .Order(StringComparer.Ordinal)
@@ -87,43 +87,43 @@ public sealed class SidecarReadinessInventoryTests
 
         if (IsDeveloperConfiguration())
         {
-            sidecarModuleIds.Should().Contain("sharpclaw_test_harness_out_of_process");
+            sidecarRegistrationIds.Should().Contain("sharpclaw_test_harness_out_of_process");
         }
         else
         {
-            sidecarModuleIds.Should().NotContain("sharpclaw_test_harness_out_of_process");
+            sidecarRegistrationIds.Should().NotContain("sharpclaw_test_harness_out_of_process");
         }
-        foreach (var moduleId in sidecarModuleIds)
+        foreach (var SourceId in sidecarRegistrationIds)
         {
-            reports.Should().ContainKey(moduleId);
-            reports[moduleId].Blockers.Should().BeEmpty(
-                $"module '{moduleId}' opted into hostMode=sidecar and must stay protocol-ready");
+            reports.Should().ContainKey(SourceId);
+            reports[SourceId].Blockers.Should().BeEmpty(
+                $"module '{SourceId}' opted into hostMode=sidecar and must stay protocol-ready");
         }
     }
 
     [Test]
-    public void ReadinessCleanBundledModulesMustDeclareSidecarHostMode()
+    public void ReadinessCleanBundledRegistrationsMustDeclareSidecarHostMode()
     {
-        var readyModuleIds = AnalyzeBundledModules()
+        var readyRegistrationIds = AnalyzeBundledRegistrations()
             .Where(report => report.IsReadyForSidecarDefault)
-            .Select(report => report.ModuleId)
+            .Select(report => report.SourceId)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        var sidecarModuleIds = LoadBundledManifests()
+        var sidecarRegistrationIds = LoadBundledManifests()
             .Where(entry => entry.RuntimeInfo.IsSidecarHostMode)
             .Select(entry => entry.Manifest.Id)
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        sidecarModuleIds.Should().Equal(
-            readyModuleIds,
+        sidecarRegistrationIds.Should().Equal(
+            readyRegistrationIds,
             "phase two should route every readiness-clean bundled module through the .NET sidecar manifest path");
     }
 
     [Test]
     public void BundledSidecarReadinessInventoryDistinguishesCoveredProtocolSurfaces()
     {
-        var reports = AnalyzeBundledModules().ToDictionary(report => report.ModuleId, StringComparer.Ordinal);
+        var reports = AnalyzeBundledRegistrations().ToDictionary(report => report.SourceId, StringComparer.Ordinal);
 
         reports["sharpclaw_agent_orchestration"].Findings
             .Should()
@@ -147,20 +147,20 @@ public sealed class SidecarReadinessInventoryTests
                                 && finding.Key == "endpoints.http");
     }
 
-    private static IReadOnlyList<ModuleSidecarReadinessReport> AnalyzeBundledModules()
+    private static IReadOnlyList<RegistrationSidecarReadinessReport> AnalyzeBundledRegistrations()
     {
-        var modules = LoadBundledModules();
+        var modules = LoadBundledRegistrations();
         var analyzer = new SidecarReadinessAnalyzer();
         return analyzer.AnalyzeAll(modules);
     }
 
-    private static IReadOnlyList<ISharpClawCoreModule> LoadBundledModules()
+    private static IReadOnlyList<ISharpClawCoreRegistration> LoadBundledRegistrations()
     {
         var apiOutputDir = ResolveApiOutputDirectory();
-        var moduleType = typeof(ISharpClawCoreModule);
-        var modules = new List<ISharpClawCoreModule>();
+        var entryType = typeof(ISharpClawCoreRegistration);
+        var modules = new List<ISharpClawCoreRegistration>();
 
-        foreach (var dllName in ExpectedModuleDlls())
+        foreach (var dllName in ExpectedRegistrationDlls())
         {
             var dllPath = Path.Combine(apiOutputDir, dllName);
             File.Exists(dllPath).Should().BeTrue($"'{dllName}' must be present in API output");
@@ -168,26 +168,26 @@ public sealed class SidecarReadinessInventoryTests
             var assembly = Assembly.LoadFrom(dllPath);
             var implementations = assembly.GetTypes()
                 .Where(type => type is { IsClass: true, IsAbstract: false }
-                               && moduleType.IsAssignableFrom(type)
+                               && entryType.IsAssignableFrom(type)
                                && type.GetConstructor(Type.EmptyTypes) is not null)
                 .ToList();
 
             implementations.Should().ContainSingle(
-                $"'{dllName}' must contain exactly one public parameterless ISharpClawCoreModule implementation");
+                $"'{dllName}' must contain exactly one public parameterless ISharpClawCoreRegistration implementation");
 
-            modules.Add((ISharpClawCoreModule)Activator.CreateInstance(implementations[0])!);
+            modules.Add((ISharpClawCoreRegistration)Activator.CreateInstance(implementations[0])!);
         }
 
         return modules.OrderBy(module => module.Id, StringComparer.Ordinal).ToArray();
     }
 
-    private static IEnumerable<string> ExpectedModuleDlls()
+    private static IEnumerable<string> ExpectedRegistrationDlls()
     {
-        foreach (var dllName in ExpectedPackagedModuleDlls)
+        foreach (var dllName in ExpectedPackagedRegistrationDlls)
             yield return dllName;
 
         if (IsDeveloperConfiguration())
-            yield return "SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll";
+            yield return "SharpClaw.DefaultPackages.TestHarness.OutOfProcess.dll";
     }
 
     private static IReadOnlyDictionary<string, string[]> ExpectedBlockerKeys()
@@ -199,14 +199,14 @@ public sealed class SidecarReadinessInventoryTests
         return expected;
     }
 
-    private static IEnumerable<string> ExpectedReadyModuleIds()
+    private static IEnumerable<string> ExpectedReadyRegistrationIds()
     {
         var expected = new List<string>
         {
             "sharpclaw_agent_orchestration",
             "sharpclaw_editor_common",
             "sharpclaw_metrics",
-            "sharpclaw_module_dev",
+            "sharpclaw_registration_dev",
             "sharpclaw_providers_anthropic",
             "sharpclaw_providers_google",
             "sharpclaw_providers_llamasharp",
@@ -239,18 +239,18 @@ public sealed class SidecarReadinessInventoryTests
         return Path.Combine(solutionRoot, "SharpClaw.Runtime", "Host", "bin", config, tfm);
     }
 
-    private static IReadOnlyList<(ModuleManifest Manifest, ModuleManifestRuntimeInfo RuntimeInfo)>
+    private static IReadOnlyList<(PackageManifest Manifest, PackageRuntimeInfo RuntimeInfo)>
         LoadBundledManifests()
     {
-        var modulesDir = Path.Combine(ResolveApiOutputDirectory(), "modules");
-        Directory.Exists(modulesDir).Should().BeTrue();
+        var registrationsDir = Path.Combine(ResolveApiOutputDirectory(), "contributions");
+        Directory.Exists(registrationsDir).Should().BeTrue();
 
-        return Directory.EnumerateFiles(modulesDir, "module.json", SearchOption.AllDirectories)
+        return Directory.EnumerateFiles(registrationsDir, "package.json", SearchOption.AllDirectories)
             .Select(path =>
             {
                 var json = File.ReadAllText(path);
-                var manifest = JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)!;
-                return (Manifest: manifest, RuntimeInfo: ModuleManifestRuntimeInfo.FromJson(json));
+                var manifest = JsonSerializer.Deserialize<PackageManifest>(json, SecureJsonOptions.Manifest)!;
+                return (Manifest: manifest, RuntimeInfo: PackageRuntimeInfo.FromJson(json));
             })
             .OrderBy(entry => entry.Manifest.Id, StringComparer.Ordinal)
             .ToArray();

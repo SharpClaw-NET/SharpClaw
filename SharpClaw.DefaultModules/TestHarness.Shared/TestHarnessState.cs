@@ -4,10 +4,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 
-namespace SharpClaw.DefaultModules.TestHarness;
+namespace SharpClaw.DefaultPackages.TestHarness;
 
 public sealed partial class TestHarnessState
 {

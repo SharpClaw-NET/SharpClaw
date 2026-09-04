@@ -1,5 +1,5 @@
 using System.Runtime.ExceptionServices;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 
 namespace SharpClaw.Gateway.Infrastructure;
@@ -65,25 +65,7 @@ public sealed class GatewayBackgroundActionBoundary
     private readonly KernelGraph _graph;
     private readonly KernelActionDispatcher _dispatcher;
 
-    public GatewayBackgroundActionBoundary()
-        : this(CreateGraph())
-    {
-    }
-
-    internal GatewayBackgroundActionBoundary(KernelGraph graph)
-    {
-        _graph = graph ?? throw new ArgumentNullException(nameof(graph));
-        GatewayActionManifest.Validate(graph);
-        _dispatcher = new KernelActionDispatcher(
-            graph,
-            new KernelActionExecutionContext(
-                RequestPrincipal.Anonymous,
-                ExtensionFeatureSet.Empty,
-                Guid.NewGuid(),
-                Guid.NewGuid()));
-    }
-
-    internal GatewayBackgroundActionBoundary(
+    public GatewayBackgroundActionBoundary(
         KernelGraph graph,
         KernelActionDispatcher dispatcher)
     {
@@ -278,6 +260,4 @@ public sealed class GatewayBackgroundActionBoundary
             Guid.NewGuid(),
             Guid.NewGuid());
 
-    private static KernelGraph CreateGraph() =>
-        new KernelGraphBuilder().Compile();
 }

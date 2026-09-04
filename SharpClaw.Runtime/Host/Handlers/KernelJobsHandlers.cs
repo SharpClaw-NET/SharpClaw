@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Http;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.Host.Routing;
 

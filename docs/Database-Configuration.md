@@ -4,7 +4,7 @@
 
 The Runtime Host selects one database provider before startup. The default provider is `JsonFile`, which uses the JSONColdStore EF Core provider.
 
-The base model contains only ProviderDB, ModelDB, ModuleStateDB, ModuleConfigEntryDB, ModuleStorageRecordDB, and ModuleStorageIndexEntryDB.
+The base model contains only ProviderDB, ModelDB, RegistrationStateDB, ConfigurationEntryDB, ScopedStorageRecordDB, and ScopedStorageIndexEntryDB.
 
 Agents, Skills, Memory, Context, Threads, Channels, history, and Permission data belong to their owning modules. The base model does not keep inactive tables for those domains.
 
@@ -71,13 +71,13 @@ Relational command timeouts use `Database__Relational__CommandTimeoutSeconds` or
 
 The Runtime checks `CanConnectAsync` before it publishes readiness. A connection failure stops startup and does not switch to JSONColdStore.
 
-The base Runtime model remains the six generic entity types named in this guide. Module-owned EF models use `IModuleDbContextFactory` and remain in their owning packages.
+The base Runtime model remains the six generic entity types named in this guide. Module-owned EF models use `IOwnedDbContextFactory` and remain in their owning packages.
 
 ## Module Storage
 
-Modules declare storage through `ISharpClawModuleBuilder.Storage` and `IModuleStorageBuilder`.
+Modules declare storage through `IKernelBuilder.Storage` and `IStorageContractBuilder`.
 
-The host validates `ModuleStorageContractDescriptor` declarations and exposes them through `IModuleStorageGateway`.
+The host validates `ScopedStorageContractDescriptor` declarations and exposes them through `IScopedStorageGateway`.
 
 Module records use the module identifier, storage name, record key, and declared indexes. A module cannot access another module's storage without an explicit contract.
 

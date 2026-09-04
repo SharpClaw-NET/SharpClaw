@@ -1,5 +1,5 @@
 using SharpClaw.Core.Kernel;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 
 namespace SharpClaw.Runtime.Host;

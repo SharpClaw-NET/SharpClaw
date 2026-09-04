@@ -4,12 +4,12 @@ using SharpClaw.Core.Permissions;
 namespace SharpClaw.Tests.Core;
 
 [TestFixture]
-public sealed class ModulePermissionReconciliationEngineTests
+public sealed class RegistrationPermissionReconciliationEngineTests
 {
-    private readonly ModulePermissionReconciliationEngine _engine = new();
+    private readonly RegistrationPermissionReconciliationEngine _engine = new();
 
     [Test]
-    public void BuildPlan_AddsMissingModuleGrantsToWildcardPermissionSets()
+    public void BuildPlan_AddsMissingRegistrationGrantsToWildcardPermissionSets()
     {
         var permissionSetId = Guid.NewGuid();
 
@@ -17,7 +17,7 @@ public sealed class ModulePermissionReconciliationEngineTests
             ["existing_flag", "new_flag"],
             ["existing_resource", "new_resource"],
             [
-                new ModulePermissionSetReconciliationFact(
+                new RegistrationPermissionSetReconciliationFact(
                     permissionSetId,
                     ["existing_flag"],
                     ["existing_resource"])
@@ -26,15 +26,15 @@ public sealed class ModulePermissionReconciliationEngineTests
         plan.HasChanges.Should().BeTrue();
         plan.PermissionSets.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(
-                new ModulePermissionSetReconciliationPlan(
+                new RegistrationPermissionSetReconciliationPlan(
                     permissionSetId,
                     [
-                        new ModuleWildcardResourceGrantDescriptor(
+                        new RegistrationWildcardResourceGrantDescriptor(
                             "new_resource",
                             PermissionClearance.Independent)
                     ],
                     [
-                        new ModuleGlobalFlagGrantDescriptor(
+                        new RegistrationGlobalFlagGrantDescriptor(
                             "new_flag",
                             PermissionClearance.Independent)
                     ]));
@@ -47,7 +47,7 @@ public sealed class ModulePermissionReconciliationEngineTests
             ["new_flag"],
             ["new_resource"],
             [
-                new ModulePermissionSetReconciliationFact(
+                new RegistrationPermissionSetReconciliationFact(
                     Guid.NewGuid(),
                     [],
                     [])
@@ -58,13 +58,13 @@ public sealed class ModulePermissionReconciliationEngineTests
     }
 
     [Test]
-    public void BuildPlan_WhenAllModuleGrantsAlreadyExist_ReturnsNoChanges()
+    public void BuildPlan_WhenAllRegistrationGrantsAlreadyExist_ReturnsNoChanges()
     {
         var plan = _engine.BuildPlan(
             ["existing_flag"],
             ["existing_resource"],
             [
-                new ModulePermissionSetReconciliationFact(
+                new RegistrationPermissionSetReconciliationFact(
                     Guid.NewGuid(),
                     ["existing_flag"],
                     ["existing_resource"])
@@ -75,7 +75,7 @@ public sealed class ModulePermissionReconciliationEngineTests
     }
 
     [Test]
-    public void BuildPlan_DeduplicatesModuleKeysAgainstPlannedAdditions()
+    public void BuildPlan_DeduplicatesRegistrationKeysAgainstPlannedAdditions()
     {
         var permissionSetId = Guid.NewGuid();
 
@@ -83,7 +83,7 @@ public sealed class ModulePermissionReconciliationEngineTests
             ["new_flag", "new_flag"],
             ["new_resource", "new_resource"],
             [
-                new ModulePermissionSetReconciliationFact(
+                new RegistrationPermissionSetReconciliationFact(
                     permissionSetId,
                     [],
                     ["seed_resource"])
@@ -93,11 +93,11 @@ public sealed class ModulePermissionReconciliationEngineTests
             .ContainSingle()
             .Subject;
         permissionSetPlan.MissingGlobalFlags.Should().Equal(
-            new ModuleGlobalFlagGrantDescriptor(
+            new RegistrationGlobalFlagGrantDescriptor(
                 "new_flag",
                 PermissionClearance.Independent));
         permissionSetPlan.MissingWildcardResources.Should().Equal(
-            new ModuleWildcardResourceGrantDescriptor(
+            new RegistrationWildcardResourceGrantDescriptor(
                 "new_resource",
                 PermissionClearance.Independent));
     }

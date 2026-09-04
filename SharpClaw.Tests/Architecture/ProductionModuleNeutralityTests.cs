@@ -5,14 +5,15 @@ using System.Xml.Linq;
 namespace SharpClaw.Tests.Architecture;
 
 [TestFixture]
-public sealed class ProductionModuleNeutralityTests
+public sealed class ProductionRegistrationNeutralityTests
 {
     [Test]
-    public void ProductionProjectsDoNotReferenceOptionalModuleOrProviderPackages()
+    public void ProductionProjectsDoNotReferenceOptionalRegistrationOrProviderPackages()
     {
         var root = ResolveSourceRoot();
         var projectPaths = Directory.EnumerateFiles(root, "*.csproj", SearchOption.AllDirectories)
             .Where(path => !path.Contains("SharpClaw.Tests", StringComparison.OrdinalIgnoreCase))
+            .Where(path => !path.Contains("SharpClaw.DefaultPackages", StringComparison.OrdinalIgnoreCase))
             .Where(path => !path.Contains("SharpClaw.DefaultModules", StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
@@ -33,12 +34,12 @@ public sealed class ProductionModuleNeutralityTests
     }
 
     [Test]
-    public void GenericPayloadTargetDoesNotNameOptionalModules()
+    public void GenericPayloadTargetDoesNotNameOptionalRegistrations()
     {
         var targetPath = Path.Combine(
             ResolveSourceRoot(),
             "build",
-            "PackagedModulePayload.targets");
+            "PackagedContributionPayload.targets");
         var source = File.ReadAllText(targetPath);
 
         source.Should().NotContain("SharpClaw.Modules.");

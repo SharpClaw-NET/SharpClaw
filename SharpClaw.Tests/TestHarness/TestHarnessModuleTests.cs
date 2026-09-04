@@ -9,10 +9,10 @@ using SharpClaw.Core.Modules;
 namespace SharpClaw.Tests.TestHarness;
 
 [TestFixture]
-public sealed class TestHarnessModuleTests
+public sealed class TestHarnessRegistrationTests
 {
     [Test]
-    public async Task ModuleRegistersDynamicProvidersToolsHeaderTagsAndCostFeed()
+    public async Task RegistrationRegistersDynamicProvidersToolsHeaderTagsAndCostFeed()
     {
         await using var host = ChatHarnessHost.Create();
 
@@ -23,13 +23,13 @@ public sealed class TestHarnessModuleTests
         factory.IsAvailable(TestHarnessConstants.CostProviderKey).Should().BeTrue();
         factory.IsAvailable(TestHarnessConstants.EdenStyleProviderKey).Should().BeTrue();
 
-        var registry = host.Services.GetRequiredService<ModuleRegistry>();
+        var registry = host.Services.GetRequiredService<RegistrationCatalog>();
         registry.GetHeaderTag(TestHarnessConstants.HeaderTagName).Should().NotBeNull();
         registry.IsInlineTool(TestHarnessConstants.InlinePermissionedTool).Should().BeTrue();
         registry.IsInlineTool(TestHarnessConstants.InlinePermissionedToolAlias).Should().BeTrue();
-        registry.TryResolve(TestHarnessConstants.JobPermissionedTool, out var moduleId, out var toolName)
+        registry.TryResolve(TestHarnessConstants.JobPermissionedTool, out var SourceId, out var toolName)
             .Should().BeTrue();
-        moduleId.Should().Be(TestHarnessConstants.ModuleId);
+        SourceId.Should().Be(TestHarnessConstants.SourceId);
         toolName.Should().Be(TestHarnessConstants.JobPermissionedTool);
         registry.GetDescriptorByDefaultResourceKey(TestHarnessConstants.DefaultResourceKey)
             .Should().NotBeNull();

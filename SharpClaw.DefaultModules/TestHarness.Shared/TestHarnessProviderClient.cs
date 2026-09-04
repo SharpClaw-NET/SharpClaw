@@ -6,7 +6,7 @@ using System.Text.Json;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;
 
-namespace SharpClaw.DefaultModules.TestHarness;
+namespace SharpClaw.DefaultPackages.TestHarness;
 
 internal sealed class TestHarnessProviderClient(
     string providerKey,
@@ -241,7 +241,7 @@ internal sealed class TestHarnessProviderClient(
 }
 
 internal sealed class TestHarnessProviderPlugin(
-    string ownerModuleId,
+    string OwnerId,
     string providerKey,
     string displayName,
     bool supportsNativeToolCalling,
@@ -251,7 +251,7 @@ internal sealed class TestHarnessProviderPlugin(
 
     public string ProviderKey => providerKey;
     public string DisplayName => displayName;
-    public string OwnerModuleId => ownerModuleId;
+    public string OwnerId => OwnerId;
     public bool RequiresEndpoint => false;
     public bool RequiresApiKey => false;
     public IModelCapabilityResolver Capabilities => _capabilities;

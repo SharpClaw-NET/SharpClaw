@@ -2,19 +2,19 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Core;
 
 [TestFixture]
-public sealed class ModuleToolExecutionPlannerTests
+public sealed class RegistrationToolExecutionPlannerTests
 {
     [Test]
     public void BuildPlan_WhenActionKeyResolvesAndScriptJsonIsRawParameters_UsesResolvedTool()
     {
         var registry = CreateRegistry();
-        var planner = new ModuleToolExecutionPlanner();
+        var planner = new RegistrationToolExecutionPlanner();
 
         var plan = planner.BuildPlan(
             actionKey: "run",
@@ -22,7 +22,7 @@ public sealed class ModuleToolExecutionPlannerTests
             maxEnvelopeBytes: 1024,
             moduleRegistry: registry);
 
-        plan.ModuleId.Should().Be("test_module");
+        plan.SourceId.Should().Be("test_registration");
         plan.ToolName.Should().Be("run");
         plan.ResolvedFromActionKey.Should().BeTrue();
         plan.Parameters.GetProperty("value").GetInt32().Should().Be(42);
@@ -32,7 +32,7 @@ public sealed class ModuleToolExecutionPlannerTests
     public void BuildPlan_WhenActionKeyResolvesAndScriptJsonIsFullEnvelope_UsesNestedParameters()
     {
         var registry = CreateRegistry();
-        var planner = new ModuleToolExecutionPlanner();
+        var planner = new RegistrationToolExecutionPlanner();
 
         var plan = planner.BuildPlan(
             actionKey: "run",
@@ -42,7 +42,7 @@ public sealed class ModuleToolExecutionPlannerTests
             maxEnvelopeBytes: 1024,
             moduleRegistry: registry);
 
-        plan.ModuleId.Should().Be("test_module");
+        plan.SourceId.Should().Be("test_registration");
         plan.ToolName.Should().Be("run");
         plan.ResolvedFromActionKey.Should().BeTrue();
         plan.Parameters.GetProperty("value").GetInt32().Should().Be(7);
@@ -52,17 +52,17 @@ public sealed class ModuleToolExecutionPlannerTests
     public void BuildPlan_WhenActionKeyDoesNotResolve_DeserializesFullEnvelope()
     {
         var registry = CreateRegistry();
-        var planner = new ModuleToolExecutionPlanner();
+        var planner = new RegistrationToolExecutionPlanner();
 
         var plan = planner.BuildPlan(
             actionKey: "missing",
             scriptJson: """
-            {"module":"test_module","tool":"run","params":{"value":3}}
+            {"module":"test_registration","tool":"run","params":{"value":3}}
             """,
             maxEnvelopeBytes: 1024,
             moduleRegistry: registry);
 
-        plan.ModuleId.Should().Be("test_module");
+        plan.SourceId.Should().Be("test_registration");
         plan.ToolName.Should().Be("run");
         plan.ResolvedFromActionKey.Should().BeFalse();
         plan.Parameters.GetProperty("value").GetInt32().Should().Be(3);
@@ -72,7 +72,7 @@ public sealed class ModuleToolExecutionPlannerTests
     public void BuildPlan_WhenNoActionKeyAndNoScriptJson_Throws()
     {
         var registry = CreateRegistry();
-        var planner = new ModuleToolExecutionPlanner();
+        var planner = new RegistrationToolExecutionPlanner();
 
         var act = () => planner.BuildPlan(
             actionKey: null,
@@ -88,11 +88,11 @@ public sealed class ModuleToolExecutionPlannerTests
     public void BuildPlan_WhenEnvelopeExceedsLimit_Throws()
     {
         var registry = CreateRegistry();
-        var planner = new ModuleToolExecutionPlanner();
+        var planner = new RegistrationToolExecutionPlanner();
 
         var act = () => planner.BuildPlan(
             actionKey: null,
-            scriptJson: """{"module":"test_module","tool":"run","params":{}}""",
+            scriptJson: """{"module":"test_registration","tool":"run","params":{}}""",
             maxEnvelopeBytes: 10,
             moduleRegistry: registry);
 
@@ -103,23 +103,23 @@ public sealed class ModuleToolExecutionPlannerTests
     [Test]
     public void CreateEnvelopeJson_SerializesStandardEnvelope()
     {
-        var planner = new ModuleToolExecutionPlanner();
+        var planner = new RegistrationToolExecutionPlanner();
 
         var json = planner.CreateEnvelopeJson(
-            "test_module",
+            "test_registration",
             "run",
             """{"value":5}""");
 
         using var doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("module").GetString().Should().Be("test_module");
+        doc.RootElement.GetProperty("module").GetString().Should().Be("test_registration");
         doc.RootElement.GetProperty("tool").GetString().Should().Be("run");
         doc.RootElement.GetProperty("params").GetProperty("value").GetInt32().Should().Be(5);
     }
 
-    private static ModuleRegistry CreateRegistry()
+    private static RegistrationCatalog CreateRegistry()
     {
-        var registry = new ModuleRegistry();
-        registry.Register(new TestModule());
+        var registry = new RegistrationCatalog();
+        registry.Register(new TestRegistration());
         return registry;
     }
 
@@ -129,9 +129,9 @@ public sealed class ModuleToolExecutionPlannerTests
         return doc.RootElement.Clone();
     }
 
-    private sealed class TestModule : ISharpClawCoreModule
+    private sealed class TestRegistration : ISharpClawCoreRegistration
     {
-        public string Id => "test_module";
+        public string Id => "test_registration";
         public string DisplayName => "Test Module";
         public string ToolPrefix => "test";
 
@@ -139,13 +139,13 @@ public sealed class ModuleToolExecutionPlannerTests
         {
         }
 
-        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() =>
+        public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() =>
         [
             new(
                 "run",
                 "Run",
                 Json("""{"type":"object"}"""),
-                new ModuleToolPermission(
+                new RegistrationToolPermission(
                     IsPerResource: false,
                     Check: (_, _, _, _) => Task.FromResult(
                         AgentActionResult.Approve(

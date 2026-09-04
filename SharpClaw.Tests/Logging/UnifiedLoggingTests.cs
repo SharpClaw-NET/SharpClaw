@@ -86,22 +86,22 @@ public sealed class UnifiedLoggingTests
                 bootId);
             using var provider = new SerilogLoggerProvider(runtime.SerilogLogger, dispose: false);
             using var factory = LoggerFactory.Create(builder => builder.AddProvider(provider));
-            using var moduleFactory = new SharpClawModuleLoggerFactory(
+            using var registrationFactory = new SharpClawRegistrationLoggerFactory(
                 factory,
-                new SharpClawModuleLogContext(
+                new SharpClawRegistrationLogContext(
                     "module-a",
                     "1.2.3",
-                    SharpClawModuleHostKind.RuntimeInProcess,
+                    SharpClawRegistrationHostKind.RuntimeInProcess,
                     bootId));
 
             var properties = Enumerable.Range(0, 28)
                 .ToDictionary(
                     index => $"Property-{index:D2}\u0001",
                     _ => (object?)new string('p', 12_000));
-            properties["SharpClaw.ModuleId"] = "forged-module";
-            properties["SharpClaw.ModuleVersion"] = "forged-version";
-            properties["SharpClaw.ModuleHostKind"] = "forged-host";
-            properties["SharpClaw.ModuleBootId"] = Guid.Empty.ToString("D");
+            properties["SharpClaw.SourceId"] = "forged-module";
+            properties["SharpClaw.RegistrationVersion"] = "forged-version";
+            properties["SharpClaw.RegistrationHostKind"] = "forged-host";
+            properties["SharpClaw.RegistrationBootId"] = Guid.Empty.ToString("D");
 
             var hostileLogger = factory.CreateLogger(new string('c', 20_000) + "\u0002");
             hostileLogger.LogError(
@@ -109,7 +109,7 @@ public sealed class UnifiedLoggingTests
                 new InvalidOperationException(new string('x', 200_000) + "\u0004"),
                 "hostile {Payload}",
                 new string('m', 200_000) + "\u0005");
-            moduleFactory.CreateLogger<UnifiedLoggingTests>().Log(
+            registrationFactory.CreateLogger<UnifiedLoggingTests>().Log(
                 LogLevel.Error,
                 new EventId(18, "module-event"),
                 properties,
@@ -137,19 +137,19 @@ public sealed class UnifiedLoggingTests
                 .Should().ContainSingle().Subject).Should().BeLessThanOrEqualTo(4 * 1024);
 
             var module = await store.ReadAsync(
-                DurableStreamKey.Module("module-a", bootId),
+                DurableStreamKey.Registration("source-a", bootId),
                 1,
                 new DurableReadOptions());
             var record = module.Records.Should().ContainSingle().Subject;
-            record.Properties.Should().ContainKey("SharpClaw.ModuleId");
-            record.Properties!["SharpClaw.ModuleId"].Should().Be("module-a");
-            record.Properties["SharpClaw.ModuleVersion"].Should().Be("1.2.3");
-            record.Properties["SharpClaw.ModuleHostKind"]
-                .Should().Be(nameof(SharpClawModuleHostKind.RuntimeInProcess));
-            record.Properties["SharpClaw.ModuleBootId"].Should().Be(bootId.ToString("D"));
+            record.Properties.Should().ContainKey("SharpClaw.SourceId");
+            record.Properties!["SharpClaw.SourceId"].Should().Be("module-a");
+            record.Properties["SharpClaw.RegistrationVersion"].Should().Be("1.2.3");
+            record.Properties["SharpClaw.RegistrationHostKind"]
+                .Should().Be(nameof(SharpClawRegistrationHostKind.RuntimeInProcess));
+            record.Properties["SharpClaw.RegistrationBootId"].Should().Be(bootId.ToString("D"));
 
             var streamDirectory = new DurableStreamPathEncoder(root)
-                .GetStreamDirectory(DurableStreamKey.Module("module-a", bootId));
+                .GetStreamDirectory(DurableStreamKey.Registration("source-a", bootId));
             var segment = Directory.GetFiles(streamDirectory, "*.scseg")
                 .Should().ContainSingle().Subject;
             ReadBodyLength(segment).Should().BeLessThanOrEqualTo(4 * 1024);
@@ -190,7 +190,7 @@ public sealed class UnifiedLoggingTests
                     Retention = new DurableRetentionOptions
                     {
                         ProcessLogAge = TimeSpan.FromDays(1),
-                        ModuleLogAge = TimeSpan.FromDays(1),
+                        RegistrationLogAge = TimeSpan.FromDays(1),
                         MaximumEncodedBytes = long.MaxValue,
                         MinimumFreeBytes = 0,
                         MaximumDeletesPerRun = 1,
@@ -233,19 +233,19 @@ public sealed class UnifiedLoggingTests
                 bootId);
             using var provider = new SerilogLoggerProvider(runtime.SerilogLogger, dispose: false);
             using var factory = LoggerFactory.Create(builder => builder.AddProvider(provider));
-            using var moduleFactory = new SharpClawModuleLoggerFactory(
+            using var registrationFactory = new SharpClawRegistrationLoggerFactory(
                 factory,
-                new SharpClawModuleLogContext(
+                new SharpClawRegistrationLogContext(
                     "module-a",
                     "1.2.3",
-                    SharpClawModuleHostKind.RuntimeInProcess,
+                    SharpClawRegistrationHostKind.RuntimeInProcess,
                     bootId));
 
             Console.SetOut(blockingOutput);
             factory.CreateLogger<UnifiedLoggingTests>().LogInformation("first");
             blockingOutput.Started.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
             factory.CreateLogger<UnifiedLoggingTests>().LogInformation("queued");
-            moduleFactory.CreateLogger<UnifiedLoggingTests>().LogInformation("terminal drop");
+            registrationFactory.CreateLogger<UnifiedLoggingTests>().LogInformation("terminal drop");
             runtime.Dispatcher.DroppedRecords.Should().BeGreaterThan(0);
 
             var shutdown = runtime.FlushAndSealAsync().AsTask();
@@ -257,7 +257,7 @@ public sealed class UnifiedLoggingTests
                 1,
                 new DurableReadOptions(MaxScanBytes: 1024 * 1024));
             var module = await store.ReadAsync(
-                DurableStreamKey.Module("module-a", bootId),
+                DurableStreamKey.Registration("source-a", bootId),
                 1,
                 new DurableReadOptions(MaxScanBytes: 1024 * 1024));
             process.Records.Should().NotContain(record => record.EventName == "RecordsDropped");
@@ -293,18 +293,18 @@ public sealed class UnifiedLoggingTests
                 bootId);
             using var provider = new SerilogLoggerProvider(runtime.SerilogLogger, dispose: false);
             using var factory = LoggerFactory.Create(builder => builder.AddProvider(provider));
-            using var moduleFactory = new SharpClawModuleLoggerFactory(
+            using var registrationFactory = new SharpClawRegistrationLoggerFactory(
                 factory,
-                new SharpClawModuleLogContext(
+                new SharpClawRegistrationLogContext(
                     "module-a",
                     "1.2.3",
-                    SharpClawModuleHostKind.RuntimeInProcess,
+                    SharpClawRegistrationHostKind.RuntimeInProcess,
                     bootId));
 
             var processLogger = factory.CreateLogger<UnifiedLoggingTests>();
             for (var index = 0; index < 20; index++)
                 processLogger.LogInformation("process-{Index}", index);
-            moduleFactory.CreateLogger<UnifiedLoggingTests>()
+            registrationFactory.CreateLogger<UnifiedLoggingTests>()
                 .LogWarning("module-terminal");
 
             await runtime.FlushAndSealAsync();
@@ -315,7 +315,7 @@ public sealed class UnifiedLoggingTests
                 1,
                 new DurableReadOptions(MaxScanBytes: 1024 * 1024));
             var module = await store.ReadAsync(
-                DurableStreamKey.Module("module-a", bootId),
+                DurableStreamKey.Registration("source-a", bootId),
                 1,
                 new DurableReadOptions(MaxScanBytes: 1024 * 1024));
             process.Records.Should().HaveCount(20);
@@ -524,7 +524,7 @@ public sealed class UnifiedLoggingTests
     }
 
     [Test]
-    public async Task ModuleLoggerUsesTrustedModuleStreamAndCannotBeReroutedByProperties()
+    public async Task RegistrationLoggerUsesTrustedRegistrationStreamAndCannotBeReroutedByProperties()
     {
         var root = CreateRoot();
         try
@@ -539,21 +539,21 @@ public sealed class UnifiedLoggingTests
                 bootId);
             using var provider = new SerilogLoggerProvider(runtime.SerilogLogger, dispose: false);
             using var factory = LoggerFactory.Create(builder => builder.AddProvider(provider));
-            using var moduleFactory = new SharpClawModuleLoggerFactory(
+            using var registrationFactory = new SharpClawRegistrationLoggerFactory(
                 factory,
-                new SharpClawModuleLogContext(
+                new SharpClawRegistrationLogContext(
                     "module-a",
                     "1.2.3",
-                    SharpClawModuleHostKind.RuntimeInProcess,
+                    SharpClawRegistrationHostKind.RuntimeInProcess,
                     moduleBootId));
 
-            moduleFactory.CreateLogger<UnifiedLoggingTests>().LogInformation(
-                "module event {SharpClaw.ModuleId}",
+            registrationFactory.CreateLogger<UnifiedLoggingTests>().LogInformation(
+                "module event {SharpClaw.SourceId}",
                 "forged-process");
             await runtime.FlushAndSealAsync();
 
             var module = await store.ReadAsync(
-                DurableStreamKey.Module("module-a", moduleBootId),
+                DurableStreamKey.Registration("source-a", moduleBootId),
                 1,
                 new DurableReadOptions());
             var process = await store.ReadAsync(
@@ -562,7 +562,7 @@ public sealed class UnifiedLoggingTests
                 new DurableReadOptions());
             module.Records.Should().ContainSingle();
             process.Records.Should().BeEmpty();
-            module.Records.Single().Properties!["SharpClaw.ModuleId"]
+            module.Records.Single().Properties!["SharpClaw.SourceId"]
                 .Should().Be("module-a");
         }
         finally

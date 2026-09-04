@@ -3,23 +3,23 @@ using System.Net.Sockets;
 using System.Text.Json;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
-using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class ForeignModuleToolProxyTests
+public sealed class ForeignRegistrationToolProxyTests
 {
     [Test]
     public async Task DiscoveredToolsAreRegisteredAndExecuteThroughSidecar()
     {
         using var workspace = TestWorkspace.Create();
-        await using var foreignHost = await ForeignModuleHost.StartAsync(
+        await using var foreignHost = await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace));
-        var registry = new ModuleRegistry();
+        var registry = new RegistrationCatalog();
         registry.Register(foreignHost.Module, foreignHost);
         using var parameters = JsonDocument.Parse("""{"value":42}""");
         var job = new AgentJobContext(
@@ -37,8 +37,8 @@ public sealed class ForeignModuleToolProxyTests
             foreignHost.Services,
             CancellationToken.None);
 
-        registry.TryResolve("sample_job", out var moduleId, out var toolName).Should().BeTrue();
-        moduleId.Should().Be("sample_dotnet_module");
+        registry.TryResolve("sample_job", out var SourceId, out var toolName).Should().BeTrue();
+        SourceId.Should().Be("sample_dotnet_registration");
         toolName.Should().Be("sample_job");
         toolDefinitions.Should().Contain(tool => tool.Name == "sample_job");
         foreignHost.Module.GetToolDefinitions().Should().Contain(tool => tool.Name == "sample_job");
@@ -49,7 +49,7 @@ public sealed class ForeignModuleToolProxyTests
     public async Task DiscoveredInlineToolsExecuteThroughSidecar()
     {
         using var workspace = TestWorkspace.Create();
-        await using var foreignHost = await ForeignModuleHost.StartAsync(
+        await using var foreignHost = await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace));
@@ -76,7 +76,7 @@ public sealed class ForeignModuleToolProxyTests
     public async Task DiscoveredStreamingToolYieldsSidecarDeltas()
     {
         using var workspace = TestWorkspace.Create();
-        await using var foreignHost = await ForeignModuleHost.StartAsync(
+        await using var foreignHost = await ForeignRegistrationHost.StartAsync(
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace));
@@ -105,17 +105,17 @@ public sealed class ForeignModuleToolProxyTests
         chunks.Should().Equal("first:", "second");
     }
 
-    private static ModuleManifest Manifest() =>
+    private static PackageManifest Manifest() =>
         new(
-            "sample_dotnet_module",
+            "sample_dotnet_registration",
             "Sample .NET Module",
             "1.0.0",
             "sdm",
             "SharpClaw.TestFixtures.ForeignSidecar.dll",
             "0.0.0");
 
-    private static ModuleManifestRuntimeInfo RuntimeInfo() =>
-        ModuleManifestRuntimeInfo.FromJson("""
+    private static PackageRuntimeInfo RuntimeInfo() =>
+        PackageRuntimeInfo.FromJson("""
         {
           "runtime": "dotnet",
           "hostMode": "sidecar",
@@ -123,16 +123,16 @@ public sealed class ForeignModuleToolProxyTests
         }
         """);
 
-    private static ForeignModuleHostLaunchOptions CreateLaunchOptions(TestWorkspace workspace)
+    private static ForeignRegistrationHostLaunchOptions CreateLaunchOptions(TestWorkspace workspace)
     {
         var helperPath = ResolveSidecarHelperPath();
-        return new ForeignModuleHostLaunchOptions
+        return new ForeignRegistrationHostLaunchOptions
         {
             ExecutablePath = "dotnet",
             Arguments = [helperPath, "--mode", "normal"],
             WorkingDirectory = Path.GetDirectoryName(helperPath),
             ModuleDirectory = workspace.ModuleDir,
-            ModuleDataDirectory = workspace.DataDir,
+            RegistrationDataDirectory = workspace.DataDir,
             ControlAddress = new Uri($"http://127.0.0.1:{GetFreeTcpPort()}"),
             ControlToken = "run-token",
             StartupTimeout = TimeSpan.FromSeconds(5),
