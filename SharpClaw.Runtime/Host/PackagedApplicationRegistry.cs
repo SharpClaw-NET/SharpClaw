@@ -472,6 +472,15 @@ internal sealed class PackagedApplicationRegistry
         IReadOnlyList<InProcessRegistrationHost> inProcessRegistrations,
         IReadOnlyList<OutOfProcessRegistrationProxy> registrations)
     {
+        ValidateEndpointRouteCollisions(
+            inProcessRegistrations
+                .SelectMany(registration => registration.Graph.Application.Endpoints)
+                .Select(endpoint => endpoint.Descriptor)
+                .ToArray(),
+            registrations
+                .SelectMany(registration => registration.Client.Application.Endpoints)
+                .Select(endpoint => endpoint.Descriptor)
+                .ToArray());
         var targets = inProcessRegistrations
             .SelectMany(registration => registration.Graph.Application.Endpoints.Select(
                 endpoint => new EndpointTarget(null, registration, endpoint.Descriptor)))
@@ -482,19 +491,6 @@ internal sealed class PackagedApplicationRegistry
                         null,
                         endpoint.Descriptor))))
             .ToArray();
-        var duplicate = targets
-            .GroupBy(target => (
-                target.Descriptor.Path,
-                target.Descriptor.Method,
-                target.Descriptor.Transport))
-            .FirstOrDefault(group => group.Count() > 1);
-        if (duplicate is not null)
-        {
-            throw new InvalidOperationException(
-                $"The registration endpoint '{duplicate.Key.Method} {duplicate.Key.Path}' "
-                + $"for transport '{duplicate.Key.Transport}' is declared more than once.");
-        }
-
         return targets
             .GroupBy(target => (target.Descriptor.Path, target.Descriptor.Method))
             .Select(group => new EndpointRoute(
@@ -507,6 +503,28 @@ internal sealed class PackagedApplicationRegistry
             .OrderBy(route => route.Path, StringComparer.Ordinal)
             .ThenBy(route => route.Method, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    internal static void ValidateEndpointRouteCollisions(
+        IReadOnlyList<EndpointRouteDescriptor> inProcessEndpoints,
+        IReadOnlyList<EndpointRouteDescriptor> sidecarEndpoints)
+    {
+        ArgumentNullException.ThrowIfNull(inProcessEndpoints);
+        ArgumentNullException.ThrowIfNull(sidecarEndpoints);
+        var endpoints = inProcessEndpoints.Concat(sidecarEndpoints).ToArray();
+        for (var firstIndex = 0; firstIndex < endpoints.Length; firstIndex++)
+        {
+            for (var secondIndex = firstIndex + 1; secondIndex < endpoints.Length; secondIndex++)
+            {
+                var first = endpoints[firstIndex];
+                var second = endpoints[secondIndex];
+                if (!EndpointRouteCollisionPolicy.Conflicts(first, second))
+                    continue;
+                throw new InvalidOperationException(
+                    $"The registration endpoint routes '{first.Method} {first.Path}' and "
+                    + $"'{second.Method} {second.Path}' have the same host route match.");
+            }
+        }
     }
 
     private static IReadOnlyDictionary<string, string[]> CopyHeaders(IHeaderDictionary headers) =>

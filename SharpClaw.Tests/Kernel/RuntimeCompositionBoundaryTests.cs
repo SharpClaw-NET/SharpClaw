@@ -4,6 +4,7 @@ using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
+using SharpClaw.Runtime.Host;
 using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
@@ -63,6 +64,47 @@ public sealed class RuntimeCompositionBoundaryTests
             .ToArray();
 
         violations.Should().BeEmpty();
+    }
+
+    [TestCase("/Models/{id}", "/models/{name}")]
+    [TestCase("/models", "/models/")]
+    [TestCase("/models/{id:guid}", "/MODELS/{modelId:guid}")]
+    public void MixedHostEndpointRoutesRejectMatchEquivalentPatterns(
+        string inProcessPath,
+        string sidecarPath)
+    {
+        var act = () => PackagedApplicationRegistry.ValidateEndpointRouteCollisions(
+            [new EndpointRouteDescriptor(
+                "in-process",
+                inProcessPath,
+                "GET",
+                HostEndpointTransport.Http)],
+            [new EndpointRouteDescriptor(
+                "sidecar",
+                sidecarPath,
+                "GET",
+                HostEndpointTransport.Http)]);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*same host route match*");
+    }
+
+    [Test]
+    public void ExactHttpAndWebSocketRoutesShareOneRuntimeMapping()
+    {
+        var act = () => PackagedApplicationRegistry.ValidateEndpointRouteCollisions(
+            [new EndpointRouteDescriptor(
+                "in-process-http",
+                "/editor/{sessionId}",
+                "GET",
+                HostEndpointTransport.Http)],
+            [new EndpointRouteDescriptor(
+                "sidecar-websocket",
+                "/editor/{sessionId}",
+                "GET",
+                HostEndpointTransport.WebSocket)]);
+
+        act.Should().NotThrow();
     }
 
     private static ServiceProvider BuildServices(
