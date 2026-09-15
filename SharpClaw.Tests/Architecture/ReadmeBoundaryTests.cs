@@ -11,7 +11,7 @@ public sealed class ReadmeBoundaryTests
         var root = FindSourceRoot();
         var readme = File.ReadAllText(Path.Combine(root, "README.md"));
 
-        readme.Should().Contain("## Kernel By Default");
+        readme.Should().Contain("A default installation lets you select a provider and model");
         readme.Should().Contain("## Modules And Capabilities");
         readme.Should().Contain("| Module type | Capability when enabled |");
         readme.Should().Contain("## Bring Your Own Features");
