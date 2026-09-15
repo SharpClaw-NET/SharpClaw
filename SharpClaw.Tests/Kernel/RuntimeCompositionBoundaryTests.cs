@@ -1,5 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Template;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
@@ -69,6 +72,7 @@ public sealed class RuntimeCompositionBoundaryTests
     [TestCase("/Models/{id}", "/models/{name}")]
     [TestCase("/models", "/models/")]
     [TestCase("/models/{id:guid}", "/MODELS/{modelId:guid}")]
+    [TestCase("/\u03A3", "/\u03C2")]
     public void MixedHostEndpointRoutesRejectMatchEquivalentPatterns(
         string inProcessPath,
         string sidecarPath)
@@ -87,6 +91,34 @@ public sealed class RuntimeCompositionBoundaryTests
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*same host route match*");
+    }
+
+    [TestCase("/\u03A3", "/\u03C2", true)]
+    [TestCase("/K", "/\u212A", false)]
+    public void RouteCollisionPolicyMatchesAspNetUnicodeLiteralMatching(
+        string registeredPath,
+        string requestPath,
+        bool expectedMatch)
+    {
+        var routeValues = new RouteValueDictionary();
+        var matcher = new TemplateMatcher(
+            TemplateParser.Parse(registeredPath.TrimStart('/')),
+            new RouteValueDictionary());
+        var frameworkMatch = matcher.TryMatch(new PathString(requestPath), routeValues);
+        var policyConflict = EndpointRouteCollisionPolicy.Conflicts(
+            new EndpointRouteDescriptor(
+                "registered",
+                registeredPath,
+                "GET",
+                HostEndpointTransport.Http),
+            new EndpointRouteDescriptor(
+                "request",
+                requestPath,
+                "GET",
+                HostEndpointTransport.Http));
+
+        frameworkMatch.Should().Be(expectedMatch);
+        policyConflict.Should().Be(frameworkMatch);
     }
 
     [Test]
