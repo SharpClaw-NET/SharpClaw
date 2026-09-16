@@ -2,32 +2,33 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.ModuleSDK;
+using RestrictionDecision = SharpClaw.Contracts.Kernel.AuthorizationRestriction;
 
-namespace SharpClaw.TestFixtures.CustomPermissionPolicy;
+namespace SharpClaw.TestFixtures.AuthorizationRestriction.InProcess;
 
-public sealed class CustomPermissionRestrictionModule : ISharpClawModule
+public sealed class InProcessAuthorizationRestrictionModule : ISharpClawModule
 {
-    public const string SourceId = "sharpclaw_test_permission_restriction";
-    public const string DiagnosticsCommand = "test-permission-restriction-state";
+    public const string SourceId = "sharpclaw_test_authorization_restriction_in_process";
+    public const string DenyRole = "test-authorization-restriction-in-process-deny";
+    public const string DiagnosticsCommand = "test-authorization-restriction-state";
 
     private readonly AuthorizationRestrictionCapture _capture = new();
 
     public ModuleIdentity Identity { get; } = new(
         SourceId,
-        "Tracked Permission Restriction",
-        "test_permission");
+        "Tracked In-Process Authorization Restriction",
+        "test_auth");
 
     public void ConfigureServices(IServiceCollection services)
     {
         services.AddSingleton(_capture);
-        services.AddAuthorizationRestriction<RoleAuthorizationRestriction>(
-            "tracked-role-boundary");
+        services.AddAuthorizationRestriction<RoleAuthorizationRestriction>("tracked-in-process-role");
         services.AddCliCommand<AuthorizationRestrictionDiagnosticsHandler>(new CliCommandDescriptor(
             DiagnosticsCommand,
             [],
-            "Reports authorization restriction execution evidence.",
-            new JsonSchemaReference("test.permission.restriction.cli.input", 1, "none"),
-            new JsonSchemaReference("test.permission.restriction.cli.result", 1, "json")));
+            "Reports authorization restriction lifecycle evidence.",
+            new JsonSchemaReference("test.authorization.restriction.cli.input", 1, "none"),
+            new JsonSchemaReference("test.authorization.restriction.cli.result", 1, "json")));
     }
 
     public ValueTask StartAsync(ServiceStartContext context, CancellationToken ct)
@@ -47,8 +48,6 @@ public sealed class CustomPermissionRestrictionModule : ISharpClawModule
 
 public sealed class RoleAuthorizationRestriction : IAuthorizationRestriction, IDisposable
 {
-    public const string DenyRole = "test-permission-restriction-deny";
-
     private readonly AuthorizationRestrictionCapture _capture;
     private int _disposed;
 
@@ -58,19 +57,20 @@ public sealed class RoleAuthorizationRestriction : IAuthorizationRestriction, ID
         _capture.RecordConstruction();
     }
 
-    public ValueTask<AuthorizationRestriction> EvaluateAsync(
+    public ValueTask<RestrictionDecision> EvaluateAsync(
         AuthorizationRestrictionContext context,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var denied = context.Caller.Roles?.Any(role =>
-            string.Equals(role, DenyRole, StringComparison.Ordinal)) == true;
+        var denied = context.Caller.Roles?.Contains(
+            InProcessAuthorizationRestrictionModule.DenyRole,
+            StringComparer.Ordinal) == true;
         _capture.RecordEvaluation(context, denied);
         return ValueTask.FromResult(denied
-            ? AuthorizationRestriction.Deny(
-                "tracked_role_denied",
-                "The tracked permission restriction denies this caller.")
-            : AuthorizationRestriction.Preserve());
+            ? RestrictionDecision.Deny(
+                "tracked_in_process_role_denied",
+                "The tracked in-process restriction denies this caller.")
+            : RestrictionDecision.Preserve());
     }
 
     public void Dispose()
@@ -105,10 +105,6 @@ public sealed class AuthorizationRestrictionCapture
     private bool _lastAuthenticated;
     private Guid? _lastTraceId;
     private Guid? _lastIdempotencyKey;
-    private Guid? _lastInvocationId;
-    private Guid? _lastParentInvocationId;
-    private int _lastDepth;
-    private int _lastAttempt;
     private string? _lastOperation;
 
     public void RecordStart() => Interlocked.Increment(ref _starts);
@@ -128,10 +124,6 @@ public sealed class AuthorizationRestrictionCapture
             _lastAuthenticated = context.Caller.IsAuthenticated;
             _lastTraceId = context.TraceId;
             _lastIdempotencyKey = context.IdempotencyKey;
-            _lastInvocationId = context.InvocationId;
-            _lastParentInvocationId = context.ParentInvocationId;
-            _lastDepth = context.Depth;
-            _lastAttempt = context.Attempt;
             _lastOperation = context.Request.Operation;
         }
     }
@@ -149,14 +141,11 @@ public sealed class AuthorizationRestrictionCapture
                 Volatile.Read(ref _evaluations),
                 Volatile.Read(ref _denials),
                 Volatile.Read(ref _disposals),
+                Volatile.Read(ref _constructions) - Volatile.Read(ref _disposals),
                 _lastSubjectId,
                 _lastAuthenticated,
                 _lastTraceId,
                 _lastIdempotencyKey,
-                _lastInvocationId,
-                _lastParentInvocationId,
-                _lastDepth,
-                _lastAttempt,
                 _lastOperation);
         }
     }
@@ -169,12 +158,9 @@ public sealed record AuthorizationRestrictionSnapshot(
     int Evaluations,
     int Denials,
     int Disposals,
+    int Active,
     string? LastSubjectId,
     bool LastAuthenticated,
     Guid? LastTraceId,
     Guid? LastIdempotencyKey,
-    Guid? LastInvocationId,
-    Guid? LastParentInvocationId,
-    int LastDepth,
-    int LastAttempt,
     string? LastOperation);

@@ -120,7 +120,7 @@ $repositories = @(
     [pscustomobject]@{
         Name = "contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
-        Commit = "63c96eb63b84501f6e9c5e7eea40f3ed31d801e4"
+        Commit = "b7defdd58865df33d7d274dba3c8b20accb4ba6e"
     },
     [pscustomobject]@{
         Name = "core"
@@ -130,12 +130,12 @@ $repositories = @(
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "0c1b0ebeebc11f936d129964cd7118a610b99750"
+        Commit = "d5588885457dab006455e3c8e504b50f3635346d"
     },
     [pscustomobject]@{
         Name = "agent-modules"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "bd56d1ad2452009fd85df440cdbe5591a0a4b6d6"
+        Commit = "b88a8dfb52aa2dc74b6413b260a18e898c2571da"
     },
     [pscustomobject]@{
         Name = "editor-integrations"

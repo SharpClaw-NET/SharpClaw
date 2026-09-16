@@ -71,6 +71,7 @@
     <ProjectReference Include="..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
     <ProjectReference Include="..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\SharpClaw.DefaultModules.TestHarness.OutOfProcess.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\SharpClaw.DefaultModules\TestHarness.InProcess\SharpClaw.DefaultModules.TestHarness.InProcess.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="Fixtures\AuthorizationRestriction.InProcess\SharpClaw.TestFixtures.AuthorizationRestriction.InProcess.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="Fixtures\ExternalModule\SharpClaw.TestFixtures.ExternalModule.csproj" />
     <ProjectReference Include="Fixtures\ForeignSidecar\SharpClaw.TestFixtures.ForeignSidecar.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
@@ -103,6 +104,15 @@
       <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\*.dll"
                                 Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
       <_InProcessHarnessManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\package.json" />
+      <_InProcessAuthorizationPayload Include="$(ArtifactsPath)\bin\SharpClaw.TestFixtures.AuthorizationRestriction.InProcess\$(Configuration.ToLower())\SharpClaw.TestFixtures.AuthorizationRestriction.InProcess.dll"
+                                      Condition="'$(ArtifactsPath)' != ''" />
+      <_InProcessAuthorizationPayload Include="$(ArtifactsPath)\bin\SharpClaw.TestFixtures.AuthorizationRestriction.InProcess\$(Configuration.ToLower())\SharpClaw.TestFixtures.AuthorizationRestriction.InProcess.deps.json"
+                                      Condition="'$(ArtifactsPath)' != ''" />
+      <_InProcessAuthorizationPayload Include="$(MSBuildProjectDirectory)\Fixtures\AuthorizationRestriction.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.TestFixtures.AuthorizationRestriction.InProcess.dll"
+                                      Condition="'$(ArtifactsPath)' == ''" />
+      <_InProcessAuthorizationPayload Include="$(MSBuildProjectDirectory)\Fixtures\AuthorizationRestriction.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.TestFixtures.AuthorizationRestriction.InProcess.deps.json"
+                                      Condition="'$(ArtifactsPath)' == ''" />
+      <_InProcessAuthorizationManifest Include="$(MSBuildProjectDirectory)\Fixtures\AuthorizationRestriction.InProcess\package.json" />
     </ItemGroup>
     <RemoveDir Directories="$(OutDir)contributions\sharpclaw_test_harness;$(OutDir)contributions\sharpclaw_test_harness_in_process;$(OutDir)contributions\sharpclaw_test_harness_out_of_process" />
     <Copy SourceFiles="@(_BundledRegistrationDll);@(_NonHostDll)"
@@ -117,6 +127,14 @@
           DestinationFiles="$(OutDir)test-contributions\sharpclaw_test_harness_in_process\package.json"
           SkipUnchangedFiles="true"
           Condition="'@(_InProcessHarnessManifest)' != ''" />
+    <Copy SourceFiles="@(_InProcessAuthorizationPayload)"
+          DestinationFolder="$(OutDir)authorization-contributions\sharpclaw_test_authorization_restriction_in_process"
+          SkipUnchangedFiles="true"
+          Condition="'@(_InProcessAuthorizationPayload)' != ''" />
+    <Copy SourceFiles="@(_InProcessAuthorizationManifest)"
+          DestinationFiles="$(OutDir)authorization-contributions\sharpclaw_test_authorization_restriction_in_process\package.json"
+          SkipUnchangedFiles="true"
+          Condition="'@(_InProcessAuthorizationManifest)' != ''" />
     <Copy SourceFiles="@(_PackagedSidecarHostFile)"
           DestinationFolder="$(OutDir)"
           SkipUnchangedFiles="true"

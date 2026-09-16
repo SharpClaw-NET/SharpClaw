@@ -58,6 +58,23 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         IReadOnlyList<string> registrationRoots,
         IConfiguration configuration)
     {
+        var registrationSet = LoadCore(registrationRoots, configuration);
+        try
+        {
+            AddInProcessAuthorities(registrationSet, []);
+            return registrationSet;
+        }
+        catch
+        {
+            registrationSet.Dispose();
+            throw;
+        }
+    }
+
+    private static PackagedDotNetRegistrationSet LoadCore(
+        IReadOnlyList<string> registrationRoots,
+        IConfiguration configuration)
+    {
         ArgumentNullException.ThrowIfNull(registrationRoots);
         ArgumentNullException.ThrowIfNull(configuration);
 
@@ -99,19 +116,30 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         }
     }
 
-    public static async Task<PackagedDotNetRegistrationSet> LoadProductionAsync(
+    public static Task<PackagedDotNetRegistrationSet> LoadProductionAsync(
         string registrationsRoot,
         IConfiguration configuration,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(registrationsRoot);
+        return LoadProductionAsync([registrationsRoot], configuration, cancellationToken);
+    }
+
+    internal static async Task<PackagedDotNetRegistrationSet> LoadProductionAsync(
+        IReadOnlyList<string> registrationRoots,
+        IConfiguration configuration,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(registrationRoots);
+        if (registrationRoots.Count == 0 || registrationRoots.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException("At least one registration root is required.", nameof(registrationRoots));
         ArgumentNullException.ThrowIfNull(configuration);
 
-        var registrationSet = Load(registrationsRoot, configuration);
+        var registrationSet = LoadCore(registrationRoots, configuration);
         var pending = new List<PendingSidecar>();
         try
         {
-            foreach (var manifest in EnumerateManifests([registrationsRoot])
+            foreach (var manifest in EnumerateManifests(registrationRoots)
                          .Where(item => IsEnabled(item, configuration))
                          .Where(item => item.RuntimeInfo.IsSidecarHostMode))
             {
@@ -142,9 +170,35 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                 }
             }
 
+            var inProcessDiscoveries = registrationSet._inProcessHosts
+                .Select(host => new PendingInProcess(
+                    host,
+                    CompiledBehaviorAuthority.Describe(
+                        host.Graph,
+                        OutOfProcessSidecarHostProtocol.Version,
+                        1,
+                        DateTimeOffset.UtcNow.AddMinutes(1))))
+                .ToArray();
+            var discoveries = inProcessDiscoveries
+                .Select(item => item.Discovery)
+                .Concat(pending.Select(item => item.Discovery.Discovery))
+                .ToArray();
+
+            foreach (var item in inProcessDiscoveries)
+            {
+                var hostCatalog = CreateHostCatalog(item.Discovery, discoveries);
+                var authority = CompiledBehaviorAuthority.Create(
+                    item.Host.Graph,
+                    item.Discovery,
+                    hostCatalog);
+                registrationSet._services.Add(ServiceDescriptor.Singleton(
+                    typeof(IExternalBehaviorAuthority),
+                    authority));
+            }
+
             foreach (var item in pending)
             {
-                var hostCatalog = CreateHostCatalog(item, pending);
+                var hostCatalog = CreateHostCatalog(item.Discovery.Discovery, discoveries);
                 var client = await item.Discovery.AuthorizeAsync(hostCatalog, cancellationToken);
                 var proxy = new OutOfProcessRegistrationProxy(
                     item.Manifest.Manifest.Id,
@@ -155,6 +209,8 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                 registrationSet._sidecarRegistrations.Add(proxy);
                 registrationSet._sidecarProcesses.Add(item.Process);
             }
+
+            AddExternalContractExports(registrationSet._services, pending);
 
             registrationSet._application = new PackagedApplicationRegistry(
                 registrationSet._inProcessHosts,
@@ -318,9 +374,114 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         return manifests;
     }
 
-    private static SidecarHostDescriptorCatalog CreateHostCatalog(
-        PendingSidecar current,
+    private static void AddExternalContractExports(
+        ICollection<ServiceDescriptor> services,
         IReadOnlyList<PendingSidecar> registrations)
+    {
+        var bindings = services
+            .Where(descriptor => descriptor.ServiceType == typeof(ServiceContractBinding))
+            .Select(descriptor => descriptor.ImplementationInstance as ServiceContractBinding)
+            .Where(binding => binding is not null)
+            .Cast<ServiceContractBinding>()
+            .ToArray();
+        var localExports = bindings
+            .Where(binding => binding.IsExport)
+            .ToDictionary(binding => binding.ContractName, StringComparer.Ordinal);
+        var externalExports = registrations
+            .SelectMany(registration =>
+                (registration.Manifest.Manifest.Exports ?? [])
+                .Select(export => (registration.Manifest.Id, Export: export)))
+            .ToArray();
+
+        var duplicate = externalExports
+            .GroupBy(item => item.Export.ContractName, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+        {
+            throw new InvalidOperationException(
+                $"Contract '{duplicate.Key}' has more than one external provider.");
+        }
+
+        foreach (var (sourceId, export) in externalExports)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(export.ContractName);
+            if (localExports.ContainsKey(export.ContractName))
+            {
+                throw new InvalidOperationException(
+                    $"Contract '{export.ContractName}' has both local and external providers.");
+            }
+
+            var requiredTypes = bindings
+                .Where(binding => !binding.IsExport)
+                .Where(binding => string.Equals(
+                    binding.ContractName,
+                    export.ContractName,
+                    StringComparison.Ordinal))
+                .Select(binding => binding.ServiceType)
+                .Distinct()
+                .ToArray();
+            if (requiredTypes.Length == 0)
+                continue;
+            if (requiredTypes.Length != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Contract '{export.ContractName}' has incompatible local requirements.");
+            }
+
+            var serviceType = requiredTypes[0];
+            if (!string.IsNullOrWhiteSpace(export.ServiceType)
+                && !string.Equals(export.ServiceType, serviceType.FullName, StringComparison.Ordinal)
+                && !string.Equals(export.ServiceType, serviceType.AssemblyQualifiedName, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"External contract '{export.ContractName}' does not match its local service type.");
+            }
+
+            services.Add(ServiceDescriptor.Singleton(
+                typeof(ServiceContractBinding),
+                new ServiceContractBinding(
+                    sourceId,
+                    serviceType,
+                    export.ContractName,
+                    SchemaVersion: 1,
+                    MaxBytes: 65_536,
+                    IsExport: true,
+                    Optional: false)));
+        }
+    }
+
+    private static void AddInProcessAuthorities(
+        PackagedDotNetRegistrationSet registrationSet,
+        IReadOnlyList<SidecarDiscoveryEnvelope> otherDiscoveries)
+    {
+        var pending = registrationSet._inProcessHosts
+            .Select(host => new PendingInProcess(
+                host,
+                CompiledBehaviorAuthority.Describe(
+                    host.Graph,
+                    OutOfProcessSidecarHostProtocol.Version,
+                    1,
+                    DateTimeOffset.UtcNow.AddMinutes(1))))
+            .ToArray();
+        var discoveries = pending
+            .Select(item => item.Discovery)
+            .Concat(otherDiscoveries)
+            .ToArray();
+        foreach (var item in pending)
+        {
+            var authority = CompiledBehaviorAuthority.Create(
+                item.Host.Graph,
+                item.Discovery,
+                CreateHostCatalog(item.Discovery, discoveries));
+            registrationSet._services.Add(ServiceDescriptor.Singleton(
+                typeof(IExternalBehaviorAuthority),
+                authority));
+        }
+    }
+
+    private static SidecarHostDescriptorCatalog CreateHostCatalog(
+        SidecarDiscoveryEnvelope current,
+        IReadOnlyList<SidecarDiscoveryEnvelope> registrations)
     {
         var actions = KernelActionCatalog.Descriptors
             .Select(item => new SidecarHostActionDescriptor(
@@ -345,12 +506,15 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                 item.ProtocolVersionRange))
             .ToDictionary(item => item.EventKey);
 
-        var ownActionKeys = current.Discovery.Discovery.ActionDefinitions
+        var ownActionKeys = current.ActionDefinitions
             .Select(item => item.ActionKey)
             .ToHashSet();
         foreach (var group in registrations
-                     .Where(item => !ReferenceEquals(item, current))
-                     .SelectMany(item => item.Discovery.Discovery.ActionDefinitions)
+                     .Where(item => !string.Equals(
+                         item.SourceId,
+                         current.SourceId,
+                         StringComparison.Ordinal))
+                     .SelectMany(item => item.ActionDefinitions)
                      .Where(item => !ownActionKeys.Contains(item.ActionKey))
                      .GroupBy(item => item.ActionKey))
         {
@@ -375,12 +539,15 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             }
         }
 
-        var ownEventKeys = current.Discovery.Discovery.EventDefinitions
+        var ownEventKeys = current.EventDefinitions
             .Select(item => item.EventKey)
             .ToHashSet();
         foreach (var group in registrations
-                     .Where(item => !ReferenceEquals(item, current))
-                     .SelectMany(item => item.Discovery.Discovery.EventDefinitions)
+                     .Where(item => !string.Equals(
+                         item.SourceId,
+                         current.SourceId,
+                         StringComparison.Ordinal))
+                     .SelectMany(item => item.EventDefinitions)
                      .Where(item => !ownEventKeys.Contains(item.EventKey))
                      .GroupBy(item => item.EventKey))
         {
@@ -751,4 +918,8 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         PackagedRegistrationManifest Manifest,
         PackagedSidecarProcess Process,
         OutOfProcessRegistrationDiscovery Discovery);
+
+    private sealed record PendingInProcess(
+        InProcessRegistrationHost Host,
+        SidecarDiscoveryEnvelope Discovery);
 }

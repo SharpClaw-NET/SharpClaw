@@ -24,6 +24,7 @@
   <Folder Name="/Tests/Infrastructure/">
     <Project Path="SharpClaw.DefaultModules/TestHarness.InProcess/SharpClaw.DefaultModules.TestHarness.InProcess.csproj" />
     <Project Path="SharpClaw.DefaultModules/TestHarness.OutOfProcess/SharpClaw.DefaultModules.TestHarness.OutOfProcess.csproj" />
+    <Project Path="SharpClaw.Tests/Fixtures/AuthorizationRestriction.InProcess/SharpClaw.TestFixtures.AuthorizationRestriction.InProcess.csproj" />
     <Project Path="SharpClaw.Tests/Fixtures/PermissionRestriction/SharpClaw.TestFixtures.PermissionRestriction.csproj" />
   </Folder>
   <Folder Name="/Solution Items/Build/">

@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Kernel;
@@ -33,6 +34,13 @@ public sealed class AgentOrchestrationHostGateTests
     private const string AgentsRegistrationId = "sharpclaw_agents";
     private const string RestrictionModuleId = "sharpclaw_test_permission_restriction";
     private const string RestrictionDenyRole = "test-permission-restriction-deny";
+    private const string RestrictionDiagnostics = "test-permission-restriction-state";
+    private const string InProcessRestrictionId =
+        "sharpclaw_test_authorization_restriction_in_process";
+    private const string InProcessRestrictionDenyRole =
+        "test-authorization-restriction-in-process-deny";
+    private const string InProcessRestrictionDiagnostics =
+        "test-authorization-restriction-state";
     private const string ContextActionKey = "context.api.dispatch";
     private const string PermissionActionKey = "permission.api.dispatch";
     private const string AgentsActionKey = "agents.api.dispatch";
@@ -59,13 +67,18 @@ public sealed class AgentOrchestrationHostGateTests
         var configuration = CreateConfiguration(provider.Endpoint);
 
         await using (var registrationSet = await PackagedDotNetRegistrationSet.LoadProductionAsync(
-                         Path.Combine(AppContext.BaseDirectory, "contributions"),
+                         [
+                             Path.Combine(AppContext.BaseDirectory, "contributions"),
+                             Path.Combine(AppContext.BaseDirectory, "authorization-contributions"),
+                         ],
                          configuration))
         {
             RecordStage("production-gate-stage=modules-loaded");
             var sidecars = registrationSet.Sidecars.ToArray();
             sidecars.Select(module => module.Identity.Id).Should().Contain(
                 [ContextRegistrationId, PermissionRegistrationId, AgentsRegistrationId, RestrictionModuleId]);
+            registrationSet.SourceIds.Should().Contain(InProcessRestrictionId);
+            sidecars.Should().NotContain(registration => registration.SourceId == InProcessRestrictionId);
             registrationSet.SourceIds.Should().Contain("sharpclaw_providers_openai_compat");
             sidecars.Should().NotContain(registration =>
                 registration.SourceId == "sharpclaw_providers_openai_compat");
@@ -78,12 +91,14 @@ public sealed class AgentOrchestrationHostGateTests
             databaseOptions.JsonFile.EncryptAtRest = false;
 
             var telemetry = new RecordingScopedStorageTelemetry();
+            var failureLog = new FailureCaptureLoggerProvider();
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions
             {
                 ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
             });
             builder.Configuration.Sources.Clear();
             builder.Configuration.AddConfiguration(configuration);
+            builder.Logging.AddProvider(failureLog);
             builder.WebHost.UseUrls("http://127.0.0.1:0");
             RuntimeHostComposition.RegisterServices(
                 builder.Services,
@@ -134,6 +149,14 @@ public sealed class AgentOrchestrationHostGateTests
                 var context = FindRegistration(sidecars, ContextRegistrationId);
                 var permission = FindRegistration(sidecars, PermissionRegistrationId);
                 var agents = FindRegistration(sidecars, AgentsRegistrationId);
+
+                var initialRestrictionState = await ReadInProcessRestrictionStateAsync(
+                    registrationSet.Application,
+                    adapter,
+                    administrator);
+                initialRestrictionState.GetProperty("Starts").GetInt32().Should().Be(1);
+                initialRestrictionState.GetProperty("Stops").GetInt32().Should().Be(0);
+                initialRestrictionState.GetProperty("Active").GetInt32().Should().Be(0);
 
                 await AssertApplicationCliAsync(
                     registrationSet.Application,
@@ -216,15 +239,33 @@ public sealed class AgentOrchestrationHostGateTests
                     FormatFailure(policy, telemetry));
                 RecordStage("production-gate-stage=policy-saved");
 
+                var authorizationProbe = await InvokeEntryAsync(
+                    permission.Client,
+                    "authorization.evaluate",
+                    JsonSerializer.SerializeToElement(
+                        new AuthorizationRequest(
+                            "manage_agents",
+                            new AuthorizationResource("global", "global")),
+                        WebJson),
+                    worker);
+                authorizationProbe.Kind.Should().Be(
+                    ActionOutcomeKind.Completed,
+                    FormatFailure(authorizationProbe, telemetry));
+
                 var allowed = await InvokeApiAsync(
                     agents.Client,
                     AgentsActionKey,
                     "agent.list",
                     EmptyPayload,
                     worker);
+                var allowedRestrictionState = await ReadRestrictionStateAsync(
+                    registrationSet.Application,
+                    adapter,
+                    administrator);
                 allowed.Kind.Should().Be(
                     ActionOutcomeKind.Completed,
-                    FormatFailure(allowed, telemetry));
+                    FormatFailure(allowed, telemetry)
+                    + $"; restriction={allowedRestrictionState.GetRawText()}");
                 RecordStage("production-gate-stage=provider-allow-complete");
 
                 var agentWritesBeforeRestriction = telemetry.Events.Count(item =>
@@ -254,6 +295,54 @@ public sealed class AgentOrchestrationHostGateTests
                     item.SourceId == AgentsRegistrationId
                     && item.Operation == ScopedStorageOperations.Upsert)
                     .Should().Be(agentWritesBeforeRestriction);
+
+                var inProcessTraceId = Guid.NewGuid();
+                var inProcessIdempotencyKey = Guid.NewGuid();
+                var inProcessRestrictedWorker = new RequestPrincipal(
+                    worker.SubjectId,
+                    "In-Process Restricted Worker",
+                    new HashSet<string>([InProcessRestrictionDenyRole], StringComparer.Ordinal),
+                    IsAuthenticated: true);
+                var agentWritesBeforeInProcessRestriction = telemetry.Events.Count(item =>
+                    item.SourceId == AgentsRegistrationId
+                    && item.Operation == ScopedStorageOperations.Upsert);
+                var inProcessRestricted = await InvokeApiAsync(
+                    agents.Client,
+                    AgentsActionKey,
+                    "agent.create",
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        name = "Rejected In-Process Agent",
+                        modelId = Guid.NewGuid(),
+                        providerKey = "custom",
+                        modelName = "rejected-in-process-model",
+                        systemPrompt = "This write must not run.",
+                    }, WebJson),
+                    inProcessRestrictedWorker,
+                    traceId: inProcessTraceId,
+                    idempotencyKey: inProcessIdempotencyKey);
+                inProcessRestricted.Kind.Should().NotBe(ActionOutcomeKind.Completed);
+                telemetry.Events.Count(item =>
+                    item.SourceId == AgentsRegistrationId
+                    && item.Operation == ScopedStorageOperations.Upsert)
+                    .Should().Be(agentWritesBeforeInProcessRestriction);
+
+                var deniedRestrictionState = await ReadInProcessRestrictionStateAsync(
+                    registrationSet.Application,
+                    adapter,
+                    administrator);
+                deniedRestrictionState.GetProperty("LastSubjectId").GetString()
+                    .Should().Be(inProcessRestrictedWorker.SubjectId);
+                deniedRestrictionState.GetProperty("LastAuthenticated").GetBoolean().Should().BeTrue();
+                deniedRestrictionState.GetProperty("LastTraceId").GetGuid().Should().Be(inProcessTraceId);
+                deniedRestrictionState.GetProperty("LastIdempotencyKey").GetGuid()
+                    .Should().Be(inProcessIdempotencyKey);
+                deniedRestrictionState.GetProperty("LastOperation").GetString().Should().Be("create_sub_agents");
+                deniedRestrictionState.GetProperty("Denials").GetInt32().Should().BeGreaterThan(0);
+                deniedRestrictionState.GetProperty("Active").GetInt32().Should().Be(0);
+                deniedRestrictionState.GetProperty("Constructions").GetInt32()
+                    .Should().Be(deniedRestrictionState.GetProperty("Disposals").GetInt32());
+                RecordStage("production-gate-stage=in-process-restriction-returned");
 
                 var sourceId = Guid.NewGuid();
                 var import = await InvokeApiAsync(
@@ -334,9 +423,14 @@ public sealed class AgentOrchestrationHostGateTests
                     app,
                     app.Services.GetRequiredService<ApiKeyProvider>().ApiKey,
                     agentToken);
+                failureLog.Clear();
+                RecordStage("pre-chat-storage-counts=" + FormatStorageCounts(telemetry));
                 using var chat = await agentClient.PostAsJsonAsync("/chat", new { message = "pipeline gate" });
                 var chatBody = await chat.Content.ReadAsStringAsync();
-                chat.StatusCode.Should().Be(HttpStatusCode.OK, chatBody);
+                chat.StatusCode.Should().Be(
+                    HttpStatusCode.OK,
+                    $"{chatBody}; providerRequests={provider.RequestCount}; "
+                    + $"storage={FormatStorageCounts(telemetry)}; failures={failureLog.Describe()}");
                 chatBody.Should().Contain("frozen package graph response");
                 provider.RequestCount.Should().Be(1);
                 RecordStage("production-gate-stage=chat-complete");
@@ -350,19 +444,27 @@ public sealed class AgentOrchestrationHostGateTests
                     item.SourceId == AgentsRegistrationId
                     && item.Operation == ScopedStorageOperations.Upsert);
                 RecordStage(
-                    "module-storage-counts=" + string.Join(
-                        ",",
-                        telemetry.Events
-                            .GroupBy(item => (item.SourceId, item.Operation))
-                            .OrderBy(group => group.Key.SourceId, StringComparer.Ordinal)
-                            .ThenBy(group => group.Key.Operation, StringComparer.Ordinal)
-                            .Select(group => $"{group.Key.SourceId}:{group.Key.Operation}:{group.Count()}")));
+                    "module-storage-counts=" + FormatStorageCounts(telemetry));
             }
             finally
             {
                 readiness.MarkNotReady();
-                await adapter.StopAsync();
-                await app.StopAsync();
+                try
+                {
+                    await adapter.StopAsync();
+                    var stoppedRestrictionState = await ReadInProcessRestrictionStateAsync(
+                        registrationSet.Application,
+                        adapter,
+                        administrator);
+                    stoppedRestrictionState.GetProperty("Stops").GetInt32().Should().Be(1);
+                    stoppedRestrictionState.GetProperty("Active").GetInt32().Should().Be(0);
+                    stoppedRestrictionState.GetProperty("Constructions").GetInt32()
+                        .Should().Be(stoppedRestrictionState.GetProperty("Disposals").GetInt32());
+                }
+                finally
+                {
+                    await app.StopAsync();
+                }
                 RecordStage("production-gate-stage=host-stopped");
             }
         }
@@ -405,6 +507,40 @@ public sealed class AgentOrchestrationHostGateTests
             result.Error?.Message ?? string.Join(" | ", result.Output.Select(item => item.Text)));
     }
 
+    private static async Task<JsonElement> ReadInProcessRestrictionStateAsync(
+        PackagedApplicationRegistry application,
+        RuntimeKernelAdapter adapter,
+        RequestPrincipal caller)
+    {
+        var result = await application.TryInvokeCliAsync(
+            InProcessRestrictionDiagnostics,
+            [],
+            adapter,
+            adapter.CreateCliExecutionContext(caller),
+            CancellationToken.None);
+        result.Should().NotBeNull();
+        result!.Succeeded.Should().BeTrue(result.Error?.Message);
+        using var document = JsonDocument.Parse(result.Output.Single().Text);
+        return document.RootElement.Clone();
+    }
+
+    private static async Task<JsonElement> ReadRestrictionStateAsync(
+        PackagedApplicationRegistry application,
+        RuntimeKernelAdapter adapter,
+        RequestPrincipal caller)
+    {
+        var result = await application.TryInvokeCliAsync(
+            RestrictionDiagnostics,
+            [],
+            adapter,
+            adapter.CreateCliExecutionContext(caller),
+            CancellationToken.None);
+        result.Should().NotBeNull();
+        result!.Succeeded.Should().BeTrue(result.Error?.Message);
+        using var document = JsonDocument.Parse(result.Output.Single().Text);
+        return document.RootElement.Clone();
+    }
+
     private static string RegisterHttpPrincipal(
         ConcurrentDictionary<string, RequestPrincipal> principals,
         RequestPrincipal principal)
@@ -439,11 +575,45 @@ public sealed class AgentOrchestrationHostGateTests
         string operation,
         JsonElement payload,
         RequestPrincipal caller,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? traceId = null,
+        Guid? idempotencyKey = null)
     {
         var action = JsonSerializer.SerializeToElement(
             new NeutralApiAction(operation, payload),
             WebJson);
+        var entry = client.Application.ActionEntries.Single(item =>
+            item.Descriptor.Key.Value == actionKey);
+        var definition = client.Discovery.ActionDefinitions.Single(item =>
+            item.ActionKey == entry.Descriptor.Key
+            && item.Version == entry.Descriptor.Version);
+        var context = client.IssueHostActionContext(
+            HostActionEntryIngress.CrossRegistration,
+            "sharpclaw-host-gate",
+            client.Discovery.SourceId,
+            definition,
+            entry.Descriptor,
+            action,
+            caller,
+            ExtensionFeatureSet.Empty,
+            traceId ?? Guid.NewGuid(),
+            idempotencyKey ?? Guid.NewGuid(),
+            DateTimeOffset.UtcNow.AddMinutes(1));
+        return await client.InvokeRegistrationActionEntryAsync(
+            definition,
+            entry.Descriptor,
+            action,
+            context,
+            cancellationToken);
+    }
+
+    private static async ValueTask<IActionOutcome<JsonElement>> InvokeEntryAsync(
+        OutOfProcessRegistrationClient client,
+        string actionKey,
+        JsonElement action,
+        RequestPrincipal caller,
+        CancellationToken cancellationToken = default)
+    {
         var entry = client.Application.ActionEntries.Single(item =>
             item.Descriptor.Key.Value == actionKey);
         var definition = client.Discovery.ActionDefinitions.Single(item =>
@@ -598,6 +768,15 @@ public sealed class AgentOrchestrationHostGateTests
         $"{outcome.Error?.Code}: {outcome.Error?.Message}; "
         + $"storage={JsonSerializer.Serialize(telemetry.Events.ToArray())}";
 
+    private static string FormatStorageCounts(RecordingScopedStorageTelemetry telemetry) =>
+        string.Join(
+            ",",
+            telemetry.Events
+                .GroupBy(item => (item.SourceId, item.Operation))
+                .OrderBy(group => group.Key.SourceId, StringComparer.Ordinal)
+                .ThenBy(group => group.Key.Operation, StringComparer.Ordinal)
+                .Select(group => $"{group.Key.SourceId}:{group.Key.Operation}:{group.Count()}"));
+
     private static RequestPrincipal Administrator(string subject) =>
         new(
             subject,
@@ -678,6 +857,64 @@ public sealed class AgentOrchestrationHostGateTests
 
         public void Record(ScopedStorageTelemetryEvent telemetryEvent) =>
             Events.Enqueue(telemetryEvent);
+    }
+
+    private sealed class FailureCaptureLoggerProvider : ILoggerProvider
+    {
+        private readonly ConcurrentQueue<Exception> _exceptions = new();
+
+        public ILogger CreateLogger(string categoryName) => new FailureCaptureLogger(_exceptions);
+
+        public void Clear()
+        {
+            while (_exceptions.TryDequeue(out _))
+            {
+            }
+        }
+
+        public string Describe() => string.Join(
+            " | ",
+            _exceptions.Select(DescribeException));
+
+        public void Dispose()
+        {
+        }
+
+        private static string DescribeException(Exception exception)
+        {
+            var values = new List<string>();
+            for (var current = exception; current is not null; current = current.InnerException)
+            {
+                values.Add(current is KernelActionFailedException failed
+                    ? $"{current.GetType().Name}:{failed.Error.Code}:{failed.Error.Message}:"
+                      + string.Join(
+                          ",",
+                          failed.Error.Details?.OrderBy(item => item.Key, StringComparer.Ordinal)
+                              .Select(item => $"{item.Key}={item.Value}") ?? [])
+                    : $"{current.GetType().Name}:{current.Message}");
+            }
+
+            return string.Join(" -> ", values);
+        }
+
+        private sealed class FailureCaptureLogger(
+            ConcurrentQueue<Exception> exceptions) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (exception is not null)
+                    exceptions.Enqueue(exception);
+            }
+        }
     }
 
     private sealed class TemporaryWorkspace : IDisposable
