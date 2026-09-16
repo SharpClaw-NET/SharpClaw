@@ -210,7 +210,11 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                 registrationSet._sidecarProcesses.Add(item.Process);
             }
 
-            AddExternalContractExports(registrationSet._services, pending);
+            AddExternalContractExports(
+                registrationSet._services,
+                pending.Select(item => new ExternalContractExportSource(
+                    item.Manifest.Id,
+                    item.Manifest.Manifest.Exports ?? [])).ToArray());
 
             registrationSet._application = new PackagedApplicationRegistry(
                 registrationSet._inProcessHosts,
@@ -374,9 +378,9 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         return manifests;
     }
 
-    private static void AddExternalContractExports(
+    internal static void AddExternalContractExports(
         ICollection<ServiceDescriptor> services,
-        IReadOnlyList<PendingSidecar> registrations)
+        IReadOnlyList<ExternalContractExportSource> registrations)
     {
         var bindings = services
             .Where(descriptor => descriptor.ServiceType == typeof(ServiceContractBinding))
@@ -389,9 +393,19 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             .ToDictionary(binding => binding.ContractName, StringComparer.Ordinal);
         var externalExports = registrations
             .SelectMany(registration =>
-                (registration.Manifest.Manifest.Exports ?? [])
-                .Select(export => (registration.Manifest.Id, Export: export)))
+                registration.Exports
+                    .Select(export => (registration.SourceId, Export: export)))
             .ToArray();
+
+        foreach (var (_, export) in externalExports)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(export.ContractName);
+            if (string.IsNullOrWhiteSpace(export.ServiceType))
+            {
+                throw new InvalidOperationException(
+                    $"External contract '{export.ContractName}' must declare a service type.");
+            }
+        }
 
         var duplicate = externalExports
             .GroupBy(item => item.Export.ContractName, StringComparer.Ordinal)
@@ -404,7 +418,6 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
 
         foreach (var (sourceId, export) in externalExports)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(export.ContractName);
             if (localExports.ContainsKey(export.ContractName))
             {
                 throw new InvalidOperationException(
@@ -429,9 +442,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             }
 
             var serviceType = requiredTypes[0];
-            if (!string.IsNullOrWhiteSpace(export.ServiceType)
-                && !string.Equals(export.ServiceType, serviceType.FullName, StringComparison.Ordinal)
-                && !string.Equals(export.ServiceType, serviceType.AssemblyQualifiedName, StringComparison.Ordinal))
+            if (!string.Equals(export.ServiceType, serviceType.FullName, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
                     $"External contract '{export.ContractName}' does not match its local service type.");
@@ -449,6 +460,10 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                     Optional: false)));
         }
     }
+
+    internal sealed record ExternalContractExportSource(
+        string SourceId,
+        IReadOnlyList<PackageContractReference> Exports);
 
     private static void AddInProcessAuthorities(
         PackagedDotNetRegistrationSet registrationSet,
