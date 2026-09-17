@@ -1,120 +1,68 @@
-SharpClaw Module Creation — Agent Skill Reference
+# SharpClaw Module Authoring Reference
 
-Full human-readable guide: guides/Module-Creation-Guide.md
+Use this reference after reading `Module-Creation-Guide.md`. It names the current public API and the required authority boundaries.
 
-────────────────────────────────────────
-WHAT A MODULE IS
-────────────────────────────────────────
-A manifest-backed module running in a sidecar process.
-C# modules still implement IKernelRegistrationSource, but the parent host discovers
-package.json and talks to the module through the sidecar protocol.
-Enabled/disabled by `Modules__<registration_id>` in the deployed Runtime Host's
-`Environment/.env`.
-Can be toggled at runtime without restarting the Core API process:
-module enable/disable <id>
+## Source Shape
 
-────────────────────────────────────────
-REQUIRED INTERFACE MEMBERS
-────────────────────────────────────────
-string Id                        unique lowercase_underscore identifier
-string DisplayName               human-readable name
-string ToolPrefix                short prefix for tool names (must be unique)
-void ConfigureServices(IServiceCollection)
-IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions()
-void MapEndpoints(IEndpointRouteBuilder)
+| Item | Required value |
+| --- | --- |
+| Entry interface | `ISharpClawModule` |
+| Identity | `ModuleIdentity` |
+| Registration entry | `ConfigureServices(IServiceCollection)` |
+| Lifecycle start | `StartAsync(ServiceStartContext, CancellationToken)` |
+| Lifecycle stop | `StopAsync(CancellationToken)` |
+| Manifest parser | `PackageManifestLoader` |
+| Graph compiler | `SharpClawModuleCompiler` |
 
-Optional (have default no-op implementations):
-  Task InitializeAsync(IServiceProvider, CancellationToken)
-  Task ShutdownAsync()
-  Task SeedDataAsync(IServiceProvider, CancellationToken)
-  IReadOnlyList<RegistrationInlineToolDefinition> GetInlineToolDefinitions()
-  IReadOnlyList<ContractExport> ExportedContracts
-  IReadOnlyList<ContractRequirement> RequiredContracts
+## Contribution API
 
-────────────────────────────────────────
-LIFECYCLE ORDER
-────────────────────────────────────────
-ConfigureServices → (container built) → InitializeAsync → SeedDataAsync
-  → MapEndpoints → [runtime] → ShutdownAsync
+| Behavior | Registration | Handler |
+| --- | --- | --- |
+| Tool | `AddTool<T>` | `IToolHandler` |
+| Action | `AddAction(...).UseTerminal<T>` | `IHostActionEntryTerminal<TAction,TResult>` |
+| Action hook | `OnAction`, `OnActionCategory`, `OnAnyAction` | Action interceptor |
+| Event | `AddEvent` and event hook extensions | Event interceptor or listener |
+| HTTP | `AddHttpEndpoint<T>` | `IHttpEndpointHandler` |
+| WebSocket | `AddWebSocketEndpoint<T>` | `IWebSocketEndpointHandler` |
+| CLI | `AddCliCommand<T>` | `ICliHandler` |
+| Contract | `ExportContract<T>`, `RequireContract<T>` | Shared public service type |
+| Storage | `AddStorage` | `IScopedStorageGateway` |
+| Chat | Chat resolver and contributor extensions | Neutral chat interfaces |
 
-InitializeAsync throws → module disabled, exported contracts poisoned,
-  dependent modules cascade-fail.
-SeedDataAsync runs once only (.seeded marker file guards repeat calls).
+## Authorization API
 
-────────────────────────────────────────
-TOOL REGISTRATION
-────────────────────────────────────────
-Job-pipeline tools (full job lifecycle, auditable):
-  Return RegistrationToolDefinition records from GetToolDefinitions().
-  Handle in ExecuteToolAsync(toolName, parameters, job, scopedServices, ct).
-  Tool exposed to model as: {prefix}_{name}
-  Aliases: IReadOnlyList<string>? on the record for legacy names.
+| Role | API | Allowed result |
+| --- | --- | --- |
+| Provider | `IAuthorizationPolicy` and `AddAuthorizationPolicy<T>` | Allow or deny |
+| Consumer | `RequireAuthorization` and `HostAuthorizationEntry` | Uses active provider |
+| Restriction | `IAuthorizationRestriction` and `AddAuthorizationRestriction<T>` | Preserve or deny |
 
-Inline tools (stateless, no job record, runs in chat loop):
-  Return RegistrationInlineToolDefinition records from GetInlineToolDefinitions().
-  Handle in ExecuteInlineToolAsync(toolName, parameters, context, scopedServices, ct).
+The contract name is `sharpclaw.authorization`. The service type is `SharpClaw.Contracts.Kernel.AuthorizationContract`. A restriction requests `Inspect`, `Wrap`, and `Observe` for `authorization.evaluate`.
 
-RegistrationToolDefinition constructor:
-  Name, Description, ParametersSchema (JsonElement), Permission, TimeoutSeconds?,
-  Aliases?
+## Authority Rules
 
-RegistrationToolPermission:
-  IsPerResource (bool)
-  Check: Func<Guid, Guid?, ActionCaller, CancellationToken, Task<AgentActionResult>>?
-  DelegateTo: string?  (name of existing AgentActionService method; validated at startup)
+Caller authority comes only from host-issued contexts. Do not put a principal in an action payload. Complete authorization before protected work. Pass the dispatcher cancellation token to each nested operation.
 
-Return values:
-  ExecuteToolAsync returns the string persisted as the job result.
-  ExecuteInlineToolAsync returns the string inserted into the chat loop.
-  Throw NotImplementedException for tool names the module does not handle.
+Cross-package calls use `IHostActionEntry` from an active action, chat, tool, endpoint, or CLI context. Do not create a second root request.
 
-Job cost tracking:
-  Modules that spend tokens outside the core chat pipeline should resolve
-  SharpClaw.Contracts.Kernel.IAgentJobCostTracker from the scopedServices
-  argument passed to ExecuteToolAsync and call RecordTokensAsync(job.JobId,
-  promptTokens, completionTokens, ct). Calls are additive, so OCR, media, or
-  private model pipelines can report usage after every chunk and the
-  host will expose the accumulated total through the current Job result.
-  External modules receive this contract through the host bridge, so they do
-  not update host database tables directly.
+## Scope Rules
 
-────────────────────────────────────────
-CONTRACTS
-────────────────────────────────────────
-Export — register interface in DI + declare in ExportedContracts:
-  new ContractExport(contractName, typeof(IMyInterface), description?)
-  contractName: lowercase_underscore, max 60 chars, unique across all modules
+Register request behavior as scoped. Resolve it only during execution. Do not capture the root provider. Do not keep a scoped handler after its execution ends.
 
-Require — declare in RequiredContracts:
-  new ContractRequirement(contractName, IsOptional: false)
-  IsOptional: true → module loads, feature degrades if provider absent
+## Testing
 
-Initialization order is sorted by contract dependency graph automatically.
+`SharpClawModuleTestBuilder.AddRegistration(module, manifestPath)` loads the real manifest and host mode. `ActionEntry` runs one registered terminal through the production Core dispatcher. `ApproveSensitiveContributions` grants one exact package identity.
 
-────────────────────────────────────────
-CLI COMMANDS
-────────────────────────────────────────
-Implement ICliCommandProvider. Register in ConfigureServices.
-Members: Verbs (IReadOnlyList<string>), HandleAsync(string[], ct) → CliResult
+```csharp
+await using var host = new SharpClawModuleTestBuilder()
+    .AddRegistration(package, manifestPath)
+    .ApproveSensitiveContributions(package.Identity.Id)
+    .UseExecutionContext(caller, features)
+    .Build();
+```
 
-────────────────────────────────────────
-ENABLING A NEW MODULE
-────────────────────────────────────────
-Add to the deployed Runtime Host's Environment/.env:
-  Modules__my_module="true"
+Test allowance, denial, cancellation, disposal, malformed input, route collisions, contract identity, and pre-write rejection. Use both hosting modes when the package supports both modes.
 
-Runtime (no restart): module enable my_module
-Verify: module get my_module  →  status should be "enabled"
-If status is "failed", check application log under [Module:my_module] for exception.
+## Prohibited Design
 
-────────────────────────────────────────
-TROUBLESHOOTING
-────────────────────────────────────────
-Not in module list         → class not implementing interface or project not compiled
-Status: failed             → InitializeAsync threw; check log [Module:{id}]
-Tool not reaching handler  → permission check denied; verify RegistrationToolPermission
-Inline tool produces nothing → ExecuteInlineToolAsync returned NotHandled or threw
-Contract not satisfied     → provider module disabled or failed; check module list
-SeedDataAsync not running  → .seeded marker exists; delete it to force re-seed
-                             check binding Kind matches a declared TriggerKey;
-                             check OS permissions for the underlying hook
+Do not reference Runtime implementation projects. Do not access a host database context. Do not add a compatibility shim, local authority, private protocol, retry route, second dispatcher, second session, or alternate storage path.

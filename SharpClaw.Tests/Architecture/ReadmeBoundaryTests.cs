@@ -27,6 +27,64 @@ public sealed class ReadmeBoundaryTests
         readme.Should().NotContain("github.com/mkn8rn/SharpClaw");
     }
 
+    [Test]
+    public void Module_authoring_guides_use_the_current_public_surface()
+    {
+        var root = FindSourceRoot();
+        var guide = File.ReadAllText(Path.Combine(
+            root,
+            "docs",
+            "guides",
+            "Module-Creation-Guide.md"));
+        var reference = File.ReadAllText(Path.Combine(
+            root,
+            "docs",
+            "guides",
+            "Module-Creation-skill.md"));
+        var text = guide + Environment.NewLine + reference;
+
+        foreach (var required in new[]
+                 {
+                     "ISharpClawModule",
+                     "PackageManifestLoader",
+                     "AddTool<THandler>",
+                     "AddAuthorizationPolicy",
+                     "AddAuthorizationRestriction",
+                     "SharpClawModuleTestBuilder",
+                     "ActionEntry",
+                     "IHostActionEntry",
+                     "hostMode",
+                 })
+        {
+            text.Should().Contain(required, required);
+        }
+
+        foreach (var retired in new[]
+                 {
+                     "IKernelRegistrationSource",
+                     "IApplicationRegistrationSource",
+                     "RegistrationToolDefinition",
+                     "RegistrationInlineToolDefinition",
+                     "RegistrationToolPermission",
+                     "GetToolDefinitions",
+                     "ExecuteToolAsync",
+                     "ExecuteInlineToolAsync",
+                     "SeedDataAsync",
+                     "InitializeAsync",
+                     "ShutdownAsync",
+                     "ExportedContracts",
+                     "RequiredContracts",
+                     "AgentJobContext",
+                     "ModuleToolDefinition",
+                     "ModuleCliCommand",
+                     "SharpClaw.Runtime.BLL",
+                     "SharpClaw.Runtime.INF",
+                 })
+        {
+            text.Should().NotContain(retired, retired);
+        }
+    }
+
     private static string FindSourceRoot()
     {
         var starts = new[]

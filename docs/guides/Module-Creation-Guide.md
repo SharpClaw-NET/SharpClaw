@@ -1,629 +1,343 @@
-# Creating a SharpClaw Module
+# Build a SharpClaw Module
 
-> **Enablement reference:** [modules/Module-Enablement-Guide.md](../modules/Module-Enablement-Guide.md)
-> **Agent skill:** [Module-Creation-skill.md](Module-Creation-skill.md)
+SharpClaw discovers optional behavior from packages at run time. The base Runtime does not reference an implementation package. A .NET package contains one manifest, one entry assembly, private dependencies, and one `ISharpClawModule` implementation.
 
-This guide walks through creating, testing, and shipping a SharpClaw module from
-scratch â€” from the minimal skeleton to registering tools, exporting contracts, owning
-troubleshooting at runtime.
+The [module enablement guide](../modules/Module-Enablement-Guide.md) explains installation and activation. This guide explains the authoring model.
 
----
+## Project Setup
 
-## Table of contents
-
-- [What a module is](#what-a-module-is)
-- [Project setup](#project-setup)
-- [Minimal skeleton](#minimal-skeleton)
-- [Lifecycle methods in depth](#lifecycle-methods-in-depth)
-- [Adding agent tools](#adding-agent-tools)
-  - [Job-pipeline tools](#job-pipeline-tools)
-  - [Inline tools](#inline-tools)
-  - [Permission checks](#permission-checks)
-- [Adding REST endpoints](#adding-rest-endpoints)
-- [Adding CLI commands](#adding-cli-commands)
-- [Exporting and consuming contracts](#exporting-and-consuming-contracts)
-- [Seed data](#seed-data)
-- [Enabling your module](#enabling-your-module)
-- [Ideas for what to build](#ideas-for-what-to-build)
-- [Debugging and troubleshooting](#debugging-and-troubleshooting)
-
----
-
-## What a module is
-
-A module is a manifest-backed package that runs as a sidecar process. A C#
-module still implements `IKernelRegistrationSource`, but the parent host discovers the
-`package.json` manifest and talks to the module through the sidecar protocol
-instead of composing the module assembly into the API process. Whether it runs
-is controlled by a single line in the core `.env` file, and it can be toggled
-on and off at runtime without restarting the Core API process.
-
-`ConfigureServices` still matters for C# modules. Those registrations build the
-module sidecar's own service provider, so module internals resolve normally
-without giving the module direct access to the parent host container.
-
-Modules can contribute any combination of:
-
-- **Agent tools** â€” exposed to models via the job pipeline or the inline chat loop
-- **REST endpoints** â€” standard minimal-API routes, mounted at startup
-- **CLI commands** â€” additional verbs in the SharpClaw CLI
-- **Service contracts** â€” typed DI interfaces exported to other modules
-- **Seed data** â€” one-time database rows or config inserted on first install
-
-Modules can also own configuration in the application host's canonical dotenv
-files. The generic loader reads the deployed Runtime Host's
-`Environment/.env` and `.dev.env` into `IConfiguration`, so the loader does not
-need a code change when a new module introduces keys such as
-`MyModule__EndpointUrl`. Your module owns the key names, defaults, and code that
-reads them. Adding keys to the shipped `.env.template` is only needed when the
-SharpClaw repo itself wants to advertise a bundled module's default settings.
-Third-party modules should document the dotenv assignments users add to their
-own Runtime Host `Environment/.env`.
-
----
-
-## Project setup
-
-Add a new class library project to the solution. Reference `SharpClaw.Contracts` so
-you have access to `IKernelRegistrationSource` and all the supporting types.
+Create a .NET 10 class library and reference `SharpClaw.ModuleSDK` with an exact version. The SDK brings the matching neutral contracts into the build. Do not reference a Runtime, Gateway, Agent Orchestration, or persistence implementation project.
 
 ```xml
-<ItemGroup>
-  <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
-</ItemGroup>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpClaw.ModuleSDK" Version="[0.5.0-beta.24]" />
+  </ItemGroup>
+</Project>
 ```
 
-If your module needs to write to the database, also reference
-`SharpClaw.Runtime.INF`. If it needs core services like agents or
-channels, reference `SharpClaw.Runtime.BLL`.
+## Minimal Module
 
-Keep module source in its own repository or in an external module workspace.
-The SharpClaw repository keeps only the TestHarness module as test
-infrastructure; production modules are consumed from packages or loaded as
-external modules. A small module repository still uses a root project folder
-and a nearby manifest:
-
-```
-MyModule/
-    MyModule.csproj
-    MyModule.cs          â† implements IKernelRegistrationSource
-    Tools/
-      MyToolHandler.cs
-```
-
----
-
-## Minimal skeleton
+`ConfigureServices` is the single registration entry. It receives a normal `IServiceCollection` that also records SharpClaw contributions. The compiler validates this complete graph before lifecycle start.
 
 ```csharp
-using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.Kernel;
+using SharpClaw.ModuleSDK;
 
-public sealed class MyModule : IKernelRegistrationSource
+namespace Example.Documents;
+
+public sealed class DocumentsModule : ISharpClawModule
 {
-    public string Id          => "my_module";
-    public string DisplayName => "My Module";
-    public string ToolPrefix  => "my";
+    public ModuleIdentity Identity { get; } = new(
+        "documents",
+        "Documents",
+        "documents");
 
     public void ConfigureServices(IServiceCollection services)
     {
-        // Register anything this module needs from DI.
-    }
-
-    public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() => [];
-
-    public void MapEndpoints(IEndpointRouteBuilder app)
-    {
-        // Register REST routes here.
+        services.AddScoped<DocumentReader>();
     }
 }
 ```
 
-That is a complete, loadable module. `InitializeAsync`, `ShutdownAsync`,
-`SeedDataAsync`, `ExportedContracts`, `RequiredContracts`, and
-`GetInlineToolDefinitions` all have default no-op implementations on the interface,
-so you only override what you need.
+`StartAsync` and `StopAsync` are optional lifecycle methods. Use them only for package-owned resources. Request-scoped work belongs in scoped handlers, not in the module instance.
 
-> **Tool prefix** must be unique across all loaded modules. Prefix collisions are
-> caught at startup with a clear error message.
+## Package Manifest
 
----
+`package.json` is authoritative package metadata. Property names are case-sensitive. `PackageManifestLoader` applies the same maximum depth and validation rules as both production hosts.
 
-## Lifecycle methods in depth
+```json
+{
+  "id": "documents",
+  "displayName": "Documents",
+  "version": "1.0.0",
+  "toolPrefix": "documents",
+  "runtime": "dotnet",
+  "hostMode": "sidecar",
+  "entryAssembly": "Example.Documents.dll",
+  "entryType": "Example.Documents.DocumentsModule",
+  "minHostVersion": "0.5.0",
+  "defaultEnabled": false
+}
+```
 
-### `ConfigureServices`
+The manifest identity must match `ModuleIdentity`. Use `sidecar` for the normal out-of-process boundary. Use `in-process` only when the operator accepts direct process trust.
 
-Called once before the DI container is built. Registers services into the shared
-`IServiceCollection`. Anything registered here is available to the rest of the
-application and to your own handlers via constructor injection.
+## Capability Map
+
+| Capability | Registration | Execution interface |
+| --- | --- | --- |
+| Tool | `AddTool<THandler>` | `IToolHandler` |
+| Typed action | `AddAction(...).UseTerminal<TTerminal>` | `IHostActionEntryTerminal<TAction,TResult>` |
+| Action restriction or observation | `OnAction`, `OnActionCategory`, `OnAnyAction` | Typed or untyped action interceptor |
+| Event publication and handling | `AddEvent` and event hook extensions | Typed event contracts |
+| HTTP route | `AddHttpEndpoint<THandler>` | `IHttpEndpointHandler` |
+| WebSocket route | `AddWebSocketEndpoint<THandler>` | `IWebSocketEndpointHandler` |
+| CLI command | `AddCliCommand<THandler>` | `ICliHandler` |
+| Shared service | `ExportContract<T>` and `RequireContract<T>` | Shared public contract type |
+| Storage | `AddStorage` | `IScopedStorageGateway` or `ScopedDocumentStore<T>` |
+| Conversation identity | `UseConversationResolver<T>` | `IConversationResolver` |
+| Chat profile | `UseChatProfileResolver<T>` | `IChatProfileResolver` |
+| Chat context | `AddChatContext<T>` | `IChatContextContributor` |
+
+## Dependency Injection and Scope
+
+Register stateful request behavior as scoped. The host creates a bounded execution scope for each action, event, tool, endpoint, CLI command, and Job operation. The scope remains alive until captured work ends, even when the caller receives an uncertain result.
+
+Do not resolve scoped services from the module constructor or the root provider. Do not keep an `IServiceProvider` for later use. Constructor injection on each handler is the normal path.
+
+## Tools
+
+A tool has one descriptor and one scoped `IToolHandler`. The host creates `ToolInvocation` from validated caller authority. The invocation contains the exact tool name, arguments, conversation identity when present, and host action context.
+
+```csharp
+public static class DocumentTools
+{
+    public static ToolDescriptor Read { get; } = new(
+        "read",
+        "Reads one document by identifier.",
+        ToolSchemas.EmptyObject,
+        ContainsSensitiveData: true);
+}
+
+public sealed class ReadDocumentTool(DocumentReader reader) : IToolHandler
+{
+    public async ValueTask<ToolResult> InvokeAsync(
+        ToolInvocation invocation,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var text = await reader.ReadAsync(invocation.Arguments, cancellationToken);
+        return ToolResult.Text(text);
+    }
+}
+```
+
+Register the handler through `services.AddTool<ReadDocumentTool>(DocumentTools.Read)`. Do not switch on tool names inside one global handler. Each descriptor has one selected handler.
+
+## Typed Actions
+
+Use a typed action when behavior needs interception, exact authority, retry policy, safe points, or a stable terminal. The descriptor owns these controls. `UseTerminal<TTerminal>` binds one stable terminal identifier to the descriptor.
 
 ```csharp
 public void ConfigureServices(IServiceCollection services)
 {
-    services.AddSingleton<MyBackgroundWorker>();
-    services.AddScoped<IMyService, MyService>();
+    services.AddAction(DocumentActions.Read)
+        .UseTerminal<ReadDocumentTerminal>(DocumentTerminals.Read);
 }
 ```
 
-### `InitializeAsync`
+The terminal implements `IHostActionEntryTerminal<TAction,TResult>`. It receives the authenticated `ActionContext<TAction>` and the dispatcher cancellation token. Do not read caller authority from the action payload.
 
-Called once after the container is built but before HTTP requests are served. Safe
-to resolve services here.
+## Authorization Provider
+
+Use the neutral authorization boundary when a package replaces the active permission system. Implement `IAuthorizationPolicy`, then call `AddAuthorizationPolicy<TPolicy>`. The policy receives the validated request and authenticated action context.
 
 ```csharp
-public async Task InitializeAsync(IServiceProvider services, CancellationToken ct)
+public sealed class DocumentAuthorizationPolicy : IAuthorizationPolicy
 {
-    var worker = services.GetRequiredService<MyBackgroundWorker>();
-    await worker.StartAsync(ct);
-}
-```
-
-> **If this method throws, the module is disabled for the current session.** The
-> error is logged and the module's state is set to `enabled=false` to prevent boot
-> loops. This also poisons any contract your module exports â€” dependents will
-> cascade-fail. Make sure initialization failures are specific and descriptive.
-
-### `ShutdownAsync`
-
-Called during graceful shutdown for every module that successfully initialized.
-
-```csharp
-public async Task ShutdownAsync()
-{
-    await _worker.StopAsync();
-}
-```
-
-### `SeedDataAsync`
-
-Called once, the first time the module loads on a fresh install. The `.seeded`
-marker file prevents it running again on subsequent starts.
-
-```csharp
-public async Task SeedDataAsync(IServiceProvider services, CancellationToken ct)
-{
-    var db = services.GetRequiredService<AppDbContext>();
-    db.MyEntities.Add(new MyEntity { Name = "Default" });
-    await db.SaveChangesAsync(ct);
-}
-```
-
----
-
-## Module configuration from dotenv
-
-The deployed Runtime Host `Environment/.env` and `.dev.env` files are canonical
-dotenv documents loaded into the standard `IConfiguration` tree before modules
-are configured. There is no central registry of module keys and no env-loader
-switch statement that must be updated for each module. If your module needs
-settings, choose stable keys that belong to the module, document them, and read
-them from DI in the service that uses them.
-
-For example, a module with id `my_module` can ask users to add these assignments
-to the deployed Runtime Host's `Environment/.env`:
-
-```dotenv
-MyModule__EndpointUrl="https://example.internal/api"
-MyModule__RetrySeconds="15"
-```
-
-The module code can then consume those values through normal constructor
-injection. The section does not need to appear in `LocalEnvironment`, and the
-Core loader does not need to know the module exists.
-
-```csharp
-using Microsoft.Extensions.Configuration;
-
-public sealed class MyService(IConfiguration configuration)
-{
-    private readonly string? _endpointUrl =
-        configuration["MyModule:EndpointUrl"];
-
-    private readonly int _retrySeconds =
-        configuration.GetValue("MyModule:RetrySeconds", 15);
-}
-```
-
-Keep defaults in module-owned code so the module still has predictable behavior
-when the keys are absent. Use a unique, readable key prefix rather than a
-generic name such as `Settings` or `Options`. If a setting is sensitive, prefer
-the Runtime Host `.env` because it is the server-side env file and uses the
-same protected-at-rest path as the rest of Runtime configuration.
-
-Bundled modules may add their documented defaults to the checked-in
-`.env.template` files for discoverability. Third-party modules should not need a
-SharpClaw source change for configuration; they should ship documentation that
-shows the dotenv assignments to paste into the Runtime Host `.env`, plus the
-module enablement assignment under `Modules`.
-
----
-
-## Adding agent tools
-
-### Job-pipeline tools
-
-Job-pipeline tools go through the canonical Jobs coordinator lifecycle â€” they create a
-job record, support approval flows, and appear in job history. Use these for
-anything with side effects, latency, or that the user might want to audit.
-
-Return them from `GetToolDefinitions()`:
-
-```csharp
-public IReadOnlyList<RegistrationToolDefinition> GetToolDefinitions() =>
-[
-    new(
-        Name:             "do_something",
-        Description:      "Does something useful. Provide 'target' as the thing to act on.",
-        ParametersSchema: JsonDocument.Parse("""
-            {
-              "type": "object",
-              "properties": {
-                "target": { "type": "string", "description": "What to act on." }
-              },
-              "required": ["target"]
-            }
-            """).RootElement,
-        Permission: new RegistrationToolPermission(
-            IsPerResource: false,
-            Check: (agentId, resourceId, caller, ct) =>
-                _permissionService.CheckGlobalFlagAsync(agentId, "CanDoSomething", ct)
-        )
-    )
-];
-```
-
-The tool is sent to the model as `my_do_something` (prefix + name). To also accept
-it under a legacy name, add `Aliases: ["do_something"]` to the definition.
-
-Implement the handler by overriding `ExecuteToolAsync`:
-
-```csharp
-public async Task<string> ExecuteToolAsync(
-    string toolName,
-    JsonElement parameters,
-    AgentJobContext job,
-    IServiceProvider scopedServices,
-    CancellationToken ct)
-{
-    if (toolName is "do_something")
+    public ValueTask<AuthorizationDecision> EvaluateAsync(
+        ActionContext<AuthorizationRequest> context,
+        CancellationToken cancellationToken = default)
     {
-        var target = parameters.GetProperty("target").GetString()!;
-        // ... do the work ...
-        return $"Done with {target}.";
+        cancellationToken.ThrowIfCancellationRequested();
+        var allowed = context.Caller.Roles?.Contains("document-reader") == true;
+        return ValueTask.FromResult(allowed
+            ? AuthorizationDecision.Allow("document_reader")
+            : AuthorizationDecision.Deny(
+                "document_denied",
+                "The caller cannot read this document."));
     }
-
-    throw new NotImplementedException($"Tool '{toolName}' is not handled.");
 }
+
+public void ConfigureServices(IServiceCollection services) =>
+    services.AddAuthorizationPolicy<DocumentAuthorizationPolicy>();
 ```
 
-### Reporting token usage from module tools
+The provider manifest must export `sharpclaw.authorization` with service type `SharpClaw.Contracts.Kernel.AuthorizationContract`. The host permits one active provider and rejects a blank or changed service type.
 
-Core automatically records the normal chat provider usage that it performs
-itself, but modules often run their own model calls. An OCR module might call a
-vision model for every page, a media module might call a model for every chunk,
-and a workflow module might call a private model behind its own client. Those
-calls still belong to the canonical Job record that started the module work, so the
-module should report them through `IAgentJobCostTracker` instead of trying to
-update core tables directly.
+## Authorization Restriction
 
-Resolve `IAgentJobCostTracker` from the `scopedServices` argument passed to
-`ExecuteToolAsync` and call `RecordTokensAsync` with the current
-`AgentJobContext.JobId`. The method is additive, so a long media-processing
-loop can report usage after each chunk and the final canonical Job result
-will show the accumulated prompt, completion, and total tokens. External modules get the
-same contract forwarded into their isolated module container, and bundled modules
-can resolve it from the same restricted service scope as other host bridges.
+Use `IAuthorizationRestriction` when a package complements another policy. A restriction can preserve or deny access. It cannot grant access, replace caller identity, replace the policy result, or issue authority.
 
 ```csharp
-public async Task<string> ExecuteToolAsync(
-    string toolName,
-    JsonElement parameters,
-    AgentJobContext job,
-    IServiceProvider scopedServices,
-    CancellationToken ct)
+public sealed class TenantRestriction : IAuthorizationRestriction
 {
-    var costTracker = scopedServices.GetRequiredService<IAgentJobCostTracker>();
-
-    var result = await myModelClient.RunAsync(parameters, ct);
-
-    await costTracker.RecordTokensAsync(
-        job.JobId,
-        result.Usage.PromptTokens,
-        result.Usage.CompletionTokens,
-        ct);
-
-    return result.Text;
-}
-```
-
-If a provider returns only a single token total, keep the convention consistent
-inside your module and document it near the call site. For example, a client
-that receives only a billed token total can report zero prompt tokens and the
-billed total as completion tokens, while a client that knows both input and
-output token counts should record those two values separately. The core
-contract only accepts non-negative token counts; it does not try to infer image,
-media, or private-provider usage from module-owned HTTP requests.
-
-### Inline tools
-
-Inline tools execute inside the streaming chat loop without creating a job record.
-Use them for fast, stateless operations: waiting, reading context, listing things.
-
-```csharp
-public IReadOnlyList<RegistrationInlineToolDefinition> GetInlineToolDefinitions() =>
-[
-    new(
-        Name:             "ping",
-        Description:      "Returns 'pong'. Useful to verify the module is active.",
-        ParametersSchema: JsonDocument.Parse("""{"type":"object","properties":{}}""").RootElement
-    )
-];
-```
-
-Implement via `ExecuteInlineToolAsync`:
-
-```csharp
-public Task<ModuleInlineToolResult> ExecuteInlineToolAsync(
-    string toolName,
-    JsonElement arguments,
-    Guid agentId,
-    IServiceProvider services,
-    CancellationToken ct)
-{
-    if (toolName is "ping")
-        return Task.FromResult(ModuleInlineToolResult.Success("pong"));
-
-    return Task.FromResult(ModuleInlineToolResult.NotHandled());
-}
-```
-
-### Permission checks
-
-`RegistrationToolPermission` has two modes:
-
-**Custom check** â€” supply a `Func` that calls whatever service you need:
-
-```csharp
-Permission: new RegistrationToolPermission(
-    IsPerResource: true,
-    Check: async (agentId, resourceId, caller, ct) =>
+    public ValueTask<AuthorizationRestriction> EvaluateAsync(
+        AuthorizationRestrictionContext context,
+        CancellationToken cancellationToken = default)
     {
-        var svc = caller.Services.GetRequiredService<IMyPermissionService>();
-        return await svc.CheckAccessAsync(agentId, resourceId!.Value, ct);
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(context.Features.Contains("tenant.allowed")
+            ? AuthorizationRestriction.Preserve()
+            : AuthorizationRestriction.Deny(
+                "tenant_denied",
+                "The caller cannot access this tenant."));
     }
-)
-```
-
-**Delegate to existing** â€” reuse a built-in permission category by name:
-
-```csharp
-Permission: new RegistrationToolPermission(
-    IsPerResource: false,
-    Check: null,
-    DelegateTo: "AccessSafeShellAsync"
-)
-```
-
-The `DelegateTo` name is validated at registration time, so a typo fails fast at
-startup.
-
----
-
-## Adding REST endpoints
-
-Use `MapEndpoints(IEndpointRouteBuilder app)` with the standard minimal-API pattern.
-There is no required path prefix â€” use whatever makes sense, but `/modules/{id}/`
-is the convention for module-scoped routes.
-
-```csharp
-public void MapEndpoints(IEndpointRouteBuilder app)
-{
-    app.MapGet("/my-module/status", async (IMyService svc, CancellationToken ct) =>
-    {
-        var status = await svc.GetStatusAsync(ct);
-        return Results.Ok(status);
-    })
-    .RequireAuthorization();
-
-    app.MapPost("/my-module/run", async (RunRequest req, IMyService svc, CancellationToken ct) =>
-    {
-        await svc.RunAsync(req.Target, ct);
-        return Results.NoContent();
-    })
-    .RequireAuthorization();
 }
+
+public void ConfigureServices(IServiceCollection services) =>
+    services.AddAuthorizationRestriction<TenantRestriction>(
+        "tenant",
+        HookPriority.High);
 ```
 
----
+The restriction manifest must require the same service type. It must request only `Inspect`, `Wrap`, and `Observe` for `authorization.evaluate`. Sensitive approval remains an operator decision.
 
-## Adding CLI commands
+## Authorization Consumer
 
-Implement `ICliCommandProvider` alongside `IKernelRegistrationSource`. The `CliDispatcher`
-discovers all `ICliCommandProvider` implementations and routes input to them.
+Call `RequireAuthorization` in a package that uses the active policy. Inject `HostAuthorizationEntry`, then evaluate before protected work. Use an active action or chat context so nested work keeps the host-issued parent authority.
 
 ```csharp
-public sealed class MyModuleCliCommands : ICliCommandProvider
+public sealed class DocumentExecutor(HostAuthorizationEntry authorization)
 {
-    private readonly IMyService _svc;
-
-    public MyModuleCliCommands(IMyService svc) => _svc = svc;
-
-    public IReadOnlyList<string> Verbs => ["mymod"];
-
-    public async Task<CliResult> HandleAsync(string[] args, CancellationToken ct)
+    public async ValueTask ExecuteAsync(
+        ActionContext<ReadDocumentAction> context,
+        CancellationToken cancellationToken)
     {
-        return args switch
-        {
-            ["mymod", "status"] => CliResult.Print(await _svc.GetStatusAsync(ct)),
-            ["mymod", "run", var target] => await RunAsync(target, ct),
-            _ => CliResult.Unknown()
-        };
+        var decision = await authorization.EvaluateAsync(
+            context,
+            new AuthorizationRequest(
+                "documents.read",
+                new AuthorizationResource(
+                    "document",
+                    context.Action.DocumentId.ToString("D"))),
+            cancellationToken);
+
+        if (!decision.Allowed)
+            throw new UnauthorizedAccessException(decision.Message);
+
+        await ReadProtectedDocumentAsync(context.Action.DocumentId, cancellationToken);
     }
 }
 ```
 
-Register it in `ConfigureServices`:
+Agent Orchestration maps its resource model to this neutral contract. Its [authorization guide](https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration/blob/main/docs/permission-modules.md) explains replacement and restriction behavior.
+
+## Shared Contracts
+
+`ExportContract<T>` publishes one service boundary. `RequireContract<T>` consumes it. Put the public service type in a shared package so the provider and consumer load identical bytes.
 
 ```csharp
-services.AddSingleton<ICliCommandProvider, MyModuleCliCommands>();
+services.AddScoped<IDocumentClock, DocumentClock>();
+services.ExportContract<IDocumentClock>("documents.clock");
 ```
 
----
+The provider manifest uses `exports`. The consumer manifest uses `requires`. Each typed entry must include the exact `Type.FullName`; a contract name alone does not grant service authority.
 
-## Exporting and consuming contracts
+## Storage
 
-If another module (or the core application) should be able to use a service your
-module provides, export it as a contract. This makes the dependency explicit and
-lets the module loader enforce initialization order.
-
-**Exporting:**
+Declare each storage operation and index through `ScopedStorageContractDescriptor`. Use `IScopedStorageGateway` directly for complete control, or wrap it with `ScopedDocumentStore<T>`. The host remains the only storage authority.
 
 ```csharp
-public IReadOnlyList<ContractExport> ExportedContracts =>
-[
-    new("my_data_source", typeof(IMyDataSource), "Provides live data from my hardware.")
-];
+services.AddStorage(new ScopedStorageContractDescriptor(
+    "documents",
+    "metadata",
+    [
+        new ScopedStorageOperationDescriptor(ScopedStorageOperations.Get),
+        new ScopedStorageOperationDescriptor(ScopedStorageOperations.Put),
+    ]));
+
+services.AddScoped(provider => new ScopedDocumentStore<DocumentMetadata>(
+    provider.GetRequiredService<IScopedStorageGateway>(),
+    "documents",
+    "metadata",
+    "documents"));
 ```
 
-Register the implementation in `ConfigureServices`:
+Do not access a host database context. Do not create a parallel storage path. Validate authorization before every protected write.
+
+## HTTP and WebSocket Routes
+
+Declare routes with `EndpointRouteDescriptor`. The host checks route collisions before mapping. It supplies `HostEndpointRouteRequest` and `IHostActionEntry` after request admission.
 
 ```csharp
-services.AddSingleton<IMyDataSource, MyDataSource>();
+services.AddHttpEndpoint<DocumentStatusEndpoint>(new EndpointRouteDescriptor(
+    "documents.status",
+    "/documents/{id}",
+    "GET",
+    HostEndpointTransport.Http));
 ```
 
-**Requiring (consuming):**
+An HTTP handler implements `IHttpEndpointHandler`. A WebSocket handler implements `IWebSocketEndpointHandler`. Both paths receive host-authenticated authority and the request cancellation token.
+
+## CLI Commands
+
+Declare one `CliCommandDescriptor` and one scoped `ICliHandler`. `CliInvocation` contains the command, arguments, invocation identity, and host action context.
 
 ```csharp
-public IReadOnlyList<ContractRequirement> RequiredContracts =>
-[
-    new("my_data_source", IsOptional: false)
-];
+services.AddCliCommand<DocumentCli>(new CliCommandDescriptor(
+    "documents.inspect",
+    ["documents-i"],
+    "Inspects document package state.",
+    inputSchema,
+    resultSchema));
 ```
 
-Resolve it in `InitializeAsync` or in your service constructors:
+Use `IHostActionEntry` from the invocation context for nested protected work. Do not create another root action.
+
+## Chat Contributions
+
+Conversation identity, history storage, profile selection, and context assembly are optional contributions. The base kernel does not infer these features. Use the neutral chat contracts when a package supplies them.
+
+| Need | API |
+| --- | --- |
+| Resolve a conversation | `UseConversationResolver<TResolver>` |
+| Select a chat profile | `UseChatProfileResolver<TResolver>` |
+| Store conversation state | `UseConversationStore<TStore>` |
+| Add bounded prompt context | `AddChatContext<TContributor>` |
+
+## Test the Real Graph
+
+Reference `SharpClaw.ModuleSDK.Testing` with an exact version. Pass the real manifest path so the test uses its host mode and effect requests. Sensitive contributions require explicit exact approvals.
 
 ```csharp
-var dataSource = services.GetRequiredService<IMyDataSource>();
+await using var host = new SharpClawModuleTestBuilder()
+    .AddRegistration(new DocumentAuthorizationModule(), manifestPath)
+    .AddRegistration(new TenantRestrictionModule(), restrictionManifestPath)
+    .ApproveSensitiveContributions("document_authorization")
+    .ApproveSensitiveContributions("tenant_restriction")
+    .UseExecutionContext(caller, features)
+    .Build();
+
+var outcome = await host.ActionEntry(
+        AuthorizationProtocol.Evaluate,
+        authorizationRequest)
+    .RunAsync(cancellationToken);
 ```
 
-If `IsOptional: true`, the module loads even when the contract provider is absent.
-Gate any code that needs it:
+`ActionEntry` uses the registered terminal and production Core dispatcher. Each terminal execution gets a new asynchronous service scope. Tests can prove allowance, denial, cancellation, disposal, and pre-write rejection without a fake dispatcher.
 
-```csharp
-var dataSource = services.GetService<IMyDataSource>();
-if (dataSource is not null)
-{
-    // feature available
-}
+## Packaging
+
+Build the package entry assembly and private dependencies into one directory. Put `package.json` at that directory root. Keep shared SharpClaw contract assemblies aligned with the frozen bill of materials.
+
+```text
+documents/
+  package.json
+  Example.Documents.dll
+  Example.Documents.deps.json
+  private-dependency.dll
 ```
 
-> **Contract names** use lowercase with underscores, start with a letter, max 60
-> characters (e.g. `desktop_capture`, `window_management`). Only one module may
-> export a given name at a time.
+Do not embed a different SharpClaw contract assembly. Do not use open dependency ranges. Do not include a fallback execution path.
 
----
+## Failure Reference
 
-## Seed data
+| Failure | Meaning |
+| --- | --- |
+| Manifest mismatch | `ModuleIdentity` and `package.json` disagree. |
+| Missing manifest request | Code requested a hook effect that the manifest did not request. |
+| Unsupported effect | The descriptor, manifest, or host grant does not permit the effect. |
+| Contract mismatch | The provider and consumer service types or schema versions differ. |
+| Route collision | Two enabled routes match the same method and route pattern. |
+| Missing sensitive approval | The operator did not approve the exact package and schema. |
+| Scoped service failure | Code resolved a scoped handler from the root provider. |
 
-`SeedDataAsync` is the right place for default database rows, default config keys,
-and one-time resource creation. It will never run twice on the same install unless
-you manually delete the `.seeded` marker.
-
-```csharp
-public async Task SeedDataAsync(IServiceProvider services, CancellationToken ct)
-{
-    var db = services.GetRequiredService<MyModuleDbContext>();
-
-    if (!await db.KnownTargets.AnyAsync(ct))
-    {
-        db.KnownTargets.Add(new KnownTarget
-        {
-            Name      = "Default Target",
-            IsDefault = true
-        });
-        await db.SaveChangesAsync(ct);
-    }
-}
-```
-
-Guard with an existence check so re-seeding manually doesn't produce duplicates.
-
----
-
-## Enabling your module
-
-1. Add your module ID to the Runtime Host's `Environment/.env`:
-
-   ```dotenv
-   Modules__my_module="true"
-   ```
-
-2. Restart the application, or use the CLI to enable it at runtime:
-
-   ```
-   module enable my_module
-   ```
-
-3. Verify it loaded:
-
-   ```
-   module get my_module
-   ```
-
-   A `status: enabled` response confirms successful initialization. If status shows
-   `failed`, check the application logs for the `InitializeAsync` exception.
-
----
-
-## Ideas for what to build
-
-  a system notification, email, or webhook.
-  file system events without polling.
-- **Hardware sensor module** â€” export an `ISensorReader` contract; other modules or
-- **Calendar integration** â€” own an `OnCalendarEvent` trigger attribute and
-- **Data pipeline module** â€” expose a `transform_data` tool that agents can call to
-  reshape JSON payloads between steps.
-- **Local LLM router** â€” export an `ILocalModelProvider` contract; point the model
-  service at a local Ollama or llama.cpp instance for offline capability.
-- **Browser automation** â€” use Playwright or Selenium under the hood; export
-  `browser_navigate` and `browser_extract` tools.
-
----
-
-## Debugging and troubleshooting
-
-**Module doesn't appear in `module list`**
-The class doesn't implement `IKernelRegistrationSource`, or the project isn't compiled into
-the solution. Check references and rebuild.
-
-**Module status is `failed` after enable**
-`InitializeAsync` threw. The full exception is in the application log under the
-`[Module:{id}]` category. Fix the error, then `module enable my_module` again â€” no
-restart needed.
-
-**Tool never reaches `ExecuteToolAsync`**
-The permission check is returning denied. Add a log line at the top of
-`ExecuteToolAsync` â€” if it never appears, the block is at the pipeline level, not
-in your code. Check the `RegistrationToolPermission` configuration for that tool.
-
-**Inline tool fires but produces no model output**
-`ExecuteInlineToolAsync` returned `NotHandled()` or threw silently. Inject an
-`ILogger<T>` into the module service, log a structured diagnostic at the top of
-the method, and inspect the bounded module operational stream for that natural
-logger category.
-
-**Contract requirement not satisfied at startup**
-The module that exports the contract you require either isn't enabled or failed to
-initialize. Run `module list` to check, enable it, then retry. If it's optional,
-gate the dependent code path with a null check.
-
-**`SeedDataAsync` isn't running**
-The `.seeded` marker already exists. Delete it from the module's data directory and
-restart to force a re-seed.
-
-**Trigger never fires**
-If it was called but events still don't fire, the OS-level hook (e.g. hotkey
-registration, process watcher) may have failed silently. Check platform
-prerequisites and permission levels. Confirm the binding row's `Kind` matches
-one of your declared `TriggerKeys`.
+Fix the declaration that caused the error. Do not bypass compiler validation or add a second execution path.
