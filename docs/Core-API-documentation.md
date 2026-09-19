@@ -171,6 +171,6 @@ SharpClaw.Core owns the neutral kernel, Jobs, Events, action contracts, and even
 
 The Runtime Host owns composition, API mapping, provider binding, module loading, readiness, and the module storage gateway.
 
-Agent Orchestration owns Agents, Skills, Memory, Context, Threads, Channels, history, and Two Tier Permission behavior when its published modules are enabled.
+Optional packages can own agent workflows, skills, memory, conversation context, history, and authorization behavior when enabled.
 
 The base Runtime does not declare feature-specific database entities for those domains. It does not keep inactive feature routes, UI, or compatibility stores.

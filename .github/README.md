@@ -16,11 +16,7 @@ Jobs support durable work that does not finish in the current request. Events gi
 
 Provider modules supply model transports and provider-specific behavior. Tool modules supply model-visible tools and their handlers.
 
-The optional Context module supplies threads, channels, context assembly, and conversation history. Without this module, requests remain independent.
-
-The optional Two Tier Permission module supplies role, clearance, preauthorization, grant, denial, and approval behavior. The kernel remains permission-neutral.
-
-The optional Agents module supplies agents, skills, and memory. It uses canonical Jobs instead of a second scheduler.
+Optional packages can supply conversation state, authorization, agent workflows, and other product behavior. The kernel does not include these domains by default.
 
 Editor, Metrics, and Module Development packages supply other optional capabilities. A disabled module contributes no behavior or storage.
 

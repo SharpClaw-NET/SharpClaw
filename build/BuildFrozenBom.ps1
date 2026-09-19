@@ -313,12 +313,10 @@ $moduleOutOfProcessProject = Join-Path $sourcesPath "module-sdk\SharpClaw.Sideca
 $moduleTestingProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.Testing\SharpClaw.ModuleSDK.Testing.csproj"
 $moduleHostOperationsProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.HostOperations\SharpClaw.ModuleSDK.HostOperations.csproj"
 $agentContractsProject = Join-Path $sourcesPath "agent-modules\SharpClaw.AgentOrchestration.Contracts\SharpClaw.AgentOrchestration.Contracts.csproj"
-$agentSolution = Join-Path $sourcesPath "agent-modules\SharpClaw.AgentOrchestration.slnx"
 $editorSolution = Join-Path $sourcesPath "editor-integrations\SharpClaw.EditorIntegrations.slnx"
 $metricsProject = Join-Path $sourcesPath "metrics\SharpClaw.Modules.Metrics\SharpClaw.Modules.Metrics.csproj"
 $providerSolution = Join-Path $sourcesPath "provider-integrations\SharpClaw.ProviderIntegrations.slnx"
 $moduleDevProject = Join-Path $sourcesPath "module-dev\SharpClaw.Modules.ModuleDev\SharpClaw.Modules.ModuleDev.csproj"
-$permissionRestrictionFixture = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\SharpClaw.Tests\Fixtures\PermissionRestriction\SharpClaw.TestFixtures.PermissionRestriction.csproj"))
 
 Restore-And-Pack -Label "contracts" -Target $contractsProject -ArtifactGroup "contracts"
 Restore-And-Pack -Label "gateway-contracts" -Target $gatewayProject -ArtifactGroup "gateway-contracts"
@@ -395,33 +393,6 @@ Pack-Target `
     -ArtifactGroup "agent-modules" `
     -PreserveAssemblyVersion
 
-Restore-Target -Label "agent-modules" -Target $agentSolution -ArtifactGroup "agent-modules"
-foreach ($agentProject in @(
-    "SharpClaw.Modules.Context\SharpClaw.Modules.Context.csproj",
-    "SharpClaw.Modules.TwoTierPermission\SharpClaw.Modules.TwoTierPermission.csproj",
-    "SharpClaw.Modules.Agents\SharpClaw.Modules.Agents.csproj"
-))
-{
-    $target = Join-Path (Join-Path $sourcesPath "agent-modules") $agentProject
-    $label = [System.IO.Path]::GetFileNameWithoutExtension($target)
-    Pack-Target -Label $label -Target $target -ArtifactGroup "agent-modules"
-}
-
-Restore-Target `
-    -Label "permission-restriction-fixture" `
-    -Target $permissionRestrictionFixture `
-    -ArtifactGroup "permission-restriction-fixture"
-Pack-Target `
-    -Label "permission-restriction-fixture" `
-    -Target $permissionRestrictionFixture `
-    -ArtifactGroup "permission-restriction-fixture" `
-    -PreserveAssemblyVersion `
-    -ExtraArguments @(
-        "-p:PackageVersion=0.5.0-beta.1",
-        "-p:Version=0.5.0-beta.1",
-        "-p:InformationalVersion=0.5.0-beta.1"
-    )
-
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"
 Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -ArtifactGroup "provider-integrations"
@@ -442,8 +413,6 @@ $expectedPackages = @(
     "SharpClaw.ModuleSDK.$packageVersion.nupkg",
     "SharpClaw.ModuleSDK.HostOperations.$packageVersion.nupkg",
     "SharpClaw.ModuleSDK.Testing.$packageVersion.nupkg",
-    "SharpClaw.Modules.Agents.$packageVersion.nupkg",
-    "SharpClaw.Modules.Context.$packageVersion.nupkg",
     "SharpClaw.Modules.EditorCommon.$packageVersion.nupkg",
     "SharpClaw.Modules.Metrics.$packageVersion.nupkg",
     "SharpClaw.Modules.ModuleDev.$moduleDevPackageVersion.nupkg",
@@ -452,12 +421,10 @@ $expectedPackages = @(
     "SharpClaw.Modules.Providers.LlamaSharp.$packageVersion.nupkg",
     "SharpClaw.Modules.Providers.Ollama.$packageVersion.nupkg",
     "SharpClaw.Modules.Providers.OpenAICompatible.$packageVersion.nupkg",
-    "SharpClaw.Modules.TwoTierPermission.$packageVersion.nupkg",
     "SharpClaw.Modules.VS2026Editor.$packageVersion.nupkg",
     "SharpClaw.Modules.VSCodeEditor.$packageVersion.nupkg",
     "SharpClaw.Providers.Common.$packageVersion.nupkg",
-    "SharpClaw.Providers.LocalCommon.$packageVersion.nupkg",
-    "SharpClaw.TestFixtures.PermissionRestriction.0.5.0-beta.1.nupkg"
+    "SharpClaw.Providers.LocalCommon.$packageVersion.nupkg"
 )
 
 $actualPackages = Get-ChildItem -LiteralPath $feedPath -Filter "*.nupkg" -File |

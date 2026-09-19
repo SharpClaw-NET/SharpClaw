@@ -218,7 +218,7 @@ public sealed class DocumentExecutor(HostAuthorizationEntry authorization)
 }
 ```
 
-Agent Orchestration maps its resource model to this neutral contract. Its [authorization guide](https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration/blob/main/docs/permission-modules.md) explains replacement and restriction behavior.
+Each authorization package maps its resource model to this neutral contract. Provider and restriction packages use the same request and decision types.
 
 ## Shared Contracts
 

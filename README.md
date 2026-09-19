@@ -10,9 +10,9 @@ Modules extend one compiled graph through typed contracts, declared capabilities
 | --- | --- |
 | Provider | Adds provider transport, credentials, model discovery, and model invocation. |
 | Tool | Adds model-visible operations that complete directly or submit canonical Jobs. |
-| Context | Adds threads, channels, conversation history, and context assembly. |
-| Two Tier Permission | Adds role clearance, channel and context preauthorization, grants, denials, and approvals. |
-| Agents | Adds agents, skills, memory, and typed agent workflows that use canonical Jobs. |
+| Conversation context | Can add threads, channels, conversation history, and context assembly. |
+| Authorization | Can add policy evaluation, grants, denials, restrictions, and approvals. |
+| Agent workflows | Can add agents, skills, memory, and typed work that uses canonical Jobs. |
 | Application | Adds declared CLI commands and authenticated HTTP or WebSocket endpoints. |
 | Integration | Connects external editors, services, observability systems, or other product surfaces. |
 
@@ -36,7 +36,7 @@ SharpClaw uses one configured persistence path for kernel and module storage. `J
 
 ## Getting Started
 
-The [SharpClaw releases](https://github.com/SharpClaw-NET/SharpClaw/releases) page provides packaged builds. A source build uses the .NET SDK version in `global.json`. Configure one enabled provider and model in the Runtime environment, then use **Chat** for model requests. **Settings** manages the Runtime endpoint and optional Gateway process. The Agent Orchestration modules add history, context, permissions, agents, skills, and memory.
+The [SharpClaw releases](https://github.com/SharpClaw-NET/SharpClaw/releases) page provides packaged builds. A source build uses the .NET SDK version in `global.json`. Configure one enabled provider and model in the Runtime environment, then use **Chat** for model requests. **Settings** manages the Runtime endpoint and optional Gateway process. Optional packages can add conversation state, authorization, agent workflows, and other product behavior.
 
 ```powershell
 dotnet restore SharpClaw.slnx
