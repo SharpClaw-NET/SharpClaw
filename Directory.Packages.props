@@ -26,7 +26,7 @@
     <PackageVersion Include="SharpClaw.Modules.TwoTierPermission" Version="[0.5.0-dev.20260919.3]" />
     <PackageVersion Include="SharpClaw.Modules.Agents" Version="[0.5.0-dev.20260919.3]" />
     <PackageVersion Include="SharpClaw.Modules.Metrics" Version="[0.5.0-dev.20260919.3]" />
-    <PackageVersion Include="SharpClaw.Modules.ModuleDev" Version="[0.5.0-dev.20260919.3]" />
+    <PackageVersion Include="SharpClaw.Modules.ModuleDev" Version="[0.5.0-dev.20260919.4]" />
     <PackageVersion Include="SharpClaw.Providers.Common" Version="[0.5.0-dev.20260919.3]" />
     <PackageVersion Include="SharpClaw.Providers.LocalCommon" Version="[0.5.0-dev.20260919.3]" />
     <PackageVersion Include="SharpClaw.Modules.Providers.Anthropic" Version="[0.5.0-dev.20260919.3]" />

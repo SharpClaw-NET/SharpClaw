@@ -16,6 +16,7 @@ $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
 $packageVersion = "0.5.0-dev.20260919.3"
+$moduleDevPackageVersion = "0.5.0-dev.20260919.4"
 
 New-Item -ItemType Directory -Force -Path @(
     $rootPath,
@@ -155,7 +156,7 @@ $repositories = @(
     [pscustomobject]@{
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
-        Commit = "9a78f40d0eb55dbb02a65d382b485a004b459803"
+        Commit = "7ce6053aa3d4a502248ddb2ce1687423bb704328"
     }
 )
 
@@ -249,10 +250,19 @@ function Pack-Target
         [string] $Target,
         [string] $ArtifactGroup,
         [string[]] $ExtraArguments = @(),
+        [string] $PackageVersionOverride = "",
         [switch] $PreserveAssemblyVersion
     )
 
     $targetArtifacts = Join-Path $artifactsPath $ArtifactGroup
+    $targetPackageVersion = if ([string]::IsNullOrWhiteSpace($PackageVersionOverride))
+    {
+        $packageVersion
+    }
+    else
+    {
+        $PackageVersionOverride
+    }
     $arguments = @(
         "pack",
         $Target,
@@ -263,13 +273,13 @@ function Pack-Target
         "-p:UseArtifactsOutput=true",
         "-p:SharpClawArtifactsRoot=$targetArtifacts",
         "-p:PackageOutputPath=$feedPath",
-        "-p:PackageVersion=$packageVersion"
+        "-p:PackageVersion=$targetPackageVersion"
     )
     if (-not $PreserveAssemblyVersion)
     {
         $arguments += @(
-            "-p:Version=$packageVersion",
-            "-p:InformationalVersion=$packageVersion"
+            "-p:Version=$targetPackageVersion",
+            "-p:InformationalVersion=$targetPackageVersion"
         )
     }
     $arguments += "-p:ContinuousIntegrationBuild=true"
@@ -415,7 +425,12 @@ Pack-Target `
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"
 Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -ArtifactGroup "provider-integrations"
-Restore-And-Pack -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
+Restore-Target -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
+Pack-Target `
+    -Label "module-dev" `
+    -Target $moduleDevProject `
+    -ArtifactGroup "module-dev" `
+    -PackageVersionOverride $moduleDevPackageVersion
 
 $expectedPackages = @(
     "SharpClaw.AgentOrchestration.Contracts.$packageVersion.nupkg",
@@ -431,7 +446,7 @@ $expectedPackages = @(
     "SharpClaw.Modules.Context.$packageVersion.nupkg",
     "SharpClaw.Modules.EditorCommon.$packageVersion.nupkg",
     "SharpClaw.Modules.Metrics.$packageVersion.nupkg",
-    "SharpClaw.Modules.ModuleDev.$packageVersion.nupkg",
+    "SharpClaw.Modules.ModuleDev.$moduleDevPackageVersion.nupkg",
     "SharpClaw.Modules.Providers.Anthropic.$packageVersion.nupkg",
     "SharpClaw.Modules.Providers.Google.$packageVersion.nupkg",
     "SharpClaw.Modules.Providers.LlamaSharp.$packageVersion.nupkg",
