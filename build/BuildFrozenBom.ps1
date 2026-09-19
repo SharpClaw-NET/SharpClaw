@@ -15,7 +15,7 @@ $artifactsPath = Join-Path $rootPath "artifacts"
 $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
-$packageVersion = "0.5.0-dev.20260904.7"
+$packageVersion = "0.5.0-dev.20260919.3"
 
 New-Item -ItemType Directory -Force -Path @(
     $rootPath,
@@ -125,37 +125,37 @@ $repositories = @(
     [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
-        Commit = "10847fcf2811971b4b8c963a8b86c76a0790a8c7"
+        Commit = "684403f3ce88a33c281f954384d197ee1fcad4e4"
     },
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "06b7eaf0abdf1d715eaa5a75d50532997d2e1415"
+        Commit = "bffbb27c1c8084ce89cbc7e2240bfce15f85778a"
     },
     [pscustomobject]@{
         Name = "agent-modules"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "5ad5c01f4d3c0ee7b2c92c6c9d9ece3fa3ec60b6"
+        Commit = "4dc560a5ac178be931c70993851dc2696c5a8ba6"
     },
     [pscustomobject]@{
         Name = "editor-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations.git"
-        Commit = "4b2c01e15b0ff5e49b8ad05e48bf7be861cffe0f"
+        Commit = "3eb32fe9cc66c008d3f2843cd64a34ee43fef720"
     },
     [pscustomobject]@{
         Name = "metrics"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Metrics.git"
-        Commit = "d5d95b01b4792cc1b32df2310a109aadb7d9a549"
+        Commit = "bbb31c9d9fb3bd54fa76a923c20b35b6ba20a4b1"
     },
     [pscustomobject]@{
         Name = "provider-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ProviderIntegrations.git"
-        Commit = "f1ea425c4ab8606a6a0bce9073a18348eb34d1ff"
+        Commit = "9deacddb2998012b656744d0dd7ebb414653b1c8"
     },
     [pscustomobject]@{
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
-        Commit = "c6162700e189d8f6f0bfcc96a763c2835d104b12"
+        Commit = "9a78f40d0eb55dbb02a65d382b485a004b459803"
     }
 )
 
@@ -263,6 +263,8 @@ function Pack-Target
         "-p:SharpClawArtifactsRoot=$targetArtifacts",
         "-p:PackageOutputPath=$feedPath",
         "-p:PackageVersion=$packageVersion",
+        "-p:Version=$packageVersion",
+        "-p:InformationalVersion=$packageVersion",
         "-p:ContinuousIntegrationBuild=true"
     ) + $ExtraArguments
     Invoke-BoundedProcess `
@@ -391,7 +393,11 @@ Pack-Target `
     -Label "permission-restriction-fixture" `
     -Target $permissionRestrictionFixture `
     -ArtifactGroup "permission-restriction-fixture" `
-    -ExtraArguments @("-p:PackageVersion=0.5.0-beta.1")
+    -ExtraArguments @(
+        "-p:PackageVersion=0.5.0-beta.1",
+        "-p:Version=0.5.0-beta.1",
+        "-p:InformationalVersion=0.5.0-beta.1"
+    )
 
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"

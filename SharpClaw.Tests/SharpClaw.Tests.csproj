@@ -6,6 +6,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
 
   <ItemGroup>
@@ -45,14 +46,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="Fixtures\**\*.cs" />
-    <Compile Remove="**\*.cs" />
     <Compile Include="GlobalUsings.cs" />
     <Compile Include="Architecture\**\*.cs" />
     <Compile Include="Gateway\**\*.cs" />
-    <Compile Remove="Gateway\GatewayEndpointToggleTests.cs" />
     <Compile Include="Persistence\**\*.cs" />
-    <Compile Remove="Persistence\EnvFileServiceTests.cs" />
     <Compile Include="Providers\**\*.cs" />
     <Compile Include="DurableStorage\**\*.cs" />
     <Compile Include="Publishing\**\*.cs" />
