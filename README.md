@@ -1,10 +1,6 @@
 # SharpClaw
 
-SharpClaw is a hypermoddable and hypertunable LLM kernel for .NET. It provides model streaming, tools, Jobs, Events, module lifecycle, authenticated transport, logging, readiness checks, and durable storage. The default JSONColdStore database creates itself and needs no external database service. PostgreSQL, SQL Server, and SQLite are also supported when an installation needs a relational database. SharpClaw supplies a coherent operational foundation while neutral module contracts let you build the product behavior that you need.
-
-## Kernel By Default
-
-A default installation lets you select a provider and model, then send one independent message to that model. The kernel does not create hidden agents, permissions, channels, threads, memory, or conversation history. It owns provider and model selection, streaming, tool execution, canonical Jobs and Events, module composition, and the universal action graph. Optional behavior exists only when its owning module is enabled.
+SharpClaw is a hypermoddable and hypertunable LLM kernel for .NET. It provides model streaming, tools, Jobs, Events, module lifecycle, authenticated transport, logging, readiness checks, and durable storage. The default JSONColdStore database creates itself and needs no external database service. PostgreSQL, SQL Server, and SQLite are also supported when an installation needs a relational database. SharpClaw supplies a coherent operational foundation while neutral module contracts let you build the product behavior that you need. A default installation lets you select a provider and model, then send one independent message to that model. The kernel does not create hidden agents, permissions, channels, threads, memory, or conversation history. It owns provider and model selection, streaming, tool execution, canonical Jobs and Events, module composition, and the universal action graph. Optional behavior exists only when its owning module is enabled.
 
 ## Modules And Capabilities
 
