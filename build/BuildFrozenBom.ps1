@@ -248,7 +248,8 @@ function Pack-Target
         [string] $Label,
         [string] $Target,
         [string] $ArtifactGroup,
-        [string[]] $ExtraArguments = @()
+        [string[]] $ExtraArguments = @(),
+        [switch] $PreserveAssemblyVersion
     )
 
     $targetArtifacts = Join-Path $artifactsPath $ArtifactGroup
@@ -262,11 +263,17 @@ function Pack-Target
         "-p:UseArtifactsOutput=true",
         "-p:SharpClawArtifactsRoot=$targetArtifacts",
         "-p:PackageOutputPath=$feedPath",
-        "-p:PackageVersion=$packageVersion",
-        "-p:Version=$packageVersion",
-        "-p:InformationalVersion=$packageVersion",
-        "-p:ContinuousIntegrationBuild=true"
-    ) + $ExtraArguments
+        "-p:PackageVersion=$packageVersion"
+    )
+    if (-not $PreserveAssemblyVersion)
+    {
+        $arguments += @(
+            "-p:Version=$packageVersion",
+            "-p:InformationalVersion=$packageVersion"
+        )
+    }
+    $arguments += "-p:ContinuousIntegrationBuild=true"
+    $arguments += $ExtraArguments
     Invoke-BoundedProcess `
         -Label "pack-$Label" `
         -FilePath "dotnet" `
@@ -371,7 +378,12 @@ Pack-Target `
     -Target $moduleOutOfProcessProject `
     -ArtifactGroup "module-hosts" `
     -ExtraArguments @("-p:OutOfProcessHostPayloadSource=$outOfProcessPayload")
-Restore-And-Pack -Label "agent-contracts" -Target $agentContractsProject -ArtifactGroup "agent-modules"
+Restore-Target -Label "agent-contracts" -Target $agentContractsProject -ArtifactGroup "agent-modules"
+Pack-Target `
+    -Label "agent-contracts" `
+    -Target $agentContractsProject `
+    -ArtifactGroup "agent-modules" `
+    -PreserveAssemblyVersion
 
 Restore-Target -Label "agent-modules" -Target $agentSolution -ArtifactGroup "agent-modules"
 foreach ($agentProject in @(
@@ -393,6 +405,7 @@ Pack-Target `
     -Label "permission-restriction-fixture" `
     -Target $permissionRestrictionFixture `
     -ArtifactGroup "permission-restriction-fixture" `
+    -PreserveAssemblyVersion `
     -ExtraArguments @(
         "-p:PackageVersion=0.5.0-beta.1",
         "-p:Version=0.5.0-beta.1",
