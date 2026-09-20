@@ -220,7 +220,7 @@ public sealed class RuntimeEventBoundaryTests
         sink.Should().Contain("RunEventActionAsync");
         sink.Should().Contain("store.EnqueueAsync");
         service.Should().Contain("RunEventActionAsync");
-        store.Should().Contain("SaveChangesThroughKernelAsync");
+        store.Should().Contain("db.SaveChangesAsync(cancellationToken)");
         bllProject.Should().Contain("Compile Include=\"Kernel\\**\\*.cs\"");
         kernelSources.Should().NotContain(source => source.Contains(
             "RegistrationEventDispatcher",

@@ -70,7 +70,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
             RecordKey = recordKey,
             StringValue = Pending,
         });
-        await db.SaveChangesThroughKernelAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async ValueTask<IReadOnlyList<RuntimeEventOutboxRecord>> ReadPendingAsync(
@@ -180,7 +180,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
         {
             stateIndex.StringValue = state;
         }
-        await db.SaveChangesThroughKernelAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async ValueTask<ScopedStorageRecordDB?> FindAsync(

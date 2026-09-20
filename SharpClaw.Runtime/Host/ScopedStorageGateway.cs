@@ -123,7 +123,7 @@ public sealed class ScopedStorageGateway(
                 db.ScopedStorageIndexEntries.AddRange(item.Indexes);
             }
 
-            await db.SaveChangesThroughKernelAsync(ct);
+            await db.SaveChangesAsync(ct);
             var revisions = pending
                 .Select(item => new ScopedStorageRevision(
                     item.Key,
@@ -228,7 +228,7 @@ public sealed class ScopedStorageGateway(
                 records.Select(record => record.RecordKey).ToArray(),
                 claim.IndexUpdates,
                 ct);
-            await db.SaveChangesThroughKernelAsync(ct);
+            await db.SaveChangesAsync(ct);
 
             var authority = NewClaimAuthority(
                 SourceId,
@@ -428,7 +428,7 @@ public sealed class ScopedStorageGateway(
     {
         var write = ReadWrite(contract, parameters);
         await UpsertRecordAsync(contract, write, ct);
-        await db.SaveChangesThroughKernelAsync(ct);
+        await db.SaveChangesAsync(ct);
         return JsonSerializer.SerializeToElement(new { saved = true }, JsonOptions);
     }
 
@@ -442,7 +442,7 @@ public sealed class ScopedStorageGateway(
             await UpsertRecordAsync(contract, write, ct);
 
         if (writes.Count > 0)
-            await db.SaveChangesThroughKernelAsync(ct);
+            await db.SaveChangesAsync(ct);
 
         return JsonSerializer.SerializeToElement(new { saved = writes.Count }, JsonOptions);
     }
@@ -490,7 +490,7 @@ public sealed class ScopedStorageGateway(
 
         var removedIndexes = await DeleteIndexesAsync(contract, key, ct);
         if (deleted || removedIndexes)
-            await db.SaveChangesThroughKernelAsync(ct);
+            await db.SaveChangesAsync(ct);
 
         return JsonSerializer.SerializeToElement(new { deleted }, JsonOptions);
     }
@@ -513,7 +513,7 @@ public sealed class ScopedStorageGateway(
 
         db.ScopedStorageRecords.RemoveRange(records);
         db.ScopedStorageIndexEntries.RemoveRange(indexes);
-        await db.SaveChangesThroughKernelAsync(ct);
+        await db.SaveChangesAsync(ct);
 
         return JsonSerializer.SerializeToElement(new { deleted = records.Count }, JsonOptions);
     }
@@ -574,7 +574,7 @@ public sealed class ScopedStorageGateway(
                 claim.IndexUpdates,
                 ct);
 
-            await db.SaveChangesThroughKernelAsync(ct);
+            await db.SaveChangesAsync(ct);
             if (transaction is not null)
                 await transactionRunner.CommitAsync(transaction, ct);
 

@@ -150,6 +150,8 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.DurableStorage'
           - domain: Direct Chat Kernel
             filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.DirectChatKernelTests'
+          - domain: Client Request Authority
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.ClientActionBoundaryTests'
           - domain: Production Module Graph
             filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.DefaultModuleSetHostGateTests'
           - domain: Publishing

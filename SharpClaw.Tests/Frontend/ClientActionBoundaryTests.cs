@@ -599,6 +599,35 @@ public sealed class ClientActionBoundaryTests
         handler.Request.Should().BeNull();
     }
 
+    [TestCase("http://attacker.example/steal")]
+    [TestCase("https://attacker.example/steal")]
+    [TestCase("file:///tmp/steal")]
+    [TestCase("custom:steal")]
+    public async Task Scheme_bearing_request_target_is_rejected_before_transport(string hostileTarget)
+    {
+        var dispatcher = CreateDispatcher(new ClientProbe());
+        var handler = new CapturingHandler();
+        using var http = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://runtime-a.test:48923/"),
+        };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            "runtime-a-key");
+
+        Func<Task> send = async () =>
+        {
+            using var response = await api.GetAsync(hostileTarget);
+        };
+
+        await FluentActions.Invoking(send)
+            .Should().ThrowAsync<KernelActionFailedException>();
+        handler.Requests.Should().BeEmpty();
+        handler.Request.Should().BeNull();
+    }
+
     [Test]
     public async Task Concurrent_retarget_keeps_each_request_key_bound_to_its_target()
     {

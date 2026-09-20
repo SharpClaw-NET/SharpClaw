@@ -436,9 +436,9 @@ public sealed class SharpClawApiClient : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(requestTarget);
 
-        if (Uri.TryCreate(requestTarget, UriKind.Absolute, out _) ||
+        if (HasAuthorityPrefix(requestTarget) ||
+            HasUriScheme(requestTarget) ||
             !Uri.TryCreate(requestTarget, UriKind.Relative, out var relativeTarget) ||
-            HasAuthorityPrefix(requestTarget) ||
             requestTarget.Contains('#'))
         {
             throw new InvalidOperationException(
@@ -459,6 +459,23 @@ public sealed class SharpClawApiClient : IDisposable
         requestTarget.Length >= 2 &&
         IsPathSeparator(requestTarget[0]) &&
         IsPathSeparator(requestTarget[1]);
+
+    private static bool HasUriScheme(string requestTarget)
+    {
+        if (requestTarget.Length == 0 || !char.IsAsciiLetter(requestTarget[0]))
+            return false;
+
+        for (var index = 1; index < requestTarget.Length; index++)
+        {
+            var character = requestTarget[index];
+            if (character == ':')
+                return true;
+            if (!char.IsAsciiLetterOrDigit(character) && character is not '+' and not '-' and not '.')
+                return false;
+        }
+
+        return false;
+    }
 
     private static bool IsPathSeparator(char value) => value is '/' or '\\';
 

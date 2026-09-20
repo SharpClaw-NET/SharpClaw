@@ -25,11 +25,13 @@ public sealed class RuntimePersistenceActionRunner(
 {
     Task<int> ISharpClawPersistenceSaveCoordinator.SaveChangesAsync(
         SharpClawDbContext db,
+        bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken) =>
-        SaveChangesAsync(db, cancellationToken).AsTask();
+        SaveChangesAsync(db, acceptAllChangesOnSuccess, cancellationToken).AsTask();
 
-    public async ValueTask<int> SaveChangesAsync(
+    internal async ValueTask<int> SaveChangesAsync(
         SharpClawDbContext db,
+        bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
@@ -57,7 +59,9 @@ public sealed class RuntimePersistenceActionRunner(
 
             try
             {
-                var saved = await db.SaveChangesTerminalAsync(actionCancellationToken);
+                var saved = await db.SaveChangesTerminalAsync(
+                    acceptAllChangesOnSuccess,
+                    actionCancellationToken);
                 terminal.TrySetResult(saved);
                 return saved;
             }
