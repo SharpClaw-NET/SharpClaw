@@ -12,15 +12,18 @@ public sealed class ReadmeBoundaryTests
         var readme = File.ReadAllText(Path.Combine(root, "README.md"));
 
         readme.Should().Contain("A default installation lets you select a provider and model");
+        readme.Should().Contain("## Architecture At A Glance");
         readme.Should().Contain("## Modules And Capabilities");
-        readme.Should().Contain("| Module type | Capability when enabled |");
         readme.Should().Contain("## Bring Your Own Features");
-        readme.Should().Contain("| Extension surface | What you can supply |");
+        readme.Should().Contain("public neutral contracts");
+        readme.Should().Contain("one configured persistence path");
         readme.Should().Contain("JSONColdStore");
         readme.Should().Contain("PostgreSQL");
         readme.Should().Contain("SQL Server");
         readme.Should().Contain("SQLite");
         readme.Should().Contain("https://github.com/SharpClaw-NET/SharpClaw");
+        readme.Should().NotContain("| Module type | Capability when enabled |");
+        readme.Should().NotContain("| Extension surface | What you can supply |");
         readme.Should().NotContain("Development Status");
         readme.Should().NotContain("We're Hiring");
         readme.Should().NotContain("Disclaimer");

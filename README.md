@@ -1,42 +1,43 @@
 # SharpClaw
 
-SharpClaw is a hypermoddable and hypertunable LLM kernel for .NET. It provides model streaming, tools, Jobs, Events, module lifecycle, authenticated transport, logging, readiness checks, and durable storage. The default JSONColdStore database creates itself and needs no external database service. PostgreSQL, SQL Server, and SQLite are also supported when an installation needs a relational database. SharpClaw supplies a coherent operational foundation while neutral module contracts let you build the product behavior that you need. A default installation lets you select a provider and model, then send one independent message to that model. The kernel does not create hidden agents, permissions, channels, threads, memory, or conversation history. It owns provider and model selection, streaming, tool execution, canonical Jobs and Events, module composition, and the universal action graph. Optional behavior exists only when its owning module is enabled.
+SharpClaw is a modular LLM runtime for .NET. Its deliberately small kernel handles model streaming, tools, canonical Jobs and Events, authenticated transport, module composition, logging, readiness, and durable storage. Product-specific behavior lives in optional modules, so an installation can start simple and grow without forking the kernel.
+
+## What You Get By Default
+
+A default installation lets you select a provider and model, then send independent requests through one explicit execution path. SharpClaw owns provider and model selection, streaming, tool execution, canonical Jobs and Events, module lifecycle, and the universal action graph. It deliberately does not create agents, permissions, channels, threads, memory, or conversation history; those features appear only when an enabled module supplies them.
+
+## Architecture At A Glance
+
+SharpClaw compiles the host and every enabled module into one typed graph before it reports readiness. Clients call the Runtime directly or through the optional authenticated Gateway. The Runtime composes SharpClaw.Core with provider integrations, tools, Jobs, Events, and one configured persistence provider, while modules contribute only the services and capabilities they declare.
+
+```mermaid
+flowchart LR
+    Client --> Runtime
+    Gateway -. optional authenticated proxy .-> Runtime
+    Modules[Enabled modules] -->|typed registrations| Runtime
+    Runtime --> Core[SharpClaw.Core]
+    Core --> Providers
+    Core --> Tools
+    Core --> Jobs
+    Core --> Events
+    Runtime --> Storage
+```
 
 ## Modules And Capabilities
 
-Modules extend one compiled graph through typed contracts, declared capabilities, and authenticated host transport. A module can add a narrow capability without replacing the kernel or creating a parallel execution path. The base application remains useful on its own, while an installation can add complete feature domains as required.
-
-| Module type | Capability when enabled |
-| --- | --- |
-| Provider | Adds provider transport, credentials, model discovery, and model invocation. |
-| Tool | Adds model-visible operations that complete directly or submit canonical Jobs. |
-| Conversation context | Can add threads, channels, conversation history, and context assembly. |
-| Authorization | Can add policy evaluation, grants, denials, restrictions, and approvals. |
-| Agent workflows | Can add agents, skills, memory, and typed work that uses canonical Jobs. |
-| Application | Adds declared CLI commands and authenticated HTTP or WebSocket endpoints. |
-| Integration | Connects external editors, services, observability systems, or other product surfaces. |
+Each module adds declared capabilities to the same compiled graph instead of replacing the kernel or opening a parallel execution path. Providers connect model backends, tools expose model-visible operations, and context, authorization, or agent modules can layer in stateful conversations, policy, memory, skills, and workflows. Application and integration modules can expose CLI commands, authenticated HTTP or WebSocket endpoints, editors, external services, and observability surfaces.
 
 ## Bring Your Own Features
 
-SharpClaw modules use public neutral contracts instead of host-specific branches. A module declares what it supplies and what it requires. The host validates that graph before startup, gives the module only its approved capabilities, and keeps all work on shared kernel paths.
-
-| Extension surface | What you can supply |
-| --- | --- |
-| Services and contracts | Typed services that other declared modules can use. |
-| Providers and tools | Model backends, model-visible tools, and typed handlers. |
-| Actions, hooks, and events | Interception, policy, tuning, observation, and event handling. |
-| Jobs | Typed durable work through the kernel scheduler, recovery, and result lifecycle. |
-| Storage | Host-managed module documents, indexes, transactions, and module-owned EF Core contexts. |
-| Chat context | Bounded prompt context from an enabled context contributor. |
-| Application surfaces | CLI commands and authenticated HTTP or WebSocket endpoints. |
+A SharpClaw module uses public neutral contracts to declare what it supplies and what it requires. Before startup, the host validates those relationships and grants only the approved capabilities. Extension points cover services, providers, tools, actions, hooks, events, durable Jobs, storage, prompt context, and application surfaces, all connected to the same kernel paths so a feature remains independently replaceable without becoming host-specific code.
 
 ## Storage
 
-SharpClaw uses one configured persistence path for kernel and module storage. `JsonFile` is the default and uses JSONColdStore. A new local installation can create durable storage without a database server or setup step. `Postgres`, `SqlServer`, and `SQLite` use the same Entity Framework Core boundary for deployments that need those providers. The Runtime validates storage before it publishes readiness and never falls back after a configured provider fails.
+SharpClaw uses one configured persistence path for both kernel and module data. The default `JsonFile` provider uses JSONColdStore and creates durable local storage without a separate database service or setup step, while PostgreSQL, SQL Server, and SQLite use the same Entity Framework Core boundary for relational deployments; the Runtime validates the selected provider before publishing readiness and never silently falls back when that provider fails.
 
 ## Getting Started
 
-The [SharpClaw releases](https://github.com/SharpClaw-NET/SharpClaw/releases) page provides packaged builds. A source build uses the .NET SDK version in `global.json`. Configure one enabled provider and model in the Runtime environment, then use **Chat** for model requests. **Settings** manages the Runtime endpoint and optional Gateway process. Optional packages can add conversation state, authorization, agent workflows, and other product behavior.
+Download a packaged build from [SharpClaw releases](https://github.com/SharpClaw-NET/SharpClaw/releases), or build the repository with the .NET SDK selected by `global.json` using the commands below. Configure one enabled provider and model in the Runtime environment, use **Chat** for model requests, and use **Settings** to manage the Runtime endpoint and optional Gateway process; install optional packages only for the conversation state, authorization, agent workflows, or integrations your application needs.
 
 ```powershell
 dotnet restore SharpClaw.slnx
@@ -45,8 +46,8 @@ dotnet build SharpClaw.slnx -c Release --no-restore
 
 ## Documentation
 
-The [kernel architecture specification](docs/SharpClaw-Kernel-Architecture-Specification.md) defines product ownership and module boundaries. [Database configuration](docs/Database-Configuration.md) describes each supported storage provider. The [Core API](docs/Core-API-documentation.md), [Core CLI](docs/Core-CLI-documentation.md), [Gateway](docs/Gateway-documentation.md), [logging](docs/Logging.md), and [provider parameters](docs/Provider-Parameters.md) documents describe the main operating surfaces.
+Start with the [kernel architecture specification](docs/SharpClaw-Kernel-Architecture-Specification.md) for product ownership and module boundaries, then use [database configuration](docs/Database-Configuration.md), the [Core API](docs/Core-API-documentation.md), [Core CLI](docs/Core-CLI-documentation.md), [Gateway](docs/Gateway-documentation.md), [logging](docs/Logging.md), and [provider parameters](docs/Provider-Parameters.md) for the corresponding operating surfaces.
 
 ## License And Security
 
-SharpClaw uses the [GNU Affero General Public License version 3 or later](LICENSE.md), with the exceptions stated in the license file. Report a security issue through [GitHub Security Advisories](https://github.com/SharpClaw-NET/SharpClaw/security/advisories/new), not through a public issue.
+SharpClaw is licensed under the [GNU Affero General Public License version 3 or later](LICENSE.md), subject to the exceptions stated in the license file. Report vulnerabilities privately through [GitHub Security Advisories](https://github.com/SharpClaw-NET/SharpClaw/security/advisories/new) rather than opening a public issue.
