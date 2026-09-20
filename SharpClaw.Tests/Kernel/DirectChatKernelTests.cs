@@ -311,7 +311,10 @@ public sealed class DirectChatKernelTests
             CancellationToken ct = default)
         {
             Started.TrySetResult();
-            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            var cancellationObserved = new TaskCompletionSource();
+            using var registration = ct.Register(
+                () => cancellationObserved.TrySetCanceled(ct));
+            await cancellationObserved.Task;
             return new ChatCompletionResult
             {
                 Content = "unreachable",
