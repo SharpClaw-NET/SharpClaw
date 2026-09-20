@@ -9,7 +9,10 @@ public class DesignTimeFactory : IDesignTimeDbContextFactory<SharpClawDbContext>
     public SharpClawDbContext CreateDbContext(string[] args)
     {
         var options = new DbContextOptionsBuilder<SharpClawDbContext>()
-            .UseNpgsql("Host=localhost;Database=SharpClaw_Migrations;Username=sharpclaw;Password=sharpclaw")
+            .UseNpgsql(
+                "Host=localhost;Database=SharpClaw_Migrations;Username=sharpclaw;Password=sharpclaw",
+                provider => provider.MigrationsAssembly(
+                    typeof(DesignTimeFactory).Assembly.GetName().Name))
             .Options;
         return new SharpClawDbContext(options);
     }

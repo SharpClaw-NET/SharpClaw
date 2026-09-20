@@ -1058,7 +1058,7 @@ public sealed class ScopedStorageGateway(
         return expectedKind switch
         {
             ScopedStorageIndexValueKind.String when value.ValueKind == JsonValueKind.String =>
-                new IndexValue(expectedKind, value.GetString() ?? "", null, null, null),
+                new IndexValue(expectedKind, ReadStringIndexValue(value), null, null, null),
             ScopedStorageIndexValueKind.Number when value.ValueKind == JsonValueKind.Number
                                                  && value.TryGetDouble(out var number) =>
                 new IndexValue(expectedKind, null, number, null, null),
@@ -1071,6 +1071,20 @@ public sealed class ScopedStorageGateway(
                 $"Registration storage index value '{value.GetRawText()}' is not a valid {expectedKind} value.",
                 nameof(value)),
         };
+    }
+
+    private static string ReadStringIndexValue(JsonElement value)
+    {
+        var stringValue = value.GetString() ?? "";
+        if (stringValue.Length > SharpClawDbContext.ScopedStorageStringIndexValueMaxLength)
+        {
+            throw new ArgumentException(
+                $"Registration storage string index values cannot exceed " +
+                $"{SharpClawDbContext.ScopedStorageStringIndexValueMaxLength} characters.",
+                nameof(value));
+        }
+
+        return stringValue;
     }
 
     private static ScopedStorageIndexEntryDB CreateIndexEntry(

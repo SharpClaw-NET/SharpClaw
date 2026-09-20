@@ -29,6 +29,7 @@
     <File Path="Directory.Build.props" />
     <File Path="Directory.Build.targets" />
     <File Path="Directory.Packages.props" />
+    <File Path="dotnet-tools.json" />
     <File Path="global.json" />
   </Folder>
   <Folder Name="/Solution Items/Docs/">
@@ -98,4 +99,3 @@
     </Project>
   </Folder>
 </Solution>
-

@@ -9,7 +9,10 @@ public class DesignTimeFactory : IDesignTimeDbContextFactory<SharpClawDbContext>
     public SharpClawDbContext CreateDbContext(string[] args)
     {
         var options = new DbContextOptionsBuilder<SharpClawDbContext>()
-            .UseSqlServer("Server=.;Database=SharpClaw_Migrations;Trusted_Connection=True;TrustServerCertificate=True")
+            .UseSqlServer(
+                "Server=.;Database=SharpClaw_Migrations;Trusted_Connection=True;TrustServerCertificate=True",
+                provider => provider.MigrationsAssembly(
+                    typeof(DesignTimeFactory).Assembly.GetName().Name))
             .Options;
         return new SharpClawDbContext(options);
     }

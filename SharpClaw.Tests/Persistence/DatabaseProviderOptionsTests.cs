@@ -183,6 +183,35 @@ public sealed class DatabaseProviderOptionsTests
             .Should().Be(mode);
     }
 
+    [TestCase(StorageMode.SQLite, "Data Source=:memory:")]
+    [TestCase(
+        StorageMode.Postgres,
+        "Host=localhost;Database=sharpclaw;Username=test;Password=test")]
+    [TestCase(
+        StorageMode.SqlServer,
+        "Server=localhost;Database=sharpclaw;User Id=test;Password=test;TrustServerCertificate=True")]
+    public void AddInfrastructure_LoadsCurrentOfficialMigration(
+        StorageMode mode,
+        string connectionString)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddInfrastructure(new DatabaseProviderOptions
+        {
+            Provider = mode,
+            ConnectionString = connectionString,
+        });
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+
+        db.Database.GetMigrations()
+            .Should().ContainSingle()
+            .Which.Should().EndWith("_InitialCreate");
+        db.Database.HasPendingModelChanges().Should().BeFalse();
+    }
+
     [Test]
     public void AddInfrastructure_ActivatesOnlyJsonColdStoreWhenSelected()
     {

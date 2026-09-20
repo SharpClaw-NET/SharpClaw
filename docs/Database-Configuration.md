@@ -14,9 +14,9 @@ Set `Database__Provider` in the deployed Runtime `Environment/.env` file. The su
 
 Use `JsonFile` for the default local installation. It does not need a connection string.
 
-Use `Postgres`, `SqlServer`, or `SQLite` with the matching `ConnectionStrings__<Provider>` key. The selected relational database must already contain its required schema.
+Use `Postgres`, `SqlServer`, or `SQLite` with the matching `ConnectionStrings__<Provider>` key. The selected relational database must already contain the schema from its matching official migration assembly.
 
-The Runtime does not run a migration endpoint during normal startup. This repository does not generate or apply a migration as part of this configuration process.
+The Runtime does not run a migration endpoint or apply migrations during normal startup. Schema deployment is an explicit administrative operation.
 
 ## Quick Start
 
@@ -73,13 +73,26 @@ The Runtime checks `CanConnectAsync` before it publishes readiness. A connection
 
 The base Runtime model remains the six generic entity types named in this guide. Module-owned EF models use `IOwnedDbContextFactory` and remain in their owning packages.
 
+## Migration Authoring
+
+Official migration and model-snapshot files are generated only by the repository-pinned EF Core console tool. Never create or edit those files by hand. Restore the tool, then run the command for every relational provider whenever `SharpClawDbContext` changes:
+
+```shell
+dotnet tool restore
+dotnet ef migrations add <MigrationName> --project SharpClaw.Migrations/Postgres/SharpClaw.Migrations.Postgres.csproj --startup-project SharpClaw.Migrations/Postgres/SharpClaw.Migrations.Postgres.csproj --context SharpClawDbContext --output-dir Migrations
+dotnet ef migrations add <MigrationName> --project SharpClaw.Migrations/SqlServer/SharpClaw.Migrations.SqlServer.csproj --startup-project SharpClaw.Migrations/SqlServer/SharpClaw.Migrations.SqlServer.csproj --context SharpClawDbContext --output-dir Migrations
+dotnet ef migrations add <MigrationName> --project SharpClaw.Migrations/SQLite/SharpClaw.Migrations.SQLite.csproj --startup-project SharpClaw.Migrations/SQLite/SharpClaw.Migrations.SQLite.csproj --context SharpClawDbContext --output-dir Migrations
+```
+
+If an unpublished scaffold is wrong, remove it with `dotnet ef migrations remove` against the same project and scaffold it again. Never alter a published migration; add a new corrective migration through the same console command. Before committing, run `dotnet ef migrations has-pending-model-changes` for all three projects and require a successful no-change result.
+
 ## Module Storage
 
 Modules declare storage through `IKernelBuilder.Storage` and `IStorageContractBuilder`.
 
 The host validates `ScopedStorageContractDescriptor` declarations and exposes them through `IScopedStorageGateway`.
 
-Module records use the module identifier, storage name, record key, and declared indexes. A module cannot access another module's storage without an explicit contract.
+Module records use the module identifier, storage name, record key, and declared indexes. String index values are limited to 128 characters so the complete composite index remains valid across every supported relational provider. A module cannot access another module's storage without an explicit contract.
 
 Do not access `SharpClawDbContext` from a module. Do not add a module entity to the base context when the module storage contract can provide the required boundary.
 

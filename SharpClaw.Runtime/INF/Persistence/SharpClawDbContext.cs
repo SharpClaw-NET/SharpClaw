@@ -10,6 +10,8 @@ public class SharpClawDbContext(
     IRuntimePersistenceActionRunnerAccessor? persistenceActionRunnerAccessor = null)
     : DbContext(options), ISharpClawDataContext
 {
+    internal const int ScopedStorageStringIndexValueMaxLength = 128;
+
     private readonly IRuntimePersistenceActionRunnerAccessor? _persistenceActionRunnerAccessor =
         persistenceActionRunnerAccessor;
 
@@ -128,7 +130,8 @@ public class SharpClawDbContext(
             entity.Property(index => index.StorageName).HasMaxLength(128);
             entity.Property(index => index.IndexName).HasMaxLength(128);
             entity.Property(index => index.RecordKey).HasMaxLength(256);
-            entity.Property(index => index.StringValue).HasMaxLength(1024);
+            entity.Property(index => index.StringValue)
+                .HasMaxLength(ScopedStorageStringIndexValueMaxLength);
         });
 
         ConfigureForProvider(modelBuilder);
