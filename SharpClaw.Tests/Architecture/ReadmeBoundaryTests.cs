@@ -15,18 +15,23 @@ public sealed class ReadmeBoundaryTests
             .Should()
             .BeFalse("the root README must be the repository's single canonical README");
 
-        readme.Should().Contain("A default installation lets you select a provider and model");
         readme.Should().Contain("## Architecture At A Glance");
-        readme.Should().Contain("## Modules And Capabilities");
         readme.Should().Contain("## Bring Your Own Features");
-        readme.Should().Contain("| Extension surface | What you can supply |");
+        readme.Should().Contain("| Area | Bring your own | What it enables |");
         readme.Should().Contain("public neutral contracts");
-        readme.Should().Contain("one configured persistence path");
+        readme.Should().Contain("Authorization policy");
+        readme.Should().Contain("Authorization consumers");
+        readme.Should().Contain("Authorization restrictions");
+        readme.Should().Contain("Permission systems");
+        readme.Should().Contain("Agents and knowledge");
+        readme.Should().Contain("one configured persistence provider");
         readme.Should().Contain("JSONColdStore");
         readme.Should().Contain("PostgreSQL");
         readme.Should().Contain("SQL Server");
         readme.Should().Contain("SQLite");
         readme.Should().Contain("https://github.com/SharpClaw-NET/SharpClaw");
+        readme.Should().NotContain("## What You Get By Default");
+        readme.Should().NotContain("## Modules And Capabilities");
         readme.Should().NotContain("| Module type | Capability when enabled |");
         readme.Should().NotContain("Development Status");
         readme.Should().NotContain("We're Hiring");
