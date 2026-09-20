@@ -160,7 +160,7 @@ $repositories = @(
     [pscustomobject]@{
         Name = "persistence"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Persistence.git"
-        Commit = "4cbcbf27004960459c662e67e91cc3a0c5ecc7c4"
+        Commit = "efbfaea0ab4ecff2bc55e13e37e48096468e4d70"
     }
 )
 
