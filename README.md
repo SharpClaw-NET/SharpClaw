@@ -31,6 +31,16 @@ Each module adds declared capabilities to the same compiled graph instead of rep
 
 A SharpClaw module uses public neutral contracts to declare what it supplies and what it requires. Before startup, the host validates those relationships and grants only the approved capabilities. Extension points cover services, providers, tools, actions, hooks, events, durable Jobs, storage, prompt context, and application surfaces, all connected to the same kernel paths so a feature remains independently replaceable without becoming host-specific code.
 
+| Extension surface | What you can supply |
+| --- | --- |
+| Services and contracts | Typed services that other declared modules can use. |
+| Providers and tools | Model backends, model-visible tools, and typed handlers. |
+| Actions, hooks, and events | Interception, policy, tuning, observation, and event handling. |
+| Jobs | Typed durable work through the kernel scheduler, recovery, and result lifecycle. |
+| Storage | Host-managed module documents, indexes, transactions, and module-owned EF Core contexts. |
+| Chat context | Bounded prompt context from an enabled context contributor. |
+| Application surfaces | CLI commands and authenticated HTTP or WebSocket endpoints. |
+
 ## Storage
 
 SharpClaw uses one configured persistence path for both kernel and module data. The default `JsonFile` provider uses JSONColdStore and creates durable local storage without a separate database service or setup step, while PostgreSQL, SQL Server, and SQLite use the same Entity Framework Core boundary for relational deployments; the Runtime validates the selected provider before publishing readiness and never silently falls back when that provider fails.
