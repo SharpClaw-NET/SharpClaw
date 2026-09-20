@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Kernel;
+using SharpClaw.Persistence;
 
 namespace SharpClaw.Runtime.INF.Persistence;
 
@@ -18,21 +19,15 @@ public interface IRuntimePersistenceActionBoundary
         CancellationToken cancellationToken = default);
 }
 
-public interface IRuntimePersistenceActionRunnerAccessor
-{
-    RuntimePersistenceActionRunner GetRequiredRunner();
-}
-
-public sealed class RuntimePersistenceActionRunnerAccessor(IServiceProvider services)
-    : IRuntimePersistenceActionRunnerAccessor
-{
-    public RuntimePersistenceActionRunner GetRequiredRunner() =>
-        services.GetRequiredService<RuntimePersistenceActionRunner>();
-}
-
 public sealed class RuntimePersistenceActionRunner(
     IRuntimePersistenceActionBoundary actionBoundary)
+    : ISharpClawPersistenceSaveCoordinator
 {
+    Task<int> ISharpClawPersistenceSaveCoordinator.SaveChangesAsync(
+        SharpClawDbContext db,
+        CancellationToken cancellationToken) =>
+        SaveChangesAsync(db, cancellationToken).AsTask();
+
     public async ValueTask<int> SaveChangesAsync(
         SharpClawDbContext db,
         CancellationToken cancellationToken = default)

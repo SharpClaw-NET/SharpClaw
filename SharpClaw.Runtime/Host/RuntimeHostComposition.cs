@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Kernel;
+using SharpClaw.Persistence;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host.Api;
 using SharpClaw.Runtime.INF;
@@ -20,7 +21,7 @@ internal static class RuntimeHostComposition
         IConfiguration configuration,
         SharpClawInstancePaths instancePaths,
         EncryptionOptions encryptionOptions,
-        DatabaseProviderOptions databaseOptions,
+        SharpClawPersistenceOptions persistenceOptions,
         IEnumerable<ServiceDescriptor> discoveredServices,
         IEnumerable<ScopedStorageContractDescriptor>? additionalStorageContracts = null)
     {
@@ -28,7 +29,7 @@ internal static class RuntimeHostComposition
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(instancePaths);
         ArgumentNullException.ThrowIfNull(encryptionOptions);
-        ArgumentNullException.ThrowIfNull(databaseOptions);
+        ArgumentNullException.ThrowIfNull(persistenceOptions);
         ArgumentNullException.ThrowIfNull(discoveredServices);
 
         foreach (var descriptor in discoveredServices)
@@ -44,7 +45,7 @@ internal static class RuntimeHostComposition
         services.AddSingleton(instancePaths);
         services.AddSingleton(encryptionOptions);
         services.AddHttpClient();
-        services.AddInfrastructure(databaseOptions);
+        services.AddInfrastructure(configuration, persistenceOptions);
         services.AddSingleton<ApiKeyProvider>();
         services.AddSingleton<RuntimeReadinessState>();
         services.AddSingleton<RuntimeDatabaseReadiness>();
@@ -87,6 +88,8 @@ internal static class RuntimeHostComposition
         services.AddScoped<IRuntimeEventOutboxStore, RuntimeScopedStorageEventOutboxStore>();
         services.AddScoped<IRuntimeEventOutboxService, RuntimeEventOutboxService>();
         services.AddScoped<RuntimePersistenceActionRunner>();
+        services.AddScoped<ISharpClawPersistenceSaveCoordinator>(serviceProvider =>
+            serviceProvider.GetRequiredService<RuntimePersistenceActionRunner>());
         services.AddScoped<IRuntimeTransactionActionRunnerAccessor,
             RuntimeTransactionActionRunnerAccessor>();
         services.AddScoped<RuntimeTransactionActionRunner>();

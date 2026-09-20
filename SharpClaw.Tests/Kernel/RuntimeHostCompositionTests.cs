@@ -16,6 +16,8 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Gateway;
 using SharpClaw.Gateway.Infrastructure;
+using SharpClaw.Persistence;
+using SharpClaw.Persistence.JSONColdStore;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host;
 using SharpClaw.Runtime.Host.Handlers;
@@ -56,15 +58,16 @@ public sealed class RuntimeHostCompositionTests
                 Path.Combine(registrationRoot, "test-contributions"),
             ],
             configuration);
-        registrationSet.SourceIds.Should().ContainSingle()
-            .Which.Should().Be("sharpclaw_test_harness_in_process");
+        registrationSet.SourceIds.Should().BeEquivalentTo(
+            [
+                "sharpclaw_persistence_jsoncoldstore",
+                "sharpclaw_persistence_postgresql",
+                "sharpclaw_persistence_sqlite",
+                "sharpclaw_persistence_sqlserver",
+                "sharpclaw_test_harness_in_process",
+            ]);
 
-        var databaseOptions = new DatabaseProviderOptions
-        {
-            Provider = StorageMode.JsonFile,
-        };
-        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
-        databaseOptions.JsonFile.EncryptAtRest = false;
+        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
@@ -216,12 +219,7 @@ public sealed class RuntimeHostCompositionTests
         var modules = registrationSet.Services
             .Concat(jobServices)
             .ToArray();
-        var databaseOptions = new DatabaseProviderOptions
-        {
-            Provider = StorageMode.JsonFile,
-        };
-        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
-        databaseOptions.JsonFile.EncryptAtRest = false;
+        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -437,12 +435,7 @@ public sealed class RuntimeHostCompositionTests
                 ["Provider:Model"] = "context-probe-model",
             })
             .Build();
-        var databaseOptions = new DatabaseProviderOptions
-        {
-            Provider = StorageMode.JsonFile,
-        };
-        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
-        databaseOptions.JsonFile.EncryptAtRest = false;
+        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
         var receiveKey = new SharpClawActionKey("runtime.request.receive");
         var receiveManifest = KernelActionCatalog.DescriptorFor(receiveKey);
         var receiveDescriptor = receiveManifest.ToDescriptor();
@@ -464,7 +457,7 @@ public sealed class RuntimeHostCompositionTests
             workspace.InstancePaths,
             new EncryptionOptions { Key = new byte[32] },
             databaseOptions,
-            TestServiceGraph.Collect([module]));
+            TestServiceGraph.Collect([module, new JSONColdStorePersistenceModule()]));
         builder.Services.AddSingleton(new KernelGraphCompileOptions
         {
             ActionRegistrationCapabilityGrants = new Dictionary<
@@ -634,6 +627,10 @@ public sealed class RuntimeHostCompositionTests
                     "sharpclaw_providers_llamasharp",
                     "sharpclaw_providers_ollama",
                     "sharpclaw_providers_openai_compat",
+                    "sharpclaw_persistence_jsoncoldstore",
+                    "sharpclaw_persistence_postgresql",
+                    "sharpclaw_persistence_sqlite",
+                    "sharpclaw_persistence_sqlserver",
                 ]);
         File.Exists(Path.Combine(
                 AppContext.BaseDirectory,
@@ -643,12 +640,7 @@ public sealed class RuntimeHostCompositionTests
             .Should().BeTrue();
         registrationSet.SourceIds.Should().NotContain("sharpclaw_test_harness_in_process");
 
-        var databaseOptions = new DatabaseProviderOptions
-        {
-            Provider = StorageMode.JsonFile,
-        };
-        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
-        databaseOptions.JsonFile.EncryptAtRest = false;
+        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -717,12 +709,7 @@ public sealed class RuntimeHostCompositionTests
                 ["Provider:ApiKey"] = "normal-payload-restart-key",
             })
             .Build();
-        var databaseOptions = new DatabaseProviderOptions
-        {
-            Provider = StorageMode.JsonFile,
-        };
-        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
-        databaseOptions.JsonFile.EncryptAtRest = false;
+        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
 
         await RunNormalProductionHostAsync(
             workspace,
@@ -766,12 +753,7 @@ public sealed class RuntimeHostCompositionTests
                 ["Provider:Model"] = "local-model",
             })
             .Build();
-        var databaseOptions = new DatabaseProviderOptions
-        {
-            Provider = StorageMode.JsonFile,
-        };
-        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
-        databaseOptions.JsonFile.EncryptAtRest = false;
+        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
 
         var modelId = Guid.NewGuid();
         await RunNormalProductionHostAsync(
@@ -822,12 +804,7 @@ public sealed class RuntimeHostCompositionTests
                 ["Provider:Model"] = "local-model",
             })
             .Build();
-        var databaseOptions = new DatabaseProviderOptions
-        {
-            Provider = StorageMode.JsonFile,
-        };
-        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
-        databaseOptions.JsonFile.EncryptAtRest = false;
+        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
 
         await RunNormalProductionHostAsync(
             workspace,
@@ -913,12 +890,7 @@ public sealed class RuntimeHostCompositionTests
                 ["Packages:sharpclaw_providers_openai_compat"] = "false",
             })
             .Build();
-        var databaseOptions = new DatabaseProviderOptions
-        {
-            Provider = StorageMode.JsonFile,
-        };
-        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
-        databaseOptions.JsonFile.EncryptAtRest = false;
+        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
 
         await RunProductionHostAsync(
             workspace,
@@ -969,10 +941,7 @@ public sealed class RuntimeHostCompositionTests
             configuration,
             workspace.InstancePaths,
             new EncryptionOptions { Key = new byte[32] },
-            new DatabaseProviderOptions
-            {
-                Provider = StorageMode.JsonFile,
-            },
+            PersistenceOptions(workspace.DatabaseDirectory),
             registrationSet.Services);
 
         await using var provider = services.BuildServiceProvider();
@@ -995,6 +964,10 @@ public sealed class RuntimeHostCompositionTests
                 ["Packages:sharpclaw_providers_llamasharp"] = "false",
                 ["Packages:sharpclaw_providers_ollama"] = "false",
                 ["Packages:sharpclaw_providers_openai_compat"] = "false",
+                ["Packages:sharpclaw_persistence_jsoncoldstore"] = "false",
+                ["Packages:sharpclaw_persistence_postgresql"] = "false",
+                ["Packages:sharpclaw_persistence_sqlite"] = "false",
+                ["Packages:sharpclaw_persistence_sqlserver"] = "false",
             })
             .Build();
 
@@ -1090,10 +1063,17 @@ public sealed class RuntimeHostCompositionTests
             response.Content.Headers.ContentType?.MediaType);
     }
 
+    private static SharpClawPersistenceOptions PersistenceOptions(string dataDirectory) =>
+        new()
+        {
+            ProviderKey = SharpClawPersistenceOptions.DefaultProviderKey,
+            DataDirectory = dataDirectory,
+        };
+
     private static async Task RunProductionHostAsync(
         TemporaryWorkspace workspace,
         IConfiguration configuration,
-        DatabaseProviderOptions databaseOptions,
+        SharpClawPersistenceOptions databaseOptions,
         Func<WebApplication, Task> operation)
     {
         using var registrationSet = PackagedDotNetRegistrationSet.Load(
@@ -1102,8 +1082,14 @@ public sealed class RuntimeHostCompositionTests
                 Path.Combine(AppContext.BaseDirectory, "test-contributions"),
             ],
             configuration);
-        registrationSet.SourceIds.Should().ContainSingle()
-            .Which.Should().Be("sharpclaw_test_harness_in_process");
+        registrationSet.SourceIds.Should().BeEquivalentTo(
+            [
+                "sharpclaw_persistence_jsoncoldstore",
+                "sharpclaw_persistence_postgresql",
+                "sharpclaw_persistence_sqlite",
+                "sharpclaw_persistence_sqlserver",
+                "sharpclaw_test_harness_in_process",
+            ]);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -1149,7 +1135,7 @@ public sealed class RuntimeHostCompositionTests
     private static async Task RunNormalProductionHostAsync(
         TemporaryWorkspace workspace,
         IConfiguration configuration,
-        DatabaseProviderOptions databaseOptions,
+        SharpClawPersistenceOptions databaseOptions,
         Func<WebApplication, IReadOnlyList<ServiceDescriptor>, Task> operation)
     {
         using var registrationSet = PackagedDotNetRegistrationSet.Load(
@@ -1163,6 +1149,10 @@ public sealed class RuntimeHostCompositionTests
                     "sharpclaw_providers_llamasharp",
                     "sharpclaw_providers_ollama",
                     "sharpclaw_providers_openai_compat",
+                    "sharpclaw_persistence_jsoncoldstore",
+                    "sharpclaw_persistence_postgresql",
+                    "sharpclaw_persistence_sqlite",
+                    "sharpclaw_persistence_sqlserver",
                 ]);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions

@@ -16,10 +16,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Supprocom.Secrets" />
     <PackageReference Include="SharpClaw.SidecarHost.InProcess" />
@@ -32,9 +28,6 @@
     <PackageReference Include="SharpClaw.Contracts" />
     <ProjectReference Include="..\INF\SharpClaw.Runtime.INF.csproj" />
     <ProjectReference Include="..\..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
-    <ProjectReference Include="..\..\SharpClaw.Migrations\Postgres\SharpClaw.Migrations.Postgres.csproj" />
-    <ProjectReference Include="..\..\SharpClaw.Migrations\SqlServer\SharpClaw.Migrations.SqlServer.csproj" />
-    <ProjectReference Include="..\..\SharpClaw.Migrations\SQLite\SharpClaw.Migrations.SQLite.csproj" />
   </ItemGroup>
 
   <Target Name="_ResolveBundledContributionOutputFiles"

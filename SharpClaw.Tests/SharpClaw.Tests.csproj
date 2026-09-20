@@ -39,6 +39,10 @@
     <PackageReference Include="SharpClaw.Modules.Providers.OpenAICompatible" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Providers.Common" />
     <PackageReference Include="SharpClaw.Providers.LocalCommon" />
+    <PackageReference Include="SharpClaw.Persistence.JSONColdStore" />
+    <PackageReference Include="SharpClaw.Persistence.PostgreSQL" />
+    <PackageReference Include="SharpClaw.Persistence.SQLServer" />
+    <PackageReference Include="SharpClaw.Persistence.SQLite" />
   </ItemGroup>
 
   <ItemGroup>

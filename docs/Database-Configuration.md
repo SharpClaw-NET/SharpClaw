@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Runtime Host selects one database provider before startup. The default provider is `JsonFile`, which uses the JSONColdStore EF Core provider.
+The Runtime Host selects one installed persistence module before startup. The default provider key is `JSONColdStore`.
 
 The base model contains only ProviderDB, ModelDB, RegistrationStateDB, ConfigurationEntryDB, ScopedStorageRecordDB, and ScopedStorageIndexEntryDB.
 
@@ -10,11 +10,11 @@ Agents, Skills, Memory, Context, Threads, Channels, history, and Permission data
 
 ## Provider Selection
 
-Set `Database__Provider` in the deployed Runtime `Environment/.env` file. The supported values are `JsonFile`, `Postgres`, `SqlServer`, and `SQLite`.
+Set `Database__Provider` in the deployed Runtime `Environment/.env` file. The official module keys are `JSONColdStore`, `PostgreSQL`, `SQLServer`, and `SQLite`; storage is an open module contract, so third-party packages can contribute additional keys without a host change.
 
-Use `JsonFile` for the default local installation. It does not need a connection string.
+Use `JSONColdStore` for the default local installation. It does not need a connection string. `JsonFile` remains a compatibility alias.
 
-Use `Postgres`, `SqlServer`, or `SQLite` with the matching `ConnectionStrings__<Provider>` key. The selected relational database must already contain the schema from its matching official migration assembly.
+Use `PostgreSQL`, `SQLServer`, or `SQLite` with the matching `ConnectionStrings__<Provider>` key. `Postgres` and `SqlServer` remain compatibility aliases. The selected relational database must already contain the schema from the migration assembly carried by that module.
 
 The Runtime does not run a migration endpoint or apply migrations during normal startup. Schema deployment is an explicit administrative operation.
 
@@ -22,7 +22,7 @@ The Runtime does not run a migration endpoint or apply migrations during normal 
 
 Use the deployed Runtime `Environment/.env` file.
 
-Set `Database__Provider=JsonFile` for the default provider.
+Set `Database__Provider=JSONColdStore` for the default provider.
 
 Start the Runtime and wait for `GET /readyz` to return HTTP `200`.
 
@@ -33,7 +33,7 @@ The Runtime creates the default JSONColdStore database during readiness validati
 Use canonical dotenv syntax. Use `__` between configuration sections and keys.
 
 ```dotenv
-Database__Provider=JsonFile
+Database__Provider=JSONColdStore
 Database__EnableDetailedErrors=true
 Database__EnableSensitiveDataLogging=false
 Database__JsonFile__Compression=Brotli
@@ -49,7 +49,7 @@ Keep `Database__EnableSensitiveDataLogging=false` outside controlled local diagn
 
 ## JSONColdStore
 
-`JsonFile` stores the base model through JSONColdStore. The Runtime uses `SharpClawDbContext` and the provider's normal EF Core path.
+`SharpClaw.Persistence.JSONColdStore` stores the base model through JSONColdStore. The Runtime uses `SharpClawDbContext` and the module's normal EF Core path.
 
 JSONColdStore settings use the `Database__JsonFile__` prefix. The current options include compression, startup mode, full-scan policy, checksums, event logging, snapshots, flush retries, transaction replay retries, and read retries.
 
@@ -61,11 +61,11 @@ The Runtime passes the instance data directory to the JSONColdStore provider. Do
 
 ## Relational Providers
 
-Set `Database__Provider=Postgres` and `ConnectionStrings__Postgres` for PostgreSQL.
+Install `SharpClaw.Persistence.PostgreSQL`, then set `Database__Provider=PostgreSQL` and `ConnectionStrings__PostgreSQL`.
 
-Set `Database__Provider=SqlServer` and `ConnectionStrings__SqlServer` for SQL Server.
+Install `SharpClaw.Persistence.SQLServer`, then set `Database__Provider=SQLServer` and `ConnectionStrings__SQLServer`.
 
-Set `Database__Provider=SQLite` and `ConnectionStrings__SQLite` for SQLite.
+Install `SharpClaw.Persistence.SQLite`, then set `Database__Provider=SQLite` and `ConnectionStrings__SQLite`.
 
 Relational command timeouts use `Database__Relational__CommandTimeoutSeconds` or the provider-specific command timeout key. PostgreSQL and SQL Server also support their configured retry settings.
 
@@ -75,13 +75,13 @@ The base Runtime model remains the six generic entity types named in this guide.
 
 ## Migration Authoring
 
-Official migration and model-snapshot files are generated only by the repository-pinned EF Core console tool. Never create or edit those files by hand. Restore the tool, then run the command for every relational provider whenever `SharpClawDbContext` changes:
+Official migration and model-snapshot files live in [SharpClaw.Persistence](https://github.com/SharpClaw-NET/SharpClaw.Persistence) and are generated only by that repository's pinned EF Core console tool. Never create or edit those files by hand. Restore the tool in that repository, then run the command for every relational provider whenever `SharpClawDbContext` changes:
 
 ```shell
 dotnet tool restore
-dotnet ef migrations add <MigrationName> --project SharpClaw.Migrations/Postgres/SharpClaw.Migrations.Postgres.csproj --startup-project SharpClaw.Migrations/Postgres/SharpClaw.Migrations.Postgres.csproj --context SharpClawDbContext --output-dir Migrations
-dotnet ef migrations add <MigrationName> --project SharpClaw.Migrations/SqlServer/SharpClaw.Migrations.SqlServer.csproj --startup-project SharpClaw.Migrations/SqlServer/SharpClaw.Migrations.SqlServer.csproj --context SharpClawDbContext --output-dir Migrations
-dotnet ef migrations add <MigrationName> --project SharpClaw.Migrations/SQLite/SharpClaw.Migrations.SQLite.csproj --startup-project SharpClaw.Migrations/SQLite/SharpClaw.Migrations.SQLite.csproj --context SharpClawDbContext --output-dir Migrations
+dotnet ef migrations add <MigrationName> --project SharpClaw.Persistence.PostgreSQL --startup-project SharpClaw.Persistence.PostgreSQL --context SharpClawDbContext --output-dir Migrations
+dotnet ef migrations add <MigrationName> --project SharpClaw.Persistence.SQLServer --startup-project SharpClaw.Persistence.SQLServer --context SharpClawDbContext --output-dir Migrations
+dotnet ef migrations add <MigrationName> --project SharpClaw.Persistence.SQLite --startup-project SharpClaw.Persistence.SQLite --context SharpClawDbContext --output-dir Migrations
 ```
 
 If an unpublished scaffold is wrong, remove it with `dotnet ef migrations remove` against the same project and scaffold it again. Never alter a published migration; add a new corrective migration through the same console command. Before committing, run `dotnet ef migrations has-pending-model-changes` for all three projects and require a successful no-change result.

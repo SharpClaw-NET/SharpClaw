@@ -178,7 +178,7 @@ public sealed class RuntimePersistenceBoundaryTests
             .UseInMemoryDatabase("persistence-boundary-" + Guid.NewGuid().ToString("N"))
             .Options;
         var runner = new RuntimePersistenceActionRunner(boundary);
-        var db = new SharpClawDbContext(options, new TestPersistenceActionRunnerAccessor(runner));
+        var db = new SharpClawDbContext(options, runner);
         db.Database.EnsureCreated();
         return (db, runner);
     }
@@ -238,9 +238,4 @@ public sealed class RuntimePersistenceBoundaryTests
         }
     }
 
-    private sealed class TestPersistenceActionRunnerAccessor(
-        RuntimePersistenceActionRunner runner) : IRuntimePersistenceActionRunnerAccessor
-    {
-        public RuntimePersistenceActionRunner GetRequiredRunner() => runner;
-    }
 }

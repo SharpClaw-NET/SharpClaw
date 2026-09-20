@@ -1,9 +1,9 @@
-using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
+using SharpClaw.Persistence;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Registrations;
 
@@ -11,196 +11,76 @@ namespace SharpClaw.Runtime.INF;
 
 public static class InfrastructureServiceExtensions
 {
-    /// <summary>
-    /// Registers the Infrastructure layer services for the given <see cref="StorageMode"/>.
-    /// </summary>
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        DatabaseProviderOptions databaseOptions)
+        IConfiguration configuration,
+        SharpClawPersistenceOptions persistenceOptions)
     {
-        ArgumentNullException.ThrowIfNull(databaseOptions);
-        databaseOptions.Validate();
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(persistenceOptions);
+        persistenceOptions.Validate();
 
-        services.AddSingleton(new RegistrationDbContextOptions
-        {
-            StorageMode = databaseOptions.Provider,
-            ConnectionString = databaseOptions.ConnectionString,
-        });
-        services.AddSingleton(databaseOptions);
+        services.AddSingleton(configuration);
+        services.AddSingleton(persistenceOptions);
+        services.AddSingleton<PersistenceProviderSelection>(serviceProvider =>
+            new(SharpClawPersistenceProviderResolver.Resolve(
+                serviceProvider.GetServices<ISharpClawPersistenceProvider>(),
+                persistenceOptions.ProviderKey)));
         services.AddSingleton<RuntimeRegistrationDbContextRegistry>();
         services.AddSingleton<RegistrationPersistenceRegistrationFactory>();
         services.AddSingleton<IOwnedDbContextFactory, RegistrationDbContextFactory>();
-        services.AddScoped<IRuntimePersistenceActionRunnerAccessor, RuntimePersistenceActionRunnerAccessor>();
 
-        switch (databaseOptions.Provider)
+        services.AddDbContext<SharpClawDbContext>((serviceProvider, optionsBuilder) =>
         {
-            case StorageMode.JsonFile:
-                var jsonOptions = databaseOptions.JsonFile;
-                services.AddSingleton(jsonOptions);
-                if (jsonOptions.EncryptAtRest)
-                {
-                    services.AddSingleton(sp =>
-                        JsonColdStoreEncryptionKey.FromBytes(
-                            sp.GetRequiredService<EncryptionOptions>().Key));
-                }
-
-                services.AddDbContext<SharpClawDbContext>((sp, options) =>
-                {
-                    ConfigureCommonOptions(sp, options, databaseOptions);
-                    options.UseJsonColdStoreDatabase(
-                        jsonOptions.DataDirectory,
-                        store => JsonColdStoreRegistration.ConfigureStore(
-                            store,
-                            jsonOptions,
-                            jsonOptions.EncryptAtRest
-                                ? sp.GetRequiredService<JsonColdStoreEncryptionKey>()
-                                : null));
-                });
-                services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
-                break;
-
-            case StorageMode.Postgres:
-                RequireConnectionString(databaseOptions.ConnectionString, databaseOptions.Provider);
-                services.AddDbContext<SharpClawDbContext>((sp, options) =>
-                {
-                    ConfigureCommonOptions(sp, options, databaseOptions);
-                    var postgres = databaseOptions.Postgres;
-                    options.UseNpgsql(databaseOptions.ConnectionString, npgsql =>
-                    {
-                        npgsql.MigrationsAssembly(postgres.MigrationsAssembly);
-                        if (postgres.CommandTimeoutSeconds is { } timeout)
-                            npgsql.CommandTimeout(timeout);
-                        if (postgres.EnableRetryOnFailure)
-                        {
-                            npgsql.EnableRetryOnFailure(
-                                postgres.MaxRetryCount,
-                                TimeSpan.FromSeconds(postgres.MaxRetryDelaySeconds),
-                                errorCodesToAdd: null);
-                        }
-                    });
-                });
-                services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
-                break;
-
-            case StorageMode.SqlServer:
-                RequireConnectionString(databaseOptions.ConnectionString, databaseOptions.Provider);
-                services.AddDbContext<SharpClawDbContext>((sp, options) =>
-                {
-                    ConfigureCommonOptions(sp, options, databaseOptions);
-                    var sqlServer = databaseOptions.SqlServer;
-                    options.UseSqlServer(databaseOptions.ConnectionString, builder =>
-                    {
-                        builder.MigrationsAssembly(sqlServer.MigrationsAssembly);
-                        if (sqlServer.CommandTimeoutSeconds is { } timeout)
-                            builder.CommandTimeout(timeout);
-                        if (sqlServer.EnableRetryOnFailure)
-                        {
-                            builder.EnableRetryOnFailure(
-                                sqlServer.MaxRetryCount,
-                                TimeSpan.FromSeconds(sqlServer.MaxRetryDelaySeconds),
-                                errorNumbersToAdd: null);
-                        }
-                    });
-                });
-                services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
-                break;
-
-            case StorageMode.SQLite:
-                RequireConnectionString(databaseOptions.ConnectionString, databaseOptions.Provider);
-                services.AddDbContext<SharpClawDbContext>((sp, options) =>
-                {
-                    ConfigureCommonOptions(sp, options, databaseOptions);
-                    var sqlite = databaseOptions.SQLite;
-                    options.UseSqlite(databaseOptions.ConnectionString, builder =>
-                    {
-                        builder.MigrationsAssembly(sqlite.MigrationsAssembly);
-                        if (sqlite.CommandTimeoutSeconds is { } timeout)
-                            builder.CommandTimeout(timeout);
-                    });
-                });
-                services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
-                break;
-
-            case StorageMode.MySql:
-                throw new NotSupportedException(
-                    "MySQL/MariaDB support requires Pomelo.EntityFrameworkCore.MySql " +
-                    "with EFC 10 compatibility. Not yet available.");
-
-            case StorageMode.Oracle:
-                throw new NotSupportedException(
-                    "Oracle support requires Oracle.EntityFrameworkCore " +
-                    "with EFC 10 compatibility. Not yet available.");
-        }
-
+            ConfigureCommonOptions(serviceProvider, optionsBuilder, persistenceOptions);
+            var provider = serviceProvider.GetRequiredService<PersistenceProviderSelection>().Provider;
+            provider.Configure(
+                optionsBuilder,
+                new SharpClawPersistenceProviderContext(
+                    serviceProvider,
+                    configuration,
+                    persistenceOptions,
+                    typeof(SharpClawDbContext),
+                    UseMigrations: true));
+        });
+        services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
         services.AddSingleton<MigrationGate>();
         services.AddSingleton<MigrationService>();
         services.AddScoped<ISharpClawDataContext>(
-            sp => sp.GetRequiredService<SharpClawDbContext>());
+            serviceProvider => serviceProvider.GetRequiredService<SharpClawDbContext>());
 
         return services;
     }
 
-    public static IServiceCollection AddInfrastructure(
-        this IServiceCollection services,
-        StorageMode mode,
-        string? connectionString = null,
-        Action<JsonColdStoreStorageOptions>? configureJsonColdStore = null)
-    {
-        var databaseOptions = new DatabaseProviderOptions
-        {
-            Provider = mode,
-            ConnectionString = mode == StorageMode.JsonFile ? null : connectionString,
-        };
-        configureJsonColdStore?.Invoke(databaseOptions.JsonFile);
-
-        return services.AddInfrastructure(databaseOptions);
-    }
-
-    private static void RequireConnectionString(string? cs, StorageMode mode)
-    {
-        if (string.IsNullOrWhiteSpace(cs))
-            throw new InvalidOperationException(
-                $"ConnectionStrings:{mode} is required when Database:Provider is '{mode}'. " +
-                $"Set it in the .env file or environment variables.");
-    }
-
     private static void ConfigureCommonOptions(
         IServiceProvider serviceProvider,
-        DbContextOptionsBuilder options,
-        DatabaseProviderOptions databaseOptions)
+        DbContextOptionsBuilder optionsBuilder,
+        SharpClawPersistenceOptions persistenceOptions)
     {
         var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
         if (loggerFactory is not null)
-            options.UseLoggerFactory(loggerFactory);
-
-        if (databaseOptions.EnableDetailedErrors)
-            options.EnableDetailedErrors();
-
-        if (databaseOptions.EnableSensitiveDataLogging)
-            options.EnableSensitiveDataLogging();
+            optionsBuilder.UseLoggerFactory(loggerFactory);
+        if (persistenceOptions.EnableDetailedErrors)
+            optionsBuilder.EnableDetailedErrors();
+        if (persistenceOptions.EnableSensitiveDataLogging)
+            optionsBuilder.EnableSensitiveDataLogging();
     }
 
-    /// <summary>
-    /// Initializes infrastructure services after the host is built.
-    /// </summary>
     public static async Task InitializeInfrastructureAsync(this IServiceProvider services)
     {
-        var storage = services.GetRequiredService<RegistrationDbContextOptions>();
-        if (storage.StorageMode != StorageMode.JsonFile)
-            return;
-
-        using var scope = services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
-        await db.Database.CanConnectAsync(CancellationToken.None);
+        await using var scope = services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var provider = scope.ServiceProvider.GetRequiredService<PersistenceProviderSelection>().Provider;
+        await provider.InitializeAsync(dbContext, CancellationToken.None);
     }
 
-    /// <summary>
-    /// Gracefully shuts down infrastructure services owned by SharpClaw.
-    /// </summary>
-    public static async Task ShutdownInfrastructureAsync(this IServiceProvider services)
+    public static Task ShutdownInfrastructureAsync(this IServiceProvider services)
     {
         services.GetService<MigrationGate>()?.Dispose();
         (services.GetService<MigrationService>() as IDisposable)?.Dispose();
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 }
+
+public sealed record PersistenceProviderSelection(ISharpClawPersistenceProvider Provider);

@@ -1,10 +1,16 @@
+using System.Reflection;
+using System.Runtime.Loader;
 using FluentAssertions;
-using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Persistence;
+using SharpClaw.Persistence;
+using SharpClaw.Persistence.JSONColdStore;
+using SharpClaw.Persistence.PostgreSQL;
+using SharpClaw.Persistence.SQLite;
+using SharpClaw.Persistence.SQLServer;
+using SharpClaw.Runtime.Host;
 using SharpClaw.Runtime.INF;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Registrations;
@@ -15,281 +21,242 @@ namespace SharpClaw.Tests.Persistence;
 public sealed class DatabaseProviderOptionsTests
 {
     [Test]
-    public void FromConfiguration_BindsJsonColdStoreProviderOptions()
+    public void FromConfiguration_PreservesAnArbitraryModuleProviderKey()
     {
         var configuration = Configuration(
-            ("Database:Provider", "JsonFile"),
-            ("Encryption:EncryptDatabase", "false"),
-            ("Database:JsonFile:Compression", "Auto"),
-            ("Database:JsonFile:StartupMode", "FullHydration"),
-            ("Database:JsonFile:FullScanPolicy", "FailUnlessExplicit"),
-            ("Database:JsonFile:FsyncOnWrite", "false"),
-            ("Database:JsonFile:FlushRetryMaxRetries", "5"),
-            ("Database:JsonFile:FlushRetryBaseDelayMilliseconds", "150"),
-            ("Database:JsonFile:TransactionReplayMaxRetries", "4"),
-            ("Database:JsonFile:ReadRetryMaxRetries", "6"),
-            ("Database:JsonFile:ReadRetryBaseDelayMilliseconds", "40"),
-            ("Database:JsonFile:IndexRescanIntervalMinutes", "11"),
-            ("Database:JsonFile:QuarantineMaxAgeDays", "12"),
-            ("Database:JsonFile:EnableChecksums", "false"),
-            ("Database:JsonFile:VerifyChecksumsOnRead", "true"),
-            ("Database:JsonFile:EnableEventLog", "true"),
-            ("Database:JsonFile:EventLogRetentionDays", "13"),
-            ("Database:JsonFile:EnableSnapshots", "true"),
-            ("Database:JsonFile:SnapshotIntervalHours", "14"),
-            ("Database:JsonFile:SnapshotRetentionCount", "15"));
-
-        var options = DatabaseProviderOptions.FromConfiguration(configuration, "E:\\sharpclaw-data");
-
-        options.Provider.Should().Be(StorageMode.JsonFile);
-        options.ConnectionString.Should().BeNull();
-        options.JsonFile.DataDirectory.Should().Be("E:\\sharpclaw-data");
-        options.JsonFile.EncryptAtRest.Should().BeFalse();
-        options.JsonFile.Compression.Should().Be(JsonColdStoreCompression.Auto);
-        options.JsonFile.StartupMode.Should().Be(JsonColdStoreStartupMode.FullHydration);
-        options.JsonFile.FullScanPolicy.Should().Be(JsonColdStoreScanPolicy.FailUnlessExplicit);
-        options.JsonFile.FsyncOnWrite.Should().BeFalse();
-        options.JsonFile.FlushRetryMaxRetries.Should().Be(5);
-        options.JsonFile.FlushRetryBaseDelayMilliseconds.Should().Be(150);
-        options.JsonFile.TransactionReplayMaxRetries.Should().Be(4);
-        options.JsonFile.ReadRetryMaxRetries.Should().Be(6);
-        options.JsonFile.ReadRetryBaseDelayMilliseconds.Should().Be(40);
-        options.JsonFile.IndexRescanIntervalMinutes.Should().Be(11);
-        options.JsonFile.QuarantineMaxAgeDays.Should().Be(12);
-        options.JsonFile.EnableChecksums.Should().BeFalse();
-        options.JsonFile.VerifyChecksumsOnRead.Should().BeTrue();
-        options.JsonFile.EnableEventLog.Should().BeTrue();
-        options.JsonFile.EventLogRetentionDays.Should().Be(13);
-        options.JsonFile.EnableSnapshots.Should().BeTrue();
-        options.JsonFile.SnapshotIntervalHours.Should().Be(14);
-        options.JsonFile.SnapshotRetentionCount.Should().Be(15);
-    }
-
-    [Test]
-    public void FromConfiguration_BindsRelationalProviderOptions()
-    {
-        var configuration = Configuration(
-            ("Database:Provider", "Postgres"),
-            ("ConnectionStrings:Postgres", "Host=localhost;Database=sharpclaw"),
+            ("Database:Provider", "FutureVectorStore"),
             ("Database:EnableDetailedErrors", "false"),
-            ("Database:EnableSensitiveDataLogging", "true"),
-            ("Database:Relational:CommandTimeoutSeconds", "30"),
-            ("Database:Postgres:CommandTimeoutSeconds", "45"),
-            ("Database:Postgres:EnableRetryOnFailure", "true"),
-            ("Database:Postgres:MaxRetryCount", "7"),
-            ("Database:Postgres:MaxRetryDelaySeconds", "8"));
+            ("Database:EnableSensitiveDataLogging", "true"));
 
-        var options = DatabaseProviderOptions.FromConfiguration(configuration, "E:\\unused-json-data");
+        var options = SharpClawPersistenceOptions.FromConfiguration(
+            configuration,
+            Path.Combine(Path.GetTempPath(), "sharpclaw-options"));
 
-        options.Provider.Should().Be(StorageMode.Postgres);
-        options.ConnectionString.Should().Be("Host=localhost;Database=sharpclaw");
+        options.ProviderKey.Should().Be("FutureVectorStore");
         options.EnableDetailedErrors.Should().BeFalse();
         options.EnableSensitiveDataLogging.Should().BeTrue();
-        options.Postgres.CommandTimeoutSeconds.Should().Be(45);
-        options.Postgres.EnableRetryOnFailure.Should().BeTrue();
-        options.Postgres.MaxRetryCount.Should().Be(7);
-        options.Postgres.MaxRetryDelaySeconds.Should().Be(8);
-        options.SqlServer.CommandTimeoutSeconds.Should().Be(30);
-        options.SQLite.CommandTimeoutSeconds.Should().Be(30);
     }
 
     [Test]
-    public void FromConfiguration_RejectsInvalidProviderOptionValues()
+    public void AddInfrastructure_FailsClearlyWhenSelectedModuleIsNotInstalled()
     {
-        var configuration = Configuration(
-            ("Database:Provider", "JsonFile"),
-            ("Database:JsonFile:Compression", "ShrinkRay"));
+        var configuration = Configuration(("Database:Provider", "MissingStore"));
+        var services = new ServiceCollection();
+        services.AddInfrastructure(
+            configuration,
+            SharpClawPersistenceOptions.FromConfiguration(configuration));
+        using var serviceProvider = services.BuildServiceProvider();
 
-        var act = () => DatabaseProviderOptions.FromConfiguration(configuration, "E:\\sharpclaw-data");
+        var act = () => serviceProvider.GetRequiredService<PersistenceProviderSelection>();
 
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*Database:JsonFile:Compression*");
+            .WithMessage("*MissingStore*not installed*");
     }
 
-    [Test]
-    public void AddInfrastructure_RejectsMissingRelationalConnectionString()
-    {
-        var services = new ServiceCollection();
-        var options = new DatabaseProviderOptions
-        {
-            Provider = StorageMode.Postgres,
-        };
-
-        var act = () => services.AddInfrastructure(options);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*ConnectionStrings:Postgres*");
-    }
-
-    [Test]
-    public void AddInfrastructure_RegistersSharedProviderOptionsForMainDbContext()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddInfrastructure(new DatabaseProviderOptions
-        {
-            Provider = StorageMode.SQLite,
-            ConnectionString = "Data Source=:memory:",
-            SQLite =
-            {
-                CommandTimeoutSeconds = 23,
-            },
-        });
-
-        using var provider = services.BuildServiceProvider();
-        var registeredOptions = provider.GetRequiredService<DatabaseProviderOptions>();
-        var registrationOptions = provider.GetRequiredService<RegistrationDbContextOptions>();
-
-        registeredOptions.Provider.Should().Be(StorageMode.SQLite);
-        registeredOptions.SQLite.CommandTimeoutSeconds.Should().Be(23);
-        registrationOptions.StorageMode.Should().Be(StorageMode.SQLite);
-        registrationOptions.ConnectionString.Should().Be("Data Source=:memory:");
-    }
-
-    [TestCase(
-        StorageMode.SQLite,
-        "Data Source=:memory:",
-        "Microsoft.EntityFrameworkCore.Sqlite")]
-    [TestCase(
-        StorageMode.Postgres,
-        "Host=localhost;Database=sharpclaw;Username=test;Password=test",
-        "Npgsql.EntityFrameworkCore.PostgreSQL")]
-    [TestCase(
-        StorageMode.SqlServer,
-        "Server=localhost;Database=sharpclaw;User Id=test;Password=test;TrustServerCertificate=True",
-        "Microsoft.EntityFrameworkCore.SqlServer")]
-    public void AddInfrastructure_ActivatesOnlyTheSelectedEfProvider(
-        StorageMode mode,
+    [TestCase("SQLite", "Data Source=:memory:", "Microsoft.EntityFrameworkCore.Sqlite")]
+    [TestCase("PostgreSQL", "Host=localhost;Database=sharpclaw;Username=test;Password=test", "Npgsql.EntityFrameworkCore.PostgreSQL")]
+    [TestCase("SQLServer", "Server=localhost;Database=sharpclaw;User Id=test;Password=test;TrustServerCertificate=True", "Microsoft.EntityFrameworkCore.SqlServer")]
+    public void AddInfrastructure_UsesOnlyTheSelectedModuleProvider(
+        string providerKey,
         string connectionString,
         string expectedProvider)
     {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddInfrastructure(new DatabaseProviderOptions
-        {
-            Provider = mode,
-            ConnectionString = connectionString,
-        });
+        using var serviceProvider = BuildProvider(
+            providerKey,
+            ("ConnectionStrings:" + providerKey, connectionString));
+        using var scope = serviceProvider.CreateScope();
 
-        services.Count(descriptor => descriptor.ServiceType
-                == typeof(DbContextOptions<SharpClawDbContext>))
-            .Should().Be(1);
-        using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
 
-        db.Database.ProviderName.Should().Be(expectedProvider);
-        provider.GetRequiredService<RegistrationDbContextOptions>().StorageMode
-            .Should().Be(mode);
+        dbContext.Database.ProviderName.Should().Be(expectedProvider);
+        serviceProvider.GetRequiredService<PersistenceProviderSelection>()
+            .Provider.Key.Should().Be(providerKey);
     }
 
-    [TestCase(StorageMode.SQLite, "Data Source=:memory:")]
-    [TestCase(
-        StorageMode.Postgres,
-        "Host=localhost;Database=sharpclaw;Username=test;Password=test")]
-    [TestCase(
-        StorageMode.SqlServer,
-        "Server=localhost;Database=sharpclaw;User Id=test;Password=test;TrustServerCertificate=True")]
-    public void AddInfrastructure_LoadsCurrentOfficialMigration(
-        StorageMode mode,
-        string connectionString)
+    [TestCase("PostgreSQL", "ConnectionStrings:PostgreSQL", "Host=localhost;Database=sharpclaw;Username=test;Password=test", "20260920114914_InitialCreate")]
+    [TestCase("SQLServer", "ConnectionStrings:SQLServer", "Server=localhost;Database=sharpclaw;User Id=test;Password=test;TrustServerCertificate=True", "20260920114918_InitialCreate")]
+    [TestCase("SQLite", "ConnectionStrings:SQLite", "Data Source=:memory:", "20260920114922_InitialCreate")]
+    public void RelationalModule_ContributesItsOwnOfficialMigration(
+        string providerKey,
+        string connectionStringKey,
+        string connectionString,
+        string expectedMigration)
     {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddInfrastructure(new DatabaseProviderOptions
-        {
-            Provider = mode,
-            ConnectionString = connectionString,
-        });
+        using var serviceProvider = BuildProvider(
+            providerKey,
+            (connectionStringKey, connectionString));
+        using var scope = serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
 
-        using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
-
-        db.Database.GetMigrations()
-            .Should().ContainSingle()
-            .Which.Should().EndWith("_InitialCreate");
-        db.Database.HasPendingModelChanges().Should().BeFalse();
+        dbContext.Database.GetMigrations().Should().ContainSingle().Which.Should().Be(expectedMigration);
+        dbContext.Database.HasPendingModelChanges().Should().BeFalse();
     }
 
     [Test]
-    public void AddInfrastructure_ActivatesOnlyJsonColdStoreWhenSelected()
+    public void ProviderAlias_PreservesExistingPostgresConfiguration()
     {
-        var root = Path.Combine(
-            Path.GetTempPath(),
-            "SharpClaw.Tests",
-            "provider-selection",
-            Guid.NewGuid().ToString("N"));
-        try
-        {
-            var options = new DatabaseProviderOptions
-            {
-                Provider = StorageMode.JsonFile,
-            };
-            options.JsonFile.DataDirectory = root;
-            options.JsonFile.EncryptAtRest = false;
-            var services = new ServiceCollection();
-            services.AddLogging();
-            services.AddInfrastructure(options);
+        using var serviceProvider = BuildProvider(
+            "Postgres",
+            ("ConnectionStrings:Postgres", "Host=localhost;Database=sharpclaw;Username=test;Password=test"));
 
-            services.Count(descriptor => descriptor.ServiceType
-                    == typeof(DbContextOptions<SharpClawDbContext>))
-                .Should().Be(1);
-            using var provider = services.BuildServiceProvider();
-            using var scope = provider.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
-
-            db.Database.ProviderName.Should().Contain("JSONColdStore");
-            provider.GetRequiredService<RegistrationDbContextOptions>().StorageMode
-                .Should().Be(StorageMode.JsonFile);
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
+        serviceProvider.GetRequiredService<PersistenceProviderSelection>()
+            .Provider.Should().BeOfType<PostgreSQLPersistenceProvider>();
     }
 
     [Test]
-    public void RegistrationDbContextFactory_AppliesSharedSqliteCommandTimeout()
+    public void NewProviderModule_RequiresNoHostSwitchOrEnumChange()
     {
-        var registry = new RuntimeRegistrationDbContextRegistry();
+        var configuration = Configuration(("Database:Provider", "FutureVectorStore"));
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<ISharpClawPersistenceProvider, FuturePersistenceProvider>();
+        services.AddInfrastructure(
+            configuration,
+            SharpClawPersistenceOptions.FromConfiguration(configuration));
+        using var serviceProvider = services.BuildServiceProvider();
+        using var scope = serviceProvider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<SharpClawDbContext>()
+            .Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.InMemory");
+    }
+
+    [Test]
+    public void RegistrationDbContextFactory_DelegatesOwnedContextConfigurationToSelectedModule()
+    {
+        using var serviceProvider = BuildProvider(
+            "SQLite",
+            ("ConnectionStrings:SQLite", "Data Source=:memory:"),
+            ("Database:SQLite:CommandTimeoutSeconds", "17"));
+        var registry = serviceProvider.GetRequiredService<RuntimeRegistrationDbContextRegistry>();
         registry.Register(new RuntimeRegistrationDbContextRegistration(
             "test_registration",
             typeof(ConfiguredRegistrationDbContext),
             [typeof(ConfiguredRegistrationEntity)]));
-        var options = new DatabaseProviderOptions
+
+        var factory = serviceProvider.GetRequiredService<IOwnedDbContextFactory>();
+        using var dbContext = (ConfiguredRegistrationDbContext)factory.CreateDbContext(
+            typeof(ConfiguredRegistrationDbContext));
+
+        dbContext.Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.Sqlite");
+        dbContext.Database.GetCommandTimeout().Should().Be(17);
+        dbContext.Database.GetMigrations().Should().BeEmpty();
+    }
+
+    [Test]
+    public void PackagedSQLServerProvider_KeepsProviderDependenciesInItsModuleLoadContext()
+    {
+        using var registrations = PackagedDotNetRegistrationSet.Load(
+            Path.Combine(AppContext.BaseDirectory, "contributions"),
+            Configuration());
+        IServiceCollection services = new ServiceCollection();
+        foreach (var descriptor in registrations.Services.Where(descriptor =>
+                     descriptor.ServiceType == typeof(ISharpClawPersistenceProvider)))
         {
-            Provider = StorageMode.SQLite,
-            ConnectionString = "Data Source=:memory:",
-            SQLite =
-            {
-                CommandTimeoutSeconds = 17,
-            },
-        };
-        var factory = new RegistrationDbContextFactory(
-            registry,
-            new RegistrationDbContextOptions
-            {
-                StorageMode = StorageMode.SQLite,
-                ConnectionString = "Data Source=:memory:",
-            },
-            options,
-            LoggerFactory.Create(_ => { }));
+            services.Add(descriptor);
+        }
 
-        using var db = (ConfiguredRegistrationDbContext)factory.CreateDbContext(typeof(ConfiguredRegistrationDbContext));
+        using var serviceProvider = services.BuildServiceProvider();
+        var provider = serviceProvider.GetServices<ISharpClawPersistenceProvider>()
+            .Single(candidate => candidate.Key == "SQLServer");
+        var moduleLoadContext = AssemblyLoadContext.GetLoadContext(provider.GetType().Assembly);
 
-        db.Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.Sqlite");
-        db.Database.GetCommandTimeout().Should().Be(17);
+        moduleLoadContext.Should().NotBeNull();
+        moduleLoadContext.Should().NotBeSameAs(AssemblyLoadContext.Default);
+        foreach (var assemblyName in new[]
+                 {
+                     "Microsoft.Data.SqlClient",
+                     "Microsoft.EntityFrameworkCore.SqlServer",
+                     "System.ClientModel",
+                     "System.Configuration.ConfigurationManager",
+                 })
+        {
+            var assembly = moduleLoadContext!.LoadFromAssemblyName(new AssemblyName(assemblyName));
+            AssemblyLoadContext.GetLoadContext(assembly).Should().BeSameAs(moduleLoadContext);
+        }
+
+        var sharedAssembly = moduleLoadContext!.LoadFromAssemblyName(
+            new AssemblyName("Microsoft.EntityFrameworkCore"));
+        AssemblyLoadContext.GetLoadContext(sharedAssembly).Should().BeSameAs(AssemblyLoadContext.Default);
+    }
+
+    [Test]
+    public void PackagedSQLiteProvider_AppliesItsOwnedMigrationAcrossTheModuleBoundary()
+    {
+        var configuration = Configuration(
+            ("Database:Provider", "SQLite"),
+            ("ConnectionStrings:SQLite", "Data Source=:memory:"));
+        using var registrations = PackagedDotNetRegistrationSet.Load(
+            Path.Combine(AppContext.BaseDirectory, "contributions"),
+            configuration);
+        IServiceCollection services = new ServiceCollection();
+        foreach (var descriptor in registrations.Services.Where(descriptor =>
+                     descriptor.ServiceType == typeof(ISharpClawPersistenceProvider)))
+        {
+            services.Add(descriptor);
+        }
+        services.AddLogging();
+        services.AddInfrastructure(
+            configuration,
+            SharpClawPersistenceOptions.FromConfiguration(configuration));
+
+        using var serviceProvider = services.BuildServiceProvider();
+        using var scope = serviceProvider.CreateScope();
+        using var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        dbContext.Database.OpenConnection();
+
+        dbContext.Database.Migrate();
+
+        dbContext.Database.GetAppliedMigrations()
+            .Should().ContainSingle().Which.Should().Be("20260920114922_InitialCreate");
+        dbContext.Database.HasPendingModelChanges().Should().BeFalse();
+    }
+
+    private static ServiceProvider BuildProvider(
+        string providerKey,
+        params (string Key, string? Value)[] values)
+    {
+        var dataDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "SharpClaw.Tests",
+            Guid.NewGuid().ToString("N"));
+        var configurationValues = values
+            .Append(("Database:Provider", providerKey))
+            .Append(("Encryption:EncryptDatabase", "false"))
+            .ToArray();
+        var configuration = Configuration(configurationValues);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(new EncryptionOptions { Key = new byte[32] });
+        new JSONColdStorePersistenceModule().ConfigureServices(services);
+        new PostgreSQLPersistenceModule().ConfigureServices(services);
+        new SQLServerPersistenceModule().ConfigureServices(services);
+        new SQLitePersistenceModule().ConfigureServices(services);
+        services.AddInfrastructure(
+            configuration,
+            SharpClawPersistenceOptions.FromConfiguration(configuration, dataDirectory));
+        return services.BuildServiceProvider();
     }
 
     private static IConfiguration Configuration(params (string Key, string? Value)[] values) =>
         new ConfigurationBuilder()
-            .AddInMemoryCollection(values.Select(value => new KeyValuePair<string, string?>(value.Key, value.Value)))
+            .AddInMemoryCollection(values.Select(value =>
+                new KeyValuePair<string, string?>(value.Key, value.Value)))
             .Build();
 
-    private sealed class ConfiguredRegistrationDbContext(DbContextOptions<ConfiguredRegistrationDbContext> options)
-        : DbContext(options)
+    private sealed class FuturePersistenceProvider : ISharpClawPersistenceProvider
+    {
+        public string Key => "FutureVectorStore";
+        public IReadOnlyCollection<string> Aliases { get; } = [];
+        public bool IsRelational => false;
+
+        public void Configure(
+            DbContextOptionsBuilder optionsBuilder,
+            SharpClawPersistenceProviderContext context) =>
+            optionsBuilder.UseInMemoryDatabase("future-provider");
+    }
+
+    private sealed class ConfiguredRegistrationDbContext(
+        DbContextOptions<ConfiguredRegistrationDbContext> options) : DbContext(options)
     {
         public DbSet<ConfiguredRegistrationEntity> Entities => Set<ConfiguredRegistrationEntity>();
     }

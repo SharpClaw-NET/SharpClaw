@@ -41,14 +41,14 @@ A SharpClaw module uses public neutral contracts to declare what it supplies and
 
 ## Storage
 
-Choose one configured persistence provider; the Runtime validates it before readiness and never silently falls back.
+Install the storage module you need and select its provider key; the Runtime validates that contribution before readiness and never silently falls back.
 
-| Provider | Backing store | Deployment notes |
+| Module package | Provider key | Deployment notes |
 | --- | --- | --- |
-| `JsonFile` | JSONColdStore | Default local option; creates durable storage without a database server or migrations. |
-| `Postgres` | PostgreSQL through EF Core | Set `ConnectionStrings__Postgres` and apply the official PostgreSQL migrations. |
-| `SqlServer` | SQL Server through EF Core | Set `ConnectionStrings__SqlServer` and apply the official SQL Server migrations. |
-| `SQLite` | SQLite through EF Core | Set `ConnectionStrings__SQLite` and apply the official SQLite migrations. |
+| `SharpClaw.Persistence.JSONColdStore` | `JSONColdStore` | Default local option; creates durable storage without a database server or migrations. The former `JsonFile` key remains an alias. |
+| `SharpClaw.Persistence.PostgreSQL` | `PostgreSQL` | Set `ConnectionStrings__PostgreSQL` and apply the migrations owned by this module. The former `Postgres` key remains an alias. |
+| `SharpClaw.Persistence.SQLServer` | `SQLServer` | For SQL Server, set `ConnectionStrings__SQLServer` and apply the migrations owned by this module. The former `SqlServer` key remains an alias. |
+| `SharpClaw.Persistence.SQLite` | `SQLite` | Set `ConnectionStrings__SQLite` and apply the migrations owned by this module. |
 
 ## Getting Started
 

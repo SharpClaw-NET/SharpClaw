@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Kernel;
+using SharpClaw.Persistence;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host;
 using SharpClaw.Runtime.Host.Api;
@@ -56,12 +57,11 @@ public sealed class DefaultModuleSetHostGateTests
             registrationSet.SourceIds.Should().NotContain(ArchivedRegistrationIds);
             registrationSet.SourceIds.Should().Contain("sharpclaw_providers_openai_compat");
 
-            var databaseOptions = new DatabaseProviderOptions
+            var databaseOptions = new SharpClawPersistenceOptions
             {
-                Provider = StorageMode.JsonFile,
+                ProviderKey = SharpClawPersistenceOptions.DefaultProviderKey,
+                DataDirectory = workspace.DatabaseDirectory,
             };
-            databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
-            databaseOptions.JsonFile.EncryptAtRest = false;
 
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions
             {

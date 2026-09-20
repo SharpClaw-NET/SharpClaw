@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Persistence;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host.Api;
 using SharpClaw.Runtime.Host.Routing;
@@ -66,7 +67,7 @@ public static class LocalRuntimeHost
             earlyConfiguration,
             instancePaths,
             encryptionOptions,
-            DatabaseProviderOptions.FromConfiguration(
+            SharpClawPersistenceOptions.FromConfiguration(
                 earlyConfiguration,
                 Path.Combine(instancePaths.DataDirectory, "database")),
             registrationSet.Services);

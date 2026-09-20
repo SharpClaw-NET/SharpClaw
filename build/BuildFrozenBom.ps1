@@ -15,8 +15,7 @@ $artifactsPath = Join-Path $rootPath "artifacts"
 $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
-$packageVersion = "0.5.0-dev.20260919.3"
-$moduleDevPackageVersion = "0.5.0-dev.20260919.4"
+$packageVersion = "0.5.0-dev.20260920.1"
 
 New-Item -ItemType Directory -Force -Path @(
     $rootPath,
@@ -126,37 +125,42 @@ $repositories = @(
     [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
-        Commit = "684403f3ce88a33c281f954384d197ee1fcad4e4"
+        Commit = "49d904adce8dc755f58f8a0fbdbef071e3402421"
     },
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "ccedb5c0bd84b1497f4564ecbab3436b0a08ec9b"
+        Commit = "9a35247777f74b7247670d28ac43c4295f82f581"
     },
     [pscustomobject]@{
         Name = "agent-modules"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "4dc560a5ac178be931c70993851dc2696c5a8ba6"
+        Commit = "1d7b12666997efbffa83fb34d8e44c34b173aae3"
     },
     [pscustomobject]@{
         Name = "editor-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations.git"
-        Commit = "3eb32fe9cc66c008d3f2843cd64a34ee43fef720"
+        Commit = "58987a8cb08d640a77074990161ad321d2604fed"
     },
     [pscustomobject]@{
         Name = "metrics"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Metrics.git"
-        Commit = "bbb31c9d9fb3bd54fa76a923c20b35b6ba20a4b1"
+        Commit = "ec17a3223e1b195afb4ad11cc799883d8dc2d2e2"
     },
     [pscustomobject]@{
         Name = "provider-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ProviderIntegrations.git"
-        Commit = "9deacddb2998012b656744d0dd7ebb414653b1c8"
+        Commit = "ec002d49e6f132224f6b846d4bef293d586de29b"
     },
     [pscustomobject]@{
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
-        Commit = "7ce6053aa3d4a502248ddb2ce1687423bb704328"
+        Commit = "766beb4f278ca9042228164494ec996d9f5a8491"
+    },
+    [pscustomobject]@{
+        Name = "persistence"
+        Repository = "https://github.com/SharpClaw-NET/SharpClaw.Persistence.git"
+        Commit = "bb0dfba984f0f5cc6c4ba5af31455fc6208afe8f"
     }
 )
 
@@ -317,6 +321,7 @@ $editorSolution = Join-Path $sourcesPath "editor-integrations\SharpClaw.EditorIn
 $metricsProject = Join-Path $sourcesPath "metrics\SharpClaw.Modules.Metrics\SharpClaw.Modules.Metrics.csproj"
 $providerSolution = Join-Path $sourcesPath "provider-integrations\SharpClaw.ProviderIntegrations.slnx"
 $moduleDevProject = Join-Path $sourcesPath "module-dev\SharpClaw.Modules.ModuleDev\SharpClaw.Modules.ModuleDev.csproj"
+$persistenceSolution = Join-Path $sourcesPath "persistence\SharpClaw.Persistence.slnx"
 
 Restore-And-Pack -Label "contracts" -Target $contractsProject -ArtifactGroup "contracts"
 Restore-And-Pack -Label "gateway-contracts" -Target $gatewayProject -ArtifactGroup "gateway-contracts"
@@ -396,12 +401,8 @@ Pack-Target `
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"
 Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -ArtifactGroup "provider-integrations"
-Restore-Target -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
-Pack-Target `
-    -Label "module-dev" `
-    -Target $moduleDevProject `
-    -ArtifactGroup "module-dev" `
-    -PackageVersionOverride $moduleDevPackageVersion
+Restore-And-Pack -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
+Restore-And-Pack -Label "persistence" -Target $persistenceSolution -ArtifactGroup "persistence"
 
 $expectedPackages = @(
     "SharpClaw.AgentOrchestration.Contracts.$packageVersion.nupkg",
@@ -415,7 +416,7 @@ $expectedPackages = @(
     "SharpClaw.ModuleSDK.Testing.$packageVersion.nupkg",
     "SharpClaw.Modules.EditorCommon.$packageVersion.nupkg",
     "SharpClaw.Modules.Metrics.$packageVersion.nupkg",
-    "SharpClaw.Modules.ModuleDev.$moduleDevPackageVersion.nupkg",
+    "SharpClaw.Modules.ModuleDev.$packageVersion.nupkg",
     "SharpClaw.Modules.Providers.Anthropic.$packageVersion.nupkg",
     "SharpClaw.Modules.Providers.Google.$packageVersion.nupkg",
     "SharpClaw.Modules.Providers.LlamaSharp.$packageVersion.nupkg",
@@ -424,7 +425,12 @@ $expectedPackages = @(
     "SharpClaw.Modules.VS2026Editor.$packageVersion.nupkg",
     "SharpClaw.Modules.VSCodeEditor.$packageVersion.nupkg",
     "SharpClaw.Providers.Common.$packageVersion.nupkg",
-    "SharpClaw.Providers.LocalCommon.$packageVersion.nupkg"
+    "SharpClaw.Providers.LocalCommon.$packageVersion.nupkg",
+    "SharpClaw.Persistence.$packageVersion.nupkg",
+    "SharpClaw.Persistence.JSONColdStore.$packageVersion.nupkg",
+    "SharpClaw.Persistence.PostgreSQL.$packageVersion.nupkg",
+    "SharpClaw.Persistence.SQLServer.$packageVersion.nupkg",
+    "SharpClaw.Persistence.SQLite.$packageVersion.nupkg"
 )
 
 $actualPackages = Get-ChildItem -LiteralPath $feedPath -Filter "*.nupkg" -File |
