@@ -44,6 +44,8 @@ public sealed partial class CiRequiredStatusCheckTests
         script.Should().Contain("$publishedPackageRepositories");
         script.Should().Contain("https://api.nuget.org/v3-flatcontainer/");
         script.Should().Contain("SharpClaw.Persistence.SQLServer");
+        script.Should().Contain("$moduleDevPackageVersion = \"0.5.0-dev.20260921.1\"");
+        script.Should().Contain("ac7ada878ace59ada90778b541e954ae200566f9");
         script.Should().NotContain("SharpClaw.AgentOrchestration");
         script.Should().NotContain("agent-modules");
     }

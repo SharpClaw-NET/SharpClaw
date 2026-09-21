@@ -16,6 +16,7 @@ $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
 $packageVersion = "0.5.0-dev.20260920.1"
+$moduleDevPackageVersion = "0.5.0-dev.20260921.1"
 
 New-Item -ItemType Directory -Force -Path @(
     $rootPath,
@@ -150,7 +151,7 @@ $sourceRepositories = @(
     [pscustomobject]@{
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
-        Commit = "766beb4f278ca9042228164494ec996d9f5a8491"
+        Commit = "ac7ada878ace59ada90778b541e954ae200566f9"
     }
 )
 
@@ -451,7 +452,12 @@ Pack-Target `
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"
 Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -ArtifactGroup "provider-integrations"
-Restore-And-Pack -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
+Restore-Target -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
+Pack-Target `
+    -Label "module-dev" `
+    -Target $moduleDevProject `
+    -ArtifactGroup "module-dev" `
+    -PackageVersionOverride $moduleDevPackageVersion
 
 $expectedPackages = @(
     "SharpClaw.Contracts.$packageVersion.nupkg",
@@ -464,7 +470,7 @@ $expectedPackages = @(
     "SharpClaw.ModuleSDK.Testing.$packageVersion.nupkg",
     "SharpClaw.Modules.EditorCommon.$packageVersion.nupkg",
     "SharpClaw.Modules.Metrics.$packageVersion.nupkg",
-    "SharpClaw.Modules.ModuleDev.$packageVersion.nupkg",
+    "SharpClaw.Modules.ModuleDev.$moduleDevPackageVersion.nupkg",
     "SharpClaw.Modules.Providers.Anthropic.$packageVersion.nupkg",
     "SharpClaw.Modules.Providers.Google.$packageVersion.nupkg",
     "SharpClaw.Modules.Providers.LlamaSharp.$packageVersion.nupkg",
@@ -511,6 +517,10 @@ foreach ($repository in $publishedPackageRepositories)
     }
 }
 
+$packageVersionOverrides = @{
+    "SharpClaw.Modules.ModuleDev" = $moduleDevPackageVersion
+}
+
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 foreach ($package in $actualPackages)
 {
@@ -538,9 +548,17 @@ foreach ($package in $actualPackages)
 
         $packageId = [string] $nuspec.package.metadata.id
         $resolvedVersion = [string] $nuspec.package.metadata.version
-        if ($resolvedVersion -ne $packageVersion)
+        $expectedVersion = if ($packageVersionOverrides.ContainsKey($packageId))
         {
-            throw "Package '$($package.Name)' has version '$resolvedVersion' instead of '$packageVersion'."
+            $packageVersionOverrides[$packageId]
+        }
+        else
+        {
+            $packageVersion
+        }
+        if ($resolvedVersion -ne $expectedVersion)
+        {
+            throw "Package '$($package.Name)' has version '$resolvedVersion' instead of '$expectedVersion'."
         }
 
         if ($publishedPackageCommits.ContainsKey($packageId))
