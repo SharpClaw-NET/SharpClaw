@@ -16,7 +16,7 @@ $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
 $packageVersion = "0.5.0-dev.20260920.1"
-$moduleDevPackageVersion = "0.5.0-dev.20260921.1"
+$moduleDevPackageVersion = "0.5.0-dev.20260921.2"
 
 New-Item -ItemType Directory -Force -Path @(
     $rootPath,
@@ -151,7 +151,7 @@ $sourceRepositories = @(
     [pscustomobject]@{
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
-        Commit = "ac7ada878ace59ada90778b541e954ae200566f9"
+        Commit = "929429f22d91832237f35f5f1fd569857321508b"
     }
 )
 
