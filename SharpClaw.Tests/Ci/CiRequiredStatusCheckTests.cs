@@ -35,6 +35,28 @@ public sealed partial class CiRequiredStatusCheckTests
             "dotnet restore $env:TEST_PROJECT --configfile $env:SHARPCLAW_NUGET_CONFIG -p:Configuration=Release");
     }
 
+    [Test]
+    public void FrozenBomUsesPublishedPersistenceAndExcludesArchivedRepositories()
+    {
+        var root = ResolveRepoRoot();
+        var script = File.ReadAllText(Path.Combine(root, "build", "BuildFrozenBom.ps1"));
+
+        script.Should().Contain("$publishedPackageRepositories");
+        script.Should().Contain("https://api.nuget.org/v3-flatcontainer/");
+        script.Should().Contain("SharpClaw.Persistence.SQLServer");
+        script.Should().NotContain("SharpClaw.AgentOrchestration");
+        script.Should().NotContain("agent-modules");
+    }
+
+    [Test]
+    public void CiRunsOnlyOnCanonicalBranches()
+    {
+        var root = ResolveRepoRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "ci.yml"));
+
+        workflow.Should().NotContain("release/**");
+    }
+
     private static IReadOnlyList<string> ExtractWorkflowContexts(string workflowPath)
     {
         File.Exists(workflowPath).Should().BeTrue();
