@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -22,14 +23,17 @@ public sealed class ExternalPersistencePackageTests
     private readonly List<string> _temporaryDirectories = [];
 
     [TearDown]
-    public void TearDown()
+    public async Task TearDown()
     {
-        foreach (var directory in _temporaryDirectories)
+        try
         {
-            if (Directory.Exists(directory))
-                Directory.Delete(directory, recursive: true);
+            foreach (var directory in _temporaryDirectories)
+                await DeleteModuleDirectoryAsync(directory);
         }
-        _temporaryDirectories.Clear();
+        finally
+        {
+            _temporaryDirectories.Clear();
+        }
     }
 
     [Test]
@@ -57,7 +61,16 @@ public sealed class ExternalPersistencePackageTests
             ("ExternalRegistrations:0:Path", externalRoot),
             ("ExternalRegistrations:0:Enabled", "true"));
         var roots = PackagedRegistrationRootResolver.Resolve(bundledRoot, configuration);
+        roots.Should().Equal(Path.GetFullPath(bundledRoot), Path.GetFullPath(externalRoot));
 
+        await VerifyPackagedProviderAsync(roots, configuration);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task VerifyPackagedProviderAsync(
+        IReadOnlyList<string> roots,
+        IConfiguration configuration)
+    {
         await using var registrations = await PackagedDotNetRegistrationSet.LoadProductionAsync(
             roots,
             configuration);
@@ -74,7 +87,6 @@ public sealed class ExternalPersistencePackageTests
         var selection = serviceProvider.GetRequiredService<PersistenceProviderSelection>();
         var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
 
-        roots.Should().Equal(Path.GetFullPath(bundledRoot), Path.GetFullPath(externalRoot));
         registrations.SourceIds.Should().ContainSingle().Which.Should().Be(FixtureSourceId);
         selection.Provider.Key.Should().Be(FixtureProviderKey);
         dbContext.Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.InMemory");
@@ -169,6 +181,32 @@ public sealed class ExternalPersistencePackageTests
         Directory.CreateDirectory(directory);
         _temporaryDirectories.Add(directory);
         return directory;
+    }
+
+    private static async Task DeleteModuleDirectoryAsync(string directory)
+    {
+        if (!Directory.Exists(directory))
+            return;
+
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+                return;
+            }
+            catch (UnauthorizedAccessException) when (attempt < 19)
+            {
+                await Task.Delay(50);
+            }
+            catch (IOException) when (attempt < 19)
+            {
+                await Task.Delay(50);
+            }
+        }
     }
 
     private static string FindSourceRoot()
