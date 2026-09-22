@@ -2,16 +2,48 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageId>SharpClaw.TestFixtures.ExternalPersistence</PackageId>
+    <Version>1.0.0-test</Version>
+    <PackageReadmeFile>persistence.fixture.readme.md</PackageReadmeFile>
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageOutputPath>$(MSBuildProjectDirectory)\obj\persistence-package</PackageOutputPath>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackExternalPersistenceFixture</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.Persistence" />
     <PackageReference Include="SharpClaw.ModuleSDK" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
   </ItemGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="persistence.fixture.readme.md" Pack="true" PackagePath="\" />
+    <Content Include="persistence.package.json"
+             Pack="true"
+             PackagePath="contentFiles\any\$(TargetFramework)\contributions\synthetic_external_persistence\package.json" />
+  </ItemGroup>
+
+  <Target Name="PackExternalPersistenceFixture"
+          DependsOnTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(TargetPath)"
+                              PackagePath="contentFiles\any\$(TargetFramework)\contributions\synthetic_external_persistence\$(TargetFileName)" />
+      <TfmSpecificPackageFile Include="$(TargetDir)$(TargetName).deps.json"
+                              Condition="Exists('$(TargetDir)$(TargetName).deps.json')"
+                              PackagePath="contentFiles\any\$(TargetFramework)\contributions\synthetic_external_persistence\$(TargetName).deps.json" />
+      <_ExternalPersistenceDependency Include="@(RuntimeCopyLocalItems)"
+                                      Condition="'%(RuntimeCopyLocalItems.Filename)' == 'Microsoft.EntityFrameworkCore.InMemory'" />
+      <TfmSpecificPackageFile Include="@(_ExternalPersistenceDependency)"
+                              PackagePath="contentFiles\any\$(TargetFramework)\contributions\synthetic_external_persistence\%(_ExternalPersistenceDependency.Filename)%(_ExternalPersistenceDependency.Extension)" />
+    </ItemGroup>
+  </Target>
 
 </Project>

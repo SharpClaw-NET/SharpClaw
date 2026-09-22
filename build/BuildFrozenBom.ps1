@@ -17,6 +17,7 @@ $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
 $packageVersion = "0.5.0-dev.20260920.1"
 $moduleDevPackageVersion = "0.5.0-dev.20260921.2"
+$persistencePackageVersion = "0.5.0-dev.20260922.1"
 
 New-Item -ItemType Directory -Force -Path @(
     $rootPath,
@@ -152,15 +153,11 @@ $sourceRepositories = @(
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
         Commit = "929429f22d91832237f35f5f1fd569857321508b"
-    }
-)
-
-$publishedPackageRepositories = @(
+    },
     [pscustomobject]@{
         Name = "persistence"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Persistence"
-        Commit = "efbfaea0ab4ecff2bc55e13e37e48096468e4d70"
-        Acquisition = "nuget.org"
+        Commit = "8ff0884018e292c987909685be6d5dc019a2524e"
         PackageIds = @(
             "SharpClaw.Persistence",
             "SharpClaw.Persistence.JSONColdStore",
@@ -206,59 +203,6 @@ foreach ($repository in $sourceRepositories)
     {
         throw "The $($repository.Name) checkout does not match its required commit."
     }
-}
-
-$httpClient = [System.Net.Http.HttpClient]::new()
-$httpClient.Timeout = [TimeSpan]::FromMinutes(5)
-try
-{
-    foreach ($repository in $publishedPackageRepositories)
-    {
-        foreach ($packageId in $repository.PackageIds)
-        {
-            $normalizedId = $packageId.ToLowerInvariant()
-            $normalizedVersion = $packageVersion.ToLowerInvariant()
-            $packageUri = "https://api.nuget.org/v3-flatcontainer/$normalizedId/$normalizedVersion/$normalizedId.$normalizedVersion.nupkg"
-            $destination = Join-Path $feedPath "$packageId.$packageVersion.nupkg"
-            $response = $httpClient.GetAsync($packageUri).GetAwaiter().GetResult()
-            try
-            {
-                $response.EnsureSuccessStatusCode()
-                $sourceStream = $response.Content.ReadAsStream()
-                try
-                {
-                    $destinationStream = [System.IO.File]::Create($destination)
-                    try
-                    {
-                        $sourceStream.CopyTo($destinationStream)
-                    }
-                    finally
-                    {
-                        $destinationStream.Dispose()
-                    }
-                }
-                finally
-                {
-                    $sourceStream.Dispose()
-                }
-            }
-            finally
-            {
-                $response.Dispose()
-            }
-
-            Invoke-BoundedProcess `
-                -Label "verify-published-$packageId" `
-                -FilePath "dotnet" `
-                -Arguments @("nuget", "verify", $destination, "--all") `
-                -WorkingDirectory $feedPath `
-                -TimeoutSeconds 300 | Out-Null
-        }
-    }
-}
-finally
-{
-    $httpClient.Dispose()
 }
 
 $escapedFeedPath = [System.Security.SecurityElement]::Escape($feedPath)
@@ -376,6 +320,7 @@ $moduleInProcessProject = Join-Path $sourcesPath "module-sdk\SharpClaw.SidecarHo
 $moduleOutOfProcessProject = Join-Path $sourcesPath "module-sdk\SharpClaw.SidecarHost.OutOfProcess\SharpClaw.SidecarHost.OutOfProcess.csproj"
 $moduleTestingProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.Testing\SharpClaw.ModuleSDK.Testing.csproj"
 $moduleHostOperationsProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.HostOperations\SharpClaw.ModuleSDK.HostOperations.csproj"
+$persistenceSolution = Join-Path $sourcesPath "persistence\SharpClaw.Persistence.slnx"
 $editorSolution = Join-Path $sourcesPath "editor-integrations\SharpClaw.EditorIntegrations.slnx"
 $metricsProject = Join-Path $sourcesPath "metrics\SharpClaw.Modules.Metrics\SharpClaw.Modules.Metrics.csproj"
 $providerSolution = Join-Path $sourcesPath "provider-integrations\SharpClaw.ProviderIntegrations.slnx"
@@ -385,6 +330,12 @@ Restore-And-Pack -Label "contracts" -Target $contractsProject -ArtifactGroup "co
 Restore-And-Pack -Label "gateway-contracts" -Target $gatewayProject -ArtifactGroup "gateway-contracts"
 Restore-And-Pack -Label "core" -Target $coreProject -ArtifactGroup "core"
 Restore-And-Pack -Label "module-sdk" -Target $moduleSdkProject -ArtifactGroup "module-sdk"
+Restore-Target -Label "persistence" -Target $persistenceSolution -ArtifactGroup "persistence"
+Pack-Target `
+    -Label "persistence" `
+    -Target $persistenceSolution `
+    -ArtifactGroup "persistence" `
+    -PackageVersionOverride $persistencePackageVersion
 
 Restore-Target -Label "module-hosts" -Target $moduleHostsSolution -ArtifactGroup "module-hosts"
 Pack-Target -Label "module-in-process" -Target $moduleInProcessProject -ArtifactGroup "module-hosts"
@@ -480,11 +431,11 @@ $expectedPackages = @(
     "SharpClaw.Modules.VSCodeEditor.$packageVersion.nupkg",
     "SharpClaw.Providers.Common.$packageVersion.nupkg",
     "SharpClaw.Providers.LocalCommon.$packageVersion.nupkg",
-    "SharpClaw.Persistence.$packageVersion.nupkg",
-    "SharpClaw.Persistence.JSONColdStore.$packageVersion.nupkg",
-    "SharpClaw.Persistence.PostgreSQL.$packageVersion.nupkg",
-    "SharpClaw.Persistence.SQLServer.$packageVersion.nupkg",
-    "SharpClaw.Persistence.SQLite.$packageVersion.nupkg"
+    "SharpClaw.Persistence.$persistencePackageVersion.nupkg",
+    "SharpClaw.Persistence.JSONColdStore.$persistencePackageVersion.nupkg",
+    "SharpClaw.Persistence.PostgreSQL.$persistencePackageVersion.nupkg",
+    "SharpClaw.Persistence.SQLServer.$persistencePackageVersion.nupkg",
+    "SharpClaw.Persistence.SQLite.$persistencePackageVersion.nupkg"
 )
 
 $actualPackages = Get-ChildItem -LiteralPath $feedPath -Filter "*.nupkg" -File |
@@ -506,19 +457,30 @@ if ($oversizedPackages.Count -ne 0)
     throw "The frozen feed contains packages at or above 250 MB: $($oversizedPackages.Name -join ', ')."
 }
 
-$publishedPackageCommits = @{}
-$publishedPackageRepositoryUrls = @{}
-foreach ($repository in $publishedPackageRepositories)
+$reviewedPackageCommits = @{}
+$reviewedPackageRepositoryUrls = @{}
+foreach ($repository in $sourceRepositories)
 {
-    foreach ($packageId in $repository.PackageIds)
+    $packageIdsProperty = $repository.PSObject.Properties["PackageIds"]
+    if ($null -eq $packageIdsProperty)
     {
-        $publishedPackageCommits[$packageId] = $repository.Commit
-        $publishedPackageRepositoryUrls[$packageId] = $repository.Repository
+        continue
+    }
+
+    foreach ($packageId in $packageIdsProperty.Value)
+    {
+        $reviewedPackageCommits[$packageId] = $repository.Commit
+        $reviewedPackageRepositoryUrls[$packageId] = $repository.Repository
     }
 }
 
 $packageVersionOverrides = @{
     "SharpClaw.Modules.ModuleDev" = $moduleDevPackageVersion
+    "SharpClaw.Persistence" = $persistencePackageVersion
+    "SharpClaw.Persistence.JSONColdStore" = $persistencePackageVersion
+    "SharpClaw.Persistence.PostgreSQL" = $persistencePackageVersion
+    "SharpClaw.Persistence.SQLServer" = $persistencePackageVersion
+    "SharpClaw.Persistence.SQLite" = $persistencePackageVersion
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -561,14 +523,14 @@ foreach ($package in $actualPackages)
             throw "Package '$($package.Name)' has version '$resolvedVersion' instead of '$expectedVersion'."
         }
 
-        if ($publishedPackageCommits.ContainsKey($packageId))
+        if ($reviewedPackageCommits.ContainsKey($packageId))
         {
             $repositoryNode = $nuspec.SelectSingleNode("//*[local-name()='repository']")
             if ($null -eq $repositoryNode -or
-                $repositoryNode.GetAttribute("url") -ne $publishedPackageRepositoryUrls[$packageId] -or
-                $repositoryNode.GetAttribute("commit") -ne $publishedPackageCommits[$packageId])
+                $repositoryNode.GetAttribute("url") -ne $reviewedPackageRepositoryUrls[$packageId] -or
+                $repositoryNode.GetAttribute("commit") -ne $reviewedPackageCommits[$packageId])
             {
-                throw "Published package '$packageId' does not match its reviewed repository provenance."
+                throw "Package '$packageId' does not match its reviewed repository provenance."
             }
         }
 
@@ -660,7 +622,7 @@ foreach ($group in $bundleAssemblyGroups)
 }
 
 $manifest = [pscustomobject]@{
-    Repositories = @($sourceRepositories + $publishedPackageRepositories)
+    Repositories = @($sourceRepositories)
     ContributionBundleManifestSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (
         Join-Path $bundlePath "contribution-bundle-manifest.json")).Hash
     ContributionAssemblies = @($canonicalAssemblies.GetEnumerator() | Sort-Object Key | ForEach-Object {

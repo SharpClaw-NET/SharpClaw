@@ -1,0 +1,18 @@
+{
+  "id": "synthetic_external_persistence",
+  "displayName": "Synthetic external persistence",
+  "version": "1.0.0-test",
+  "enabled": true,
+  "toolPrefix": "sep",
+  "runtime": "dotnet",
+  "hostMode": "in-process",
+  "entryAssembly": "SharpClaw.TestFixtures.ExternalModule.dll",
+  "entryType": "SharpClaw.TestFixtures.ExternalRegistration.ExternalPersistenceFixtureModule",
+  "minHostVersion": "0.1.0-beta",
+  "author": "SharpClaw Tests",
+  "description": "Independently packaged persistence-provider fixture.",
+  "license": "AGPL-3.0-or-later",
+  "platforms": [ "windows", "linux", "macos" ],
+  "exports": [],
+  "requires": []
+}

@@ -36,13 +36,15 @@ public sealed partial class CiRequiredStatusCheckTests
     }
 
     [Test]
-    public void FrozenBomUsesPublishedPersistenceAndExcludesArchivedRepositories()
+    public void FrozenBomBuildsReviewedPersistenceAndExcludesArchivedRepositories()
     {
         var root = ResolveRepoRoot();
         var script = File.ReadAllText(Path.Combine(root, "build", "BuildFrozenBom.ps1"));
 
-        script.Should().Contain("$publishedPackageRepositories");
-        script.Should().Contain("https://api.nuget.org/v3-flatcontainer/");
+        script.Should().Contain("$persistencePackageVersion = \"0.5.0-dev.20260922.1\"");
+        script.Should().Contain("8ff0884018e292c987909685be6d5dc019a2524e");
+        script.Should().Contain("Restore-Target -Label \"persistence\"");
+        script.Should().Contain("-PackageVersionOverride $persistencePackageVersion");
         script.Should().Contain("SharpClaw.Persistence.SQLServer");
         script.Should().Contain("$moduleDevPackageVersion = \"0.5.0-dev.20260921.2\"");
         script.Should().Contain("929429f22d91832237f35f5f1fd569857321508b");

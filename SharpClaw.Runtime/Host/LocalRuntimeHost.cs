@@ -37,8 +37,11 @@ public static class LocalRuntimeHost
             .AddEnvironmentVariables()
             .AddLocalEnvironment(isDevelopment: false, instancePaths)
             .Build();
-        await using var registrationSet = await PackagedDotNetRegistrationSet.LoadProductionAsync(
+        var registrationRoots = PackagedRegistrationRootResolver.Resolve(
             Path.Combine(AppContext.BaseDirectory, "contributions"),
+            earlyConfiguration);
+        await using var registrationSet = await PackagedDotNetRegistrationSet.LoadProductionAsync(
+            registrationRoots,
             earlyConfiguration,
             cancellationToken);
 

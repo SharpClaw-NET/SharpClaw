@@ -135,7 +135,7 @@ jobs:
           - domain: Gateway Boundaries
             filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayContractsIsolationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayRegistrationLoaderTests|FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests|FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayRegistrationTests'
           - domain: Persistence Provider
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DatabaseProviderOptionsTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DatabaseProviderOptionsTests|FullyQualifiedName~SharpClaw.Tests.Persistence.ExternalPersistencePackageTests'
           - domain: Persistence Environment
             filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.EnvironmentTemplateTests|FullyQualifiedName~SharpClaw.Tests.Persistence.InstallationKeyCompatibilityTests'
           - domain: Persistence Instances

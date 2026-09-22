@@ -18,6 +18,8 @@ Use `PostgreSQL`, `SQLServer`, or `SQLite` with the matching `ConnectionStrings_
 
 The Runtime does not run a migration endpoint or apply migrations during normal startup. Schema deployment is an explicit administrative operation.
 
+Changing `Database__Provider` currently takes effect when the Runtime builds its next service graph. A provider replacement is also a data move, so safely eliminating the process restart requires an administrative cutover that drains all work, migrates and verifies the target store, builds a complete replacement Runtime generation, and atomically publishes it. Mutating the provider singleton or connection string inside the active graph is not supported because existing scopes and EF internal service providers would continue using the old store.
+
 ## Quick Start
 
 Use the deployed Runtime `Environment/.env` file.

@@ -1,17 +1,17 @@
 # Module Enablement Guide
 
-SharpClaw modules are runtime feature packages discovered by the Core API at
+SharpClaw modules are runtime feature packages discovered by the Runtime at
 startup. A module can add tools, REST endpoints, CLI commands, resource types,
-provider implementations or editor integrations. The bundled
-modules are restored from NuGet package payloads; external modules can be added
-separately through the `ExternalRegistrations` section in the Core env file.
+provider implementations, persistence providers, or editor integrations. The
+bundled modules are restored from NuGet package payloads. `ExternalRegistrations`
+adds roots to the same package-manifest loader; it is not a second module system.
 
 The deployed Runtime Host assembly's `Environment/.env` uses
 canonical dotenv. In development mode, `.dev.env` is loaded after `.env`, so
 the development file can turn on modules without changing the base template.
-File keys use `__`, while `IConfiguration` uses `:`. A module is enabled only
-when its `Modules__<registration_id>` key is explicitly set to `"true"`. A missing key or
-a value of `"false"` keeps that module disabled.
+File keys use `__`, while `IConfiguration` uses `:`. A package manifest supplies
+the default enabled state. `Packages__<registration_id>` may explicitly override
+that state with `"true"` or `"false"`.
 
 Module-owned configuration uses the same package-backed env loader. If an
 enabled module reads `IConfiguration["MyModule:EndpointUrl"]`, users can add
@@ -27,60 +27,52 @@ MyModule__EndpointUrl="https://example.internal/api"
 MyModule__RetrySeconds="15"
 ```
 
-That section is independent from the enablement entry. Users still enable the
-module under `Modules`, then add any module-specific section the module's own
-documentation describes. Bundled modules may place their defaults in the
+That section is independent from the enablement entry. Users override the
+module under `Packages` when necessary, then add any module-specific section
+the module's own documentation describes. Bundled modules may place their defaults in the
 checked-in `.env.template` files for discoverability, but third-party modules
 do not need a SharpClaw source change just to introduce configuration keys.
-Changes to Core `.env` take effect after the Core process restarts.
+Changes to Runtime `.env` take effect after the Runtime process restarts.
 
-For example, this enables agent orchestration while keeping the VS Code editor
-bridge disabled:
+For example, this enables one package while keeping the VS Code editor bridge
+disabled:
 
 ```dotenv
-Modules__sharpclaw_agent_orchestration="true"
-Modules__sharpclaw_vscode_editor="false"
+Packages__example_package="true"
+Packages__sharpclaw_vscode_editor="false"
 ```
 
-Runtime management uses the same module ids. `module list` shows discovered
-modules and their load state. `module get sharpclaw_agent_orchestration` shows
-one module in detail. `module enable sharpclaw_vscode_editor` enables a module
-without a restart, and `module disable sharpclaw_vscode_editor` turns it off
-again. Routes that were already mapped stay mapped, but disabled module routes
-should return an unavailable response rather than executing module behavior.
+Package enablement is compiled into the Runtime graph during startup. Changing a
+package override or external registration root takes effect after a Runtime
+restart; the current production host does not claim live graph replacement.
 
-The base template keeps feature and editor modules off and enables provider
-modules. That gives a clean install provider support without exposing extra
-automation or editor surfaces by accident. The development template turns every
-bundled module on so contributors exercise the complete bundled surface during
-local work.
+Bundled manifests currently provide the enablement defaults, and both Runtime
+templates leave those defaults intact. Add explicit package overrides when an
+installation needs a smaller surface; the development template changes logging
+and other development settings without creating a second enablement model.
 
 ## Current Bundled Modules
 
-The current bundled module set contains agent orchestration, editor common,
-metrics, module development, five provider modules, and two editor modules.
+The current bundled module set contains editor common, metrics, module
+development, five model-provider modules, four persistence-provider modules,
+and two editor modules.
 Those modules are package-owned. SharpClaw keeps only the TestHarness module
 source in this repository for explicit test infrastructure. Older module
 surfaces that are not present in the package set are not part of the bundled
 product unless an external module supplies them.
 
-`sharpclaw_agent_orchestration` is the Agent Orchestration module. It owns
-agent lifecycle and orchestration tools such as sub-agent creation, agent
-management and skill access. It is disabled in the base template
-and enabled in the development template.
-
 `sharpclaw_editor_common` is the shared editor infrastructure module. It
 exports the `editor_bridge` and `editor_session` contracts used by editor
-integrations. It is disabled in the base template and enabled in development.
-Enable it before enabling an editor module when you need editor bridge support.
+integrations. Disable it only when no enabled editor integration requires its
+contracts.
 
 `sharpclaw_metrics` owns built-in metric
-providers. It is disabled in the base template and enabled in development. If a
+providers. If a
 metric threshold depends on metric thresholds but never fires, this is the first
 module to check.
 
-`sharpclaw_registration_dev` is the Module Development Kit. It provides module
-authoring, building, hot-loading, and introspection tools. It has an optional
+`sharpclaw_module_dev` is the Module Development Kit. It provides module
+authoring, building, packaging, and introspection tools. It has an optional
 `window_management` dependency, so it can still load when that contract is not
 available, but features backed by that contract will be unavailable.
 
@@ -93,73 +85,64 @@ lifecycle, `/models/local` endpoints, and the `localmodel` CLI verb.
 `sharpclaw_providers_openai_compat` registers OpenAI-protocol providers,
 including OpenAI, DeepSeek, OpenRouter, ZAI, Vercel AI Gateway, xAI, Groq,
 Cerebras, Mistral, GitHub Copilot, Minimax, Eden AI, Custom, Google Gemini
-through the OpenAI shim, and Google Vertex AI through the OpenAI shim. These
-provider modules are enabled in both the base template and the development
-template.
+through the OpenAI shim, and Google Vertex AI through the OpenAI shim. Their
+manifests currently default to enabled.
+
+`sharpclaw_persistence_jsoncoldstore`, `sharpclaw_persistence_postgresql`,
+`sharpclaw_persistence_sqlserver`, and `sharpclaw_persistence_sqlite` contribute
+the official storage provider keys. Installations select one with
+`Database__Provider`; third-party persistence packages use the same module and
+provider contracts.
 
 `sharpclaw_vs2026_editor` adds the Visual Studio 2026 editor integration via
-the editor bridge. It is a Windows-focused editor module and is disabled in the
-base template. `sharpclaw_vscode_editor` adds the VS Code editor integration
-for code editing, navigation, and workspace management, and it is also disabled
-in the base template.
+the editor bridge and is Windows-focused. `sharpclaw_vscode_editor` adds the VS
+Code editor integration for code editing, navigation, and workspace management.
+Use package overrides to disable either integration on installations that do
+not expose that editor surface.
 
-## Base Template Modules
+## Package Overrides
 
-This is the current `Modules` section from the Core `.env.template`. The
-operational settings at the top of the section control module host behavior.
-The module ids after them are the bundled modules that exist in the current
-source tree.
+The base template declares only the package-envelope limit. Package enablement
+normally comes from each manifest; the remaining lines below are examples of
+explicit overrides an installation may add.
 
 ```dotenv
-Modules__CrashOnExternalModuleLoadFailure="true"
-Modules__EventDispatchTimeoutSeconds="5"
-Modules__HealthCheckIntervalSeconds="60"
-Modules__HealthCheckFailureThreshold="3"
-Modules__HealthCheckTimeoutSeconds="10"
-Modules__MaxEnvelopeSizeBytes="1048576"
-Modules__UnloadVerifyMaxAttempts="10"
-Modules__UnloadVerifyDelayMs="100"
-Modules__sharpclaw_agent_orchestration="false"
-Modules__sharpclaw_editor_common="false"
-Modules__sharpclaw_metrics="false"
-Modules__sharpclaw_module_dev="false"
-Modules__sharpclaw_providers_anthropic="true"
-Modules__sharpclaw_providers_google="true"
-Modules__sharpclaw_providers_llamasharp="true"
-Modules__sharpclaw_providers_ollama="true"
-Modules__sharpclaw_providers_openai_compat="true"
-Modules__sharpclaw_vs2026_editor="false"
-Modules__sharpclaw_vscode_editor="false"
+Packages__MaxEnvelopeSizeBytes="1048576"
+Packages__sharpclaw_editor_common="false"
+Packages__sharpclaw_metrics="false"
+Packages__sharpclaw_module_dev="false"
+Packages__sharpclaw_providers_anthropic="true"
+Packages__sharpclaw_providers_google="true"
+Packages__sharpclaw_providers_llamasharp="true"
+Packages__sharpclaw_providers_ollama="true"
+Packages__sharpclaw_providers_openai_compat="true"
+Packages__sharpclaw_vs2026_editor="false"
+Packages__sharpclaw_vscode_editor="false"
 ```
 
-The development template uses the same operational settings and sets every
-bundled module id to `"true"`. If local development behaves differently from a
-base install, compare `.env` and `.dev.env` first; the later development file
-usually explains the difference.
+If local development behaves differently from a base install, compare `.env`
+and `.dev.env` first; the later development file overrides the base document.
 
 ## External Modules
 
-External modules are configured separately from bundled modules. Add an
-absolute path to a directory that contains `package.json` under
-`ExternalRegistrations`. The `Enabled` value defaults to true when it is omitted. By
-default, startup fails if an enabled external module path cannot be loaded;
-set `Modules:CrashOnExternalModuleLoadFailure` to `"false"` only when you want
-startup to continue while investigating a broken local module path.
+Add an absolute directory containing one or more `package.json` contribution
+manifests under `ExternalRegistrations`. `Enabled` defaults to true. Enabled
+roots and bundled contributions enter the same loader, graph compiler, identity
+checks, dependency rules, and startup failure boundary. Missing paths and broken
+packages fail closed.
 
 ```dotenv
 ExternalRegistrations__0__Path="C:/modules/Custom.Module/bin/Debug/net10.0"
 ExternalRegistrations__0__Enabled="true"
 ```
 
-When an external module is loaded through the runtime loader, SharpClaw can add
-the path back into the Core env file so it persists across restarts. Keep those
-paths absolute and keep disabled entries in place when you want a module to be
-documented but not loaded on the current machine.
+Keep paths absolute and keep disabled entries in place when a package should
+remain documented but must not load on the current machine.
 
 ## Troubleshooting
 
-If a module does not load, first check the exact module id in the Core env file
-and make sure the value is the string `"true"`. A typo such as
+If a module does not load, first check the exact package id and its manifest
+default, then check any `Packages__<id>` override in the Runtime env file. A typo such as
 `sharpclaw_vs_code_editor` will not match `sharpclaw_vscode_editor`, so the
 module remains disabled even though the env file looks close at a glance. Next
 check the platform. `sharpclaw_vs2026_editor` is only useful on Windows, while
