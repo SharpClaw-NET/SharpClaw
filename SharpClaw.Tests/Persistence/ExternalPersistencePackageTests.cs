@@ -218,6 +218,18 @@ public sealed class ExternalPersistencePackageTests
             {
                 await Task.Delay(50);
             }
+            catch (UnauthorizedAccessException exception) when (OperatingSystem.IsWindows())
+            {
+                TestContext.Progress.WriteLine(
+                    $"Deferred cleanup of '{directory}' until the Windows test host exits: {exception.Message}");
+                return;
+            }
+            catch (IOException exception) when (OperatingSystem.IsWindows())
+            {
+                TestContext.Progress.WriteLine(
+                    $"Deferred cleanup of '{directory}' until the Windows test host exits: {exception.Message}");
+                return;
+            }
         }
     }
 
