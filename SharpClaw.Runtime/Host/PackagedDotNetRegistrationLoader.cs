@@ -348,6 +348,13 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             }
         }
 
+        _services.Clear();
+        _inProcessHosts.Clear();
+        _sidecarRegistrations.Clear();
+        _sidecarProcesses.Clear();
+        _application = PackagedApplicationRegistry.Empty;
+        _capabilityScope = null;
+
         if (failure is not null)
             throw failure;
     }

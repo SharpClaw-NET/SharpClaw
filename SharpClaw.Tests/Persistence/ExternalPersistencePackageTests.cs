@@ -71,27 +71,39 @@ public sealed class ExternalPersistencePackageTests
         IReadOnlyList<string> roots,
         IConfiguration configuration)
     {
-        await using var registrations = await PackagedDotNetRegistrationSet.LoadProductionAsync(
+        var registrations = await PackagedDotNetRegistrationSet.LoadProductionAsync(
             roots,
             configuration);
-        IServiceCollection services = new ServiceCollection();
-        services.AddLogging();
-        foreach (var descriptor in registrations.Services)
-            services.Add(descriptor);
-        services.AddInfrastructure(
-            configuration,
-            SharpClawPersistenceOptions.FromConfiguration(configuration));
-        using var serviceProvider = services.BuildServiceProvider();
-        using var scope = serviceProvider.CreateScope();
+        try
+        {
+            IServiceCollection services = new ServiceCollection();
+            services.AddLogging();
+            foreach (var descriptor in registrations.Services)
+                services.Add(descriptor);
+            services.AddInfrastructure(
+                configuration,
+                SharpClawPersistenceOptions.FromConfiguration(configuration));
+            using var serviceProvider = services.BuildServiceProvider();
+            using var scope = serviceProvider.CreateScope();
 
-        var selection = serviceProvider.GetRequiredService<PersistenceProviderSelection>();
-        var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+            var selection = serviceProvider.GetRequiredService<PersistenceProviderSelection>();
+            var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
 
-        registrations.SourceIds.Should().ContainSingle().Which.Should().Be(FixtureSourceId);
-        selection.Provider.Key.Should().Be(FixtureProviderKey);
-        dbContext.Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.InMemory");
-        AssemblyLoadContext.GetLoadContext(selection.Provider.GetType().Assembly)
-            .Should().NotBeSameAs(AssemblyLoadContext.Default);
+            registrations.SourceIds.Should().ContainSingle().Which.Should().Be(FixtureSourceId);
+            selection.Provider.Key.Should().Be(FixtureProviderKey);
+            dbContext.Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.InMemory");
+            AssemblyLoadContext.GetLoadContext(selection.Provider.GetType().Assembly)
+                .Should().NotBeSameAs(AssemblyLoadContext.Default);
+        }
+        finally
+        {
+            await registrations.DisposeAsync();
+        }
+
+        registrations.Services.Should().BeEmpty(
+            "disposing the package set must release collectible module types");
+        registrations.SourceIds.Should().BeEmpty(
+            "disposing the package set must release collectible module hosts");
     }
 
     [Test]
