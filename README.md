@@ -39,6 +39,18 @@ A SharpClaw module uses public neutral contracts to declare what it supplies and
 |  | Application surfaces | CLI commands and authenticated HTTP or WebSocket endpoints. |
 |  | Storage | Host-managed documents, indexes, claims, and transactions, or module-owned EF Core contexts. |
 
+## Bring Your Own Keys
+
+Provider credentials and AI integrations belong to modules, not the kernel. Select an enabled provider with `Provider__Key` and supply its credential with `Providers__<provider-key>__ApiKey`, or use `Provider__ApiKey` as the single-provider fallback; local providers require no key. Any module can add another chat or model provider by implementing the public provider contract, without adding a kernel allowlist. AI types outside the kernel's chat contract—including speech transcription, speaker diarization, image generation, video generation, embeddings, reranking, and future modalities—can instead ship as specialized module-owned pipelines that contribute their own typed actions, tools, Jobs and Events, endpoints, and configuration to the same compiled graph.
+
+| Module package | Providers and selectable keys | Credential |
+| --- | --- | --- |
+| `SharpClaw.Modules.Providers.OpenAICompatible` | OpenAI (`openai`), DeepSeek (`deepseek`), OpenRouter (`openrouter`), Eden AI (`eden-ai`), Google Gemini OpenAI shim (`google-gemini-openai`), Google Vertex AI OpenAI shim (`google-vertex-ai-openai`), Z.AI (`zai`), Vercel AI Gateway (`vercel-ai-gateway`), xAI (`xai`), Groq (`groq`), Cerebras (`cerebras`), Mistral (`mistral`), GitHub Copilot (`github-copilot`), MiniMax (`minimax`), and a custom OpenAI-compatible endpoint (`custom`) | API key or token; GitHub Copilot supports device-code authorization, and `custom` also requires its endpoint. |
+| `SharpClaw.Modules.Providers.Anthropic` | Anthropic (`anthropic`) | API key. |
+| `SharpClaw.Modules.Providers.Google` | Google Gemini (`google-gemini`) and Google Vertex AI (`google-vertex-ai`) | Gemini API key or Vertex AI OAuth access token. |
+| `SharpClaw.Modules.Providers.Ollama` | Ollama (`ollama`) | None. |
+| `SharpClaw.Modules.Providers.LlamaSharp` | Local GGUF inference (`llamasharp`) | None. |
+
 ## Bring Your Own Storage
 
 Storage is completely modular: install one of the packages below or any compatible third-party persistence module and select its provider key. The Runtime discovers every storage provider through the same module loader, validates it before readiness, and has no provider allowlist or silent fallback; each module owns its provider configuration and, where applicable, its migrations.
