@@ -39,9 +39,9 @@ A SharpClaw module uses public neutral contracts to declare what it supplies and
 |  | Application surfaces | CLI commands and authenticated HTTP or WebSocket endpoints. |
 |  | Storage | Host-managed documents, indexes, claims, and transactions, or module-owned EF Core contexts. |
 
-## Storage
+## Bring Your Own Storage
 
-Install the storage module you need and select its provider key; the Runtime validates that contribution before readiness and never silently falls back.
+Storage is completely modular: install one of the packages below or any compatible third-party persistence module and select its provider key. The Runtime discovers every storage provider through the same module loader, validates it before readiness, and has no provider allowlist or silent fallback; each module owns its provider configuration and, where applicable, its migrations.
 
 | Module package | Provider key | Deployment notes |
 | --- | --- | --- |
