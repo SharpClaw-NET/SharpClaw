@@ -140,7 +140,7 @@ $sourceRepositories = @(
     [pscustomobject]@{
         Name = "module-sdk-sidecar"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "ab1f3c80c6e5c7e1ba1760a8c09e9da7106bf403"
+        Commit = "95361031492ba5df47b1d7261db7afbabc4b283a"
     },
     [pscustomobject]@{
         Name = "editor-integrations"

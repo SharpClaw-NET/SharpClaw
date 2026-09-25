@@ -63,7 +63,7 @@ public sealed partial class CiRequiredStatusCheckTests
         script.Should().Contain("Name = \"module-sdk\"");
         script.Should().Contain("195ba708050c72d6606b9cba86d0a45a46f7b86c");
         script.Should().Contain("Name = \"module-sdk-sidecar\"");
-        script.Should().Contain("ab1f3c80c6e5c7e1ba1760a8c09e9da7106bf403");
+        script.Should().Contain("95361031492ba5df47b1d7261db7afbabc4b283a");
         script.Should().Contain("-PackageVersionOverride $moduleTestingPackageVersion");
         script.Should().Contain("-PackageVersionOverride $moduleHostPackageVersion");
         script.Should().Contain("JsonSchema.Net.dll");
