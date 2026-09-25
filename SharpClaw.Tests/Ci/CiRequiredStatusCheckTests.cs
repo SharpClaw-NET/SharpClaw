@@ -58,12 +58,12 @@ public sealed partial class CiRequiredStatusCheckTests
         var root = ResolveRepoRoot();
         var script = File.ReadAllText(Path.Combine(root, "build", "BuildFrozenBom.ps1"));
 
-        script.Should().Contain("$corePackageVersion = \"0.5.0-dev.20260925.1\"");
-        script.Should().Contain("c2cfb113a91fd46376a9da264a5d3398fac70670");
+        script.Should().Contain("$corePackageVersion = \"0.5.0-dev.20260925.2\"");
+        script.Should().Contain("ed524f1c0139daf9ac25ee9abf0329b81ccbf626");
         script.Should().Contain("Name = \"module-sdk\"");
         script.Should().Contain("195ba708050c72d6606b9cba86d0a45a46f7b86c");
         script.Should().Contain("Name = \"module-sdk-sidecar\"");
-        script.Should().Contain("bbee7739cdcbb8bcf31cdc7978ed7612c2ab5e59");
+        script.Should().Contain("ab1f3c80c6e5c7e1ba1760a8c09e9da7106bf403");
         script.Should().Contain("-PackageVersionOverride $moduleTestingPackageVersion");
         script.Should().Contain("-PackageVersionOverride $moduleHostPackageVersion");
         script.Should().Contain("JsonSchema.Net.dll");

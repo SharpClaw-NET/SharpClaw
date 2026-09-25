@@ -16,9 +16,9 @@ $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
 $packageVersion = "0.5.0-dev.20260920.1"
-$corePackageVersion = "0.5.0-dev.20260925.1"
-$moduleHostPackageVersion = "0.5.0-dev.20260925.1"
-$moduleTestingPackageVersion = "0.5.0-dev.20260925.1"
+$corePackageVersion = "0.5.0-dev.20260925.2"
+$moduleHostPackageVersion = "0.5.0-dev.20260925.2"
+$moduleTestingPackageVersion = "0.5.0-dev.20260925.2"
 $moduleDevPackageVersion = "0.5.0-dev.20260921.2"
 $persistencePackageVersion = "0.5.0-dev.20260922.1"
 
@@ -130,7 +130,7 @@ $sourceRepositories = @(
     [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
-        Commit = "c2cfb113a91fd46376a9da264a5d3398fac70670"
+        Commit = "ed524f1c0139daf9ac25ee9abf0329b81ccbf626"
     },
     [pscustomobject]@{
         Name = "module-sdk"
@@ -140,7 +140,7 @@ $sourceRepositories = @(
     [pscustomobject]@{
         Name = "module-sdk-sidecar"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "bbee7739cdcbb8bcf31cdc7978ed7612c2ab5e59"
+        Commit = "ab1f3c80c6e5c7e1ba1760a8c09e9da7106bf403"
     },
     [pscustomobject]@{
         Name = "editor-integrations"
