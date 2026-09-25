@@ -230,7 +230,8 @@ public sealed class RuntimeCompositionBoundaryTests
     {
         public IProviderApiClient Create(
             IConfiguration configuration,
-            IReadOnlyList<IProviderPlugin> plugins) => provider;
+            IReadOnlyList<IProviderPlugin> plugins,
+            string providerKey) => provider;
     }
 
     private sealed class TestProvider : IProviderPlugin, IProviderApiClient

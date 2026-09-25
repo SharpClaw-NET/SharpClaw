@@ -472,7 +472,8 @@ public sealed class RuntimeProviderBoundaryTests
     {
         public IProviderApiClient Create(
             IConfiguration configuration,
-            IReadOnlyList<IProviderPlugin> plugins) => provider;
+            IReadOnlyList<IProviderPlugin> plugins,
+            string providerKey) => provider;
     }
 
     private sealed class EmptyCapabilities : IModelCapabilityResolver

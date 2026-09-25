@@ -612,7 +612,8 @@ public sealed class RuntimeCliBoundaryTests
     {
         public IProviderApiClient Create(
             IConfiguration configuration,
-            IReadOnlyList<IProviderPlugin> plugins) => provider;
+            IReadOnlyList<IProviderPlugin> plugins,
+            string providerKey) => provider;
     }
 
     private sealed class CliProvider(CliProbe probe) : IProviderPlugin, IProviderApiClient

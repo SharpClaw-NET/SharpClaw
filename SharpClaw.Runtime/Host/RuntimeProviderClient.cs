@@ -8,20 +8,25 @@ public sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFactory
 {
     public IProviderApiClient Create(
         IConfiguration configuration,
-        IReadOnlyList<IProviderPlugin> plugins)
+        IReadOnlyList<IProviderPlugin> plugins,
+        string providerKey)
     {
-        var providerKey = configuration["Provider:Key"]
-            ?? configuration["Providers:Default"]
-            ?? throw new InvalidOperationException(
-                "Provider:Key must be configured before a provider call.");
+        if (string.IsNullOrWhiteSpace(providerKey))
+            throw new InvalidOperationException("A chat profile must select a provider key.");
         var plugin = plugins.FirstOrDefault(value =>
             string.Equals(value.ProviderKey, providerKey, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException(
                 $"No enabled provider registration registered provider '{providerKey}'.");
+        var configuredDefault = configuration["Provider:Key"]
+            ?? configuration["Providers:Default"];
+        var isDefault = string.Equals(
+            configuredDefault,
+            providerKey,
+            StringComparison.OrdinalIgnoreCase);
         var endpoint = configuration[$"Providers:{providerKey}:Endpoint"]
-            ?? configuration["Provider:Endpoint"];
+            ?? (isDefault ? configuration["Provider:Endpoint"] : null);
         var credential = configuration[$"Providers:{providerKey}:ApiKey"]
-            ?? configuration["Provider:ApiKey"]
+            ?? (isDefault ? configuration["Provider:ApiKey"] : null)
             ?? string.Empty;
         var options = new ProviderClientOptions(endpoint);
         if (!plugin.RequiresApiKey)

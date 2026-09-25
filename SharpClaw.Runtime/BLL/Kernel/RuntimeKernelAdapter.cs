@@ -87,7 +87,15 @@ public sealed class RuntimeKernelAdapter :
             ?.ToArray()
             ?? [];
         ValidateConfiguredProviders(configuration, plugins);
-        var providerClient = providerClientFactory.Create(configuration, plugins);
+        var defaultProviderKey = configuration["Provider:Key"]
+            ?? configuration["Providers:Default"]!;
+        var defaultProviderClient = providerClientFactory.Create(
+            configuration,
+            plugins,
+            defaultProviderKey);
+        var providerClients = new System.Collections.Concurrent.ConcurrentDictionary<
+            string, Lazy<IProviderApiClient>>(StringComparer.OrdinalIgnoreCase);
+        providerClients[defaultProviderKey] = new Lazy<IProviderApiClient>(() => defaultProviderClient);
         var conversationResolver = ResolveConversationResolver(Graph);
         var effectiveConversationStore = ResolveConversationStore(Graph);
         var profileResolver = ResolveProfileResolver(Graph, configuration);
@@ -95,7 +103,11 @@ public sealed class RuntimeKernelAdapter :
         Kernel = DirectChatKernelFactory.CreateFromGraph(
             Graph,
             _actionDispatcher,
-            new ProviderKernelTransport(providerClient),
+            new ProviderKernelTransport(providerKey =>
+                providerClients.GetOrAdd(
+                    providerKey,
+                    key => new Lazy<IProviderApiClient>(() =>
+                        providerClientFactory.Create(configuration, plugins, key))).Value),
             conversationResolver,
             profileResolver,
             effectiveConversationStore);

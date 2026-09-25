@@ -639,7 +639,8 @@ public sealed class RuntimeSecurityBoundaryTests
     {
         public IProviderApiClient Create(
             IConfiguration configuration,
-            IReadOnlyList<IProviderPlugin> plugins) => provider;
+            IReadOnlyList<IProviderPlugin> plugins,
+            string providerKey) => provider;
     }
 
     private sealed class SecurityProvider : IProviderPlugin, IProviderApiClient

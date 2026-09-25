@@ -5,6 +5,7 @@ using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
+using SharpClaw.Runtime.Host;
 using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
@@ -47,6 +48,47 @@ public sealed class RuntimeKernelAdapterTests
         provider.Messages.Should().ContainSingle(message => message.Content == "hello");
         module.Started.Should().BeTrue();
         module.Stopped.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task Module_profile_routes_each_turn_and_module_prompt_reaches_each_provider_once()
+    {
+        var primary = new RecordingProviderClient();
+        var alternate = new RecordingProviderClient("alternate");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "test",
+                ["Provider:Model"] = "test-model",
+            })
+            .Build();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = RuntimeKernelAdapterTestFactory.Create(
+            configuration,
+            [new ProviderModule(primary), new ProviderModule(alternate)],
+            workspace.CreateInstancePaths(),
+            new RuntimeProviderClientFactory(),
+            configureServices: services =>
+            {
+                services.AddSingleton<IChatProfileResolver, SwitchingProfileResolver>();
+                services.AddSingleton<IChatContextContributor, ModulePromptContributor>();
+            });
+
+        await adapter.Kernel.RunAsync(new ChatTurnInput("primary"));
+        await adapter.Kernel.RunAsync(new ChatTurnInput("alternate"));
+        var streamed = new List<ChatStreamChunk>();
+        await foreach (var chunk in adapter.Kernel.StreamAsync(new ChatTurnInput("alternate")))
+            streamed.Add(chunk);
+
+        primary.SystemPrompts.Should().Equal("profile instructions\n\nmodule instructions");
+        alternate.SystemPrompts.Should().Equal(
+            "profile instructions\n\nmodule instructions",
+            "profile instructions\n\nmodule instructions");
+        primary.Messages.Should().NotContain(message => message.Role == "system");
+        alternate.Messages.Should().NotContain(message => message.Role == "system");
+        primary.Messages.Should().ContainSingle(message => message.Content == "primary");
+        alternate.Messages.Should().Contain(message => message.Content == "alternate");
+        streamed.Should().ContainSingle(chunk => chunk.IsFinished);
     }
 
     [Test]
@@ -372,7 +414,7 @@ public sealed class RuntimeKernelAdapterTests
     private sealed class ProviderModule(IProviderPlugin provider) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
-            new("test-module", "Test module", "test");
+            new($"test-module-{provider.ProviderKey}", "Test module", "test");
 
         public bool Started { get; private set; }
 
@@ -441,16 +483,17 @@ public sealed class RuntimeKernelAdapterTests
 
         public IProviderApiClient Create(
             IConfiguration configuration,
-            IReadOnlyList<IProviderPlugin> plugins)
+            IReadOnlyList<IProviderPlugin> plugins,
+            string providerKey)
         {
             Plugins = plugins;
             return client;
         }
     }
 
-    private sealed class RecordingProviderClient : IProviderPlugin, IProviderApiClient
+    private sealed class RecordingProviderClient(string providerKey = "test") : IProviderPlugin, IProviderApiClient
     {
-        public string ProviderKey => "test";
+        public string ProviderKey => providerKey;
         public string DisplayName => "Test";
         public bool RequiresEndpoint => false;
         public bool RequiresApiKey => false;
@@ -459,6 +502,7 @@ public sealed class RuntimeKernelAdapterTests
         public IReadOnlyList<ProviderCostSeed> CostSeeds => [];
         public IDeviceCodeFlow? DeviceCodeFlow => null;
         public List<ChatCompletionMessage> Messages { get; } = [];
+        public List<string?> SystemPrompts { get; } = [];
 
         public IProviderApiClient CreateClient(ProviderClientOptions options) => this;
 
@@ -474,6 +518,7 @@ public sealed class RuntimeKernelAdapterTests
             CompletionParameters? completionParameters = null,
             CancellationToken ct = default)
         {
+            SystemPrompts.Add(systemPrompt);
             Messages.AddRange(messages);
             return Task.FromResult(new ChatCompletionResult
             {
@@ -482,6 +527,31 @@ public sealed class RuntimeKernelAdapterTests
                 Usage = new TokenUsage(1, 1),
             });
         }
+    }
+
+    private sealed class SwitchingProfileResolver : IChatProfileResolver
+    {
+        public ValueTask<ChatProfile> ResolveAsync(
+            ChatTurnContext turn,
+            ChatOperationContext context,
+            CancellationToken ct) =>
+            ValueTask.FromResult(new ChatProfile(
+                turn.Input.Message == "alternate" ? "alternate" : "test",
+                Guid.Empty,
+                "test-model",
+                "profile instructions"));
+    }
+
+    private sealed class ModulePromptContributor : IChatContextContributor
+    {
+        public ValueTask<ChatContextContribution> ContributeAsync(
+            ChatContextRequest request,
+            ChatOperationContext context,
+            CancellationToken ct) =>
+            ValueTask.FromResult(new ChatContextContribution(
+                [new SystemPromptSegment("module", "module instructions")],
+                [],
+                []));
     }
 
     private sealed class EmptyCapabilityResolver : IModelCapabilityResolver

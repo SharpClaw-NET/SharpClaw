@@ -71,6 +71,40 @@ public sealed class DirectChatKernelTests
     }
 
     [Test]
+    public async Task Tool_aware_buffered_and_streaming_calls_send_one_combined_system_prompt()
+    {
+        var provider = new RecordingProviderClient();
+        var transport = new ProviderKernelTransport(provider);
+        var turn = new ChatTurnContext(
+            Guid.NewGuid(),
+            new ChatTurnInput("hello"),
+            new ConversationSelection(Guid.NewGuid(), true));
+        var request = new ProviderTurnRequest(
+            turn,
+            new ChatProfile("test", Guid.Empty, "test-model", "profile instructions"),
+            ChatContextContribution.Empty,
+            [new ToolDescriptor("sample", "sample tool", ToolSchemas.EmptyObject)]);
+        ToolAwareMessage[] messages =
+        [
+            ToolAwareMessage.System("profile instructions"),
+            ToolAwareMessage.System("module instructions"),
+            ToolAwareMessage.User("hello"),
+        ];
+
+        await transport.CompleteAsync(request, messages, CancellationToken.None);
+        await foreach (var _ in transport.StreamAsync(request, messages, CancellationToken.None))
+        {
+        }
+
+        provider.ToolSystemPrompts.Should().Equal(
+            "profile instructions\n\nmodule instructions",
+            "profile instructions\n\nmodule instructions");
+        provider.ToolMessages.Should().HaveCount(2)
+            .And.AllSatisfy(requestMessages =>
+                requestMessages.Should().ContainSingle(message => message.Role == "user"));
+    }
+
+    [Test]
     public async Task Direct_kernel_honors_explicit_conversation_and_cancellation()
     {
         var provider = new RecordingProviderClient();
@@ -221,7 +255,10 @@ public sealed class DirectChatKernelTests
     private sealed class RecordingProviderClient : IProviderApiClient
     {
         public string ProviderKey => "test";
+        public bool SupportsNativeToolCalling => true;
         public List<ChatCompletionMessage> Messages { get; } = [];
+        public List<string?> ToolSystemPrompts { get; } = [];
+        public List<IReadOnlyList<ToolAwareMessage>> ToolMessages { get; } = [];
 
         public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<string>>(["test-model"]);
@@ -242,6 +279,38 @@ public sealed class DirectChatKernelTests
                 FinishReason = FinishReason.Stop,
                 Usage = new TokenUsage(1, 1),
             });
+        }
+
+        public Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
+            string model,
+            string? systemPrompt,
+            IReadOnlyList<ToolAwareMessage> messages,
+            IReadOnlyList<ChatToolDefinition> tools,
+            int? maxCompletionTokens = null,
+            Dictionary<string, JsonElement>? providerParameters = null,
+            CompletionParameters? completionParameters = null,
+            CancellationToken ct = default)
+        {
+            ToolSystemPrompts.Add(systemPrompt);
+            ToolMessages.Add(messages);
+            return Task.FromResult(new ChatCompletionResult { Content = "reply" });
+        }
+
+        public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
+            string model,
+            string? systemPrompt,
+            IReadOnlyList<ToolAwareMessage> messages,
+            IReadOnlyList<ChatToolDefinition> tools,
+            int? maxCompletionTokens = null,
+            Dictionary<string, JsonElement>? providerParameters = null,
+            CompletionParameters? completionParameters = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            CancellationToken ct = default)
+        {
+            ToolSystemPrompts.Add(systemPrompt);
+            ToolMessages.Add(messages);
+            await Task.Yield();
+            yield return ChatStreamChunk.Final(new ChatCompletionResult { Content = "reply" });
         }
     }
 

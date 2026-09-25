@@ -511,7 +511,8 @@ public sealed class RuntimeEventBoundaryTests
     {
         public IProviderApiClient Create(
             IConfiguration configuration,
-            IReadOnlyList<IProviderPlugin> plugins) => client;
+            IReadOnlyList<IProviderPlugin> plugins,
+            string providerKey) => client;
     }
 
     private sealed class EventProvider : IProviderPlugin, IProviderApiClient
