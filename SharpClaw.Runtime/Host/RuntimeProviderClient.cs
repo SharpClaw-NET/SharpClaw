@@ -11,6 +11,8 @@ public sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFactory
         IReadOnlyList<IProviderPlugin> plugins,
         string providerKey)
     {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(plugins);
         if (string.IsNullOrWhiteSpace(providerKey))
             throw new InvalidOperationException("A chat profile must select a provider key.");
         var plugin = plugins.FirstOrDefault(value =>

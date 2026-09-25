@@ -46,6 +46,10 @@ public sealed class RuntimeProviderClientFactoryTests
         alternate.LastEndpoint.Should().Be("https://alternate.example");
         Assert.Throws<InvalidOperationException>(() =>
             factory.Create(scopedConfiguration, plugins, "unknown"));
+        Assert.Throws<ArgumentNullException>(() =>
+            factory.Create(null!, plugins, "primary"));
+        Assert.Throws<ArgumentNullException>(() =>
+            factory.Create(configuration, null!, "primary"));
     }
 
     private sealed class CredentialProvider(string providerKey)
