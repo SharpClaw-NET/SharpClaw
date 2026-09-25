@@ -58,17 +58,46 @@ public sealed partial class CiRequiredStatusCheckTests
         var root = ResolveRepoRoot();
         var script = File.ReadAllText(Path.Combine(root, "build", "BuildFrozenBom.ps1"));
 
-        script.Should().Contain("$corePackageVersion = \"0.5.0-dev.20260925.2\"");
-        script.Should().Contain("ed524f1c0139daf9ac25ee9abf0329b81ccbf626");
+        script.Should().Contain("$corePackageVersion = \"0.5.0-dev.20260925.3\"");
+        script.Should().Contain("62f081180a8c6465ce84a7a8bd5cc96dce23c546");
         script.Should().Contain("Name = \"module-sdk\"");
         script.Should().Contain("195ba708050c72d6606b9cba86d0a45a46f7b86c");
         script.Should().Contain("Name = \"module-sdk-sidecar\"");
-        script.Should().Contain("95361031492ba5df47b1d7261db7afbabc4b283a");
+        script.Should().Contain("1d36241a9e404dd7be99385dcff81ba6bd301fff");
         script.Should().Contain("-PackageVersionOverride $moduleTestingPackageVersion");
         script.Should().Contain("-PackageVersionOverride $moduleHostPackageVersion");
         script.Should().Contain("JsonSchema.Net.dll");
         script.Should().Contain("JsonPointer.Net.dll");
         script.Should().Contain("Json.More.dll");
+    }
+
+    [Test]
+    public void FrozenBomRequiresReviewedProvenanceForEveryPackage()
+    {
+        var root = ResolveRepoRoot();
+        var script = File.ReadAllText(Path.Combine(root, "build", "BuildFrozenBom.ps1"));
+        var sourceSection = script.Split(
+            "foreach ($repository in $sourceRepositories)", 2, StringSplitOptions.None)[0];
+        var packageMappings = Regex.Matches(
+                sourceSection,
+                @"PackageIds = @\((?<ids>.*?)\)",
+                RegexOptions.Singleline)
+            .Cast<Match>()
+            .ToArray();
+        var packageIds = packageMappings
+            .SelectMany(mapping => Regex.Matches(
+                    mapping.Groups["ids"].Value,
+                    "\"(?<id>SharpClaw\\.[^\"]+)\"")
+                .Cast<Match>()
+                .Select(match => match.Groups["id"].Value))
+            .ToArray();
+
+        packageMappings.Should().HaveCount(9);
+        packageIds.Should().HaveCount(25).And.OnlyHaveUniqueItems();
+        script.Should().Contain("Source '$($repository.Name)' has no package provenance mapping.");
+        script.Should().Contain("Package '$packageId' has multiple source provenance mappings.");
+        script.Should().Contain("Package '$packageId' has no reviewed source provenance.");
+        script.Should().Contain("Package '$packageId' does not match its reviewed repository provenance.");
     }
 
     [Test]

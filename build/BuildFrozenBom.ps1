@@ -16,9 +16,9 @@ $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
 $packageVersion = "0.5.0-dev.20260920.1"
-$corePackageVersion = "0.5.0-dev.20260925.2"
-$moduleHostPackageVersion = "0.5.0-dev.20260925.2"
-$moduleTestingPackageVersion = "0.5.0-dev.20260925.2"
+$corePackageVersion = "0.5.0-dev.20260925.3"
+$moduleHostPackageVersion = "0.5.0-dev.20260925.3"
+$moduleTestingPackageVersion = "0.5.0-dev.20260925.3"
 $moduleDevPackageVersion = "0.5.0-dev.20260921.2"
 $persistencePackageVersion = "0.5.0-dev.20260922.1"
 
@@ -126,41 +126,65 @@ $sourceRepositories = @(
         Name = "contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
         Commit = "b7defdd58865df33d7d274dba3c8b20accb4ba6e"
+        PackageIds = @("SharpClaw.Contracts", "SharpClaw.Gateway.Contracts")
     },
     [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
-        Commit = "ed524f1c0139daf9ac25ee9abf0329b81ccbf626"
+        Commit = "62f081180a8c6465ce84a7a8bd5cc96dce23c546"
+        PackageIds = @("SharpClaw.Core")
     },
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
         Commit = "195ba708050c72d6606b9cba86d0a45a46f7b86c"
+        PackageIds = @(
+            "SharpClaw.ModuleSDK",
+            "SharpClaw.SidecarHost.InProcess",
+            "SharpClaw.ModuleSDK.HostOperations"
+        )
     },
     [pscustomobject]@{
         Name = "module-sdk-sidecar"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "95361031492ba5df47b1d7261db7afbabc4b283a"
+        Commit = "1d36241a9e404dd7be99385dcff81ba6bd301fff"
+        PackageIds = @("SharpClaw.ModuleSDK.Testing", "SharpClaw.SidecarHost.OutOfProcess")
     },
     [pscustomobject]@{
         Name = "editor-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations.git"
         Commit = "58987a8cb08d640a77074990161ad321d2604fed"
+        PackageIds = @(
+            "SharpClaw.Modules.EditorCommon",
+            "SharpClaw.Modules.VS2026Editor",
+            "SharpClaw.Modules.VSCodeEditor"
+        )
     },
     [pscustomobject]@{
         Name = "metrics"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Metrics.git"
         Commit = "ec17a3223e1b195afb4ad11cc799883d8dc2d2e2"
+        PackageIds = @("SharpClaw.Modules.Metrics")
     },
     [pscustomobject]@{
         Name = "provider-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ProviderIntegrations.git"
         Commit = "ec002d49e6f132224f6b846d4bef293d586de29b"
+        PackageIds = @(
+            "SharpClaw.Providers.Common",
+            "SharpClaw.Providers.LocalCommon",
+            "SharpClaw.Modules.Providers.Anthropic",
+            "SharpClaw.Modules.Providers.Google",
+            "SharpClaw.Modules.Providers.LlamaSharp",
+            "SharpClaw.Modules.Providers.Ollama",
+            "SharpClaw.Modules.Providers.OpenAICompatible"
+        )
     },
     [pscustomobject]@{
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
         Commit = "929429f22d91832237f35f5f1fd569857321508b"
+        PackageIds = @("SharpClaw.Modules.ModuleDev")
     },
     [pscustomobject]@{
         Name = "persistence"
@@ -483,16 +507,26 @@ $reviewedPackageRepositoryUrls = @{}
 foreach ($repository in $sourceRepositories)
 {
     $packageIdsProperty = $repository.PSObject.Properties["PackageIds"]
-    if ($null -eq $packageIdsProperty)
+    if ($null -eq $packageIdsProperty -or @($packageIdsProperty.Value).Count -eq 0)
     {
-        continue
+        throw "Source '$($repository.Name)' has no package provenance mapping."
     }
 
     foreach ($packageId in $packageIdsProperty.Value)
     {
+        if ($reviewedPackageCommits.ContainsKey($packageId))
+        {
+            throw "Package '$packageId' has multiple source provenance mappings."
+        }
+
         $reviewedPackageCommits[$packageId] = $repository.Commit
-        $reviewedPackageRepositoryUrls[$packageId] = $repository.Repository
+        $reviewedPackageRepositoryUrls[$packageId] = $repository.Repository -replace '\.git$', ''
     }
+}
+
+if ($reviewedPackageCommits.Count -ne $expectedPackages.Count)
+{
+    throw "The package provenance map has $($reviewedPackageCommits.Count) IDs for $($expectedPackages.Count) expected packages."
 }
 
 $packageVersionOverrides = @{
@@ -534,6 +568,11 @@ foreach ($package in $actualPackages)
 
         $packageId = [string] $nuspec.package.metadata.id
         $resolvedVersion = [string] $nuspec.package.metadata.version
+        if ($package.Name -ne "$packageId.$resolvedVersion.nupkg")
+        {
+            throw "Package '$($package.Name)' does not match its nuspec identity."
+        }
+
         $expectedVersion = if ($packageVersionOverrides.ContainsKey($packageId))
         {
             $packageVersionOverrides[$packageId]
@@ -547,15 +586,17 @@ foreach ($package in $actualPackages)
             throw "Package '$($package.Name)' has version '$resolvedVersion' instead of '$expectedVersion'."
         }
 
-        if ($reviewedPackageCommits.ContainsKey($packageId))
+        if (-not $reviewedPackageCommits.ContainsKey($packageId))
         {
-            $repositoryNode = $nuspec.SelectSingleNode("//*[local-name()='repository']")
-            if ($null -eq $repositoryNode -or
-                $repositoryNode.GetAttribute("url") -ne $reviewedPackageRepositoryUrls[$packageId] -or
-                $repositoryNode.GetAttribute("commit") -ne $reviewedPackageCommits[$packageId])
-            {
-                throw "Package '$packageId' does not match its reviewed repository provenance."
-            }
+            throw "Package '$packageId' has no reviewed source provenance."
+        }
+
+        $repositoryNode = $nuspec.SelectSingleNode("//*[local-name()='repository']")
+        if ($null -eq $repositoryNode -or
+            ($repositoryNode.GetAttribute("url") -replace '\.git$', '') -ne $reviewedPackageRepositoryUrls[$packageId] -or
+            $repositoryNode.GetAttribute("commit") -ne $reviewedPackageCommits[$packageId])
+        {
+            throw "Package '$packageId' does not match its reviewed repository provenance."
         }
 
         foreach ($dependency in $nuspec.SelectNodes("//*[local-name()='dependency']"))
