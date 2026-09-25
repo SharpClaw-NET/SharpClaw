@@ -53,6 +53,25 @@ public sealed partial class CiRequiredStatusCheckTests
     }
 
     [Test]
+    public void FrozenBomKeeps_old_sdk_packages_immutable_and_packs_the_new_core_closure()
+    {
+        var root = ResolveRepoRoot();
+        var script = File.ReadAllText(Path.Combine(root, "build", "BuildFrozenBom.ps1"));
+
+        script.Should().Contain("$corePackageVersion = \"0.5.0-dev.20260925.1\"");
+        script.Should().Contain("c2cfb113a91fd46376a9da264a5d3398fac70670");
+        script.Should().Contain("Name = \"module-sdk\"");
+        script.Should().Contain("195ba708050c72d6606b9cba86d0a45a46f7b86c");
+        script.Should().Contain("Name = \"module-sdk-sidecar\"");
+        script.Should().Contain("bbee7739cdcbb8bcf31cdc7978ed7612c2ab5e59");
+        script.Should().Contain("-PackageVersionOverride $moduleTestingPackageVersion");
+        script.Should().Contain("-PackageVersionOverride $moduleHostPackageVersion");
+        script.Should().Contain("JsonSchema.Net.dll");
+        script.Should().Contain("JsonPointer.Net.dll");
+        script.Should().Contain("Json.More.dll");
+    }
+
+    [Test]
     public void CiRunsOnlyOnCanonicalBranches()
     {
         var root = ResolveRepoRoot();

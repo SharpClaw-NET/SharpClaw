@@ -16,6 +16,9 @@ $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
 $packageVersion = "0.5.0-dev.20260920.1"
+$corePackageVersion = "0.5.0-dev.20260925.1"
+$moduleHostPackageVersion = "0.5.0-dev.20260925.1"
+$moduleTestingPackageVersion = "0.5.0-dev.20260925.1"
 $moduleDevPackageVersion = "0.5.0-dev.20260921.2"
 $persistencePackageVersion = "0.5.0-dev.20260922.1"
 
@@ -127,12 +130,17 @@ $sourceRepositories = @(
     [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
-        Commit = "422ba97ec1b26db602a0485362aba2d910634370"
+        Commit = "c2cfb113a91fd46376a9da264a5d3398fac70670"
     },
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
         Commit = "195ba708050c72d6606b9cba86d0a45a46f7b86c"
+    },
+    [pscustomobject]@{
+        Name = "module-sdk-sidecar"
+        Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
+        Commit = "bbee7739cdcbb8bcf31cdc7978ed7612c2ab5e59"
     },
     [pscustomobject]@{
         Name = "editor-integrations"
@@ -315,10 +323,9 @@ $contractsProject = Join-Path $sourcesPath "contracts\SharpClaw.Contracts\SharpC
 $gatewayProject = Join-Path $sourcesPath "contracts\SharpClaw.Gateway.Contracts\SharpClaw.Gateway.Contracts.csproj"
 $coreProject = Join-Path $sourcesPath "core\SharpClaw.Core\SharpClaw.Core.csproj"
 $moduleSdkProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK\SharpClaw.ModuleSDK.csproj"
-$moduleHostsSolution = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.slnx"
 $moduleInProcessProject = Join-Path $sourcesPath "module-sdk\SharpClaw.SidecarHost.InProcess\SharpClaw.SidecarHost.InProcess.csproj"
-$moduleOutOfProcessProject = Join-Path $sourcesPath "module-sdk\SharpClaw.SidecarHost.OutOfProcess\SharpClaw.SidecarHost.OutOfProcess.csproj"
-$moduleTestingProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.Testing\SharpClaw.ModuleSDK.Testing.csproj"
+$moduleOutOfProcessProject = Join-Path $sourcesPath "module-sdk-sidecar\SharpClaw.SidecarHost.OutOfProcess\SharpClaw.SidecarHost.OutOfProcess.csproj"
+$moduleTestingProject = Join-Path $sourcesPath "module-sdk-sidecar\SharpClaw.ModuleSDK.Testing\SharpClaw.ModuleSDK.Testing.csproj"
 $moduleHostOperationsProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.HostOperations\SharpClaw.ModuleSDK.HostOperations.csproj"
 $persistenceSolution = Join-Path $sourcesPath "persistence\SharpClaw.Persistence.slnx"
 $editorSolution = Join-Path $sourcesPath "editor-integrations\SharpClaw.EditorIntegrations.slnx"
@@ -328,7 +335,12 @@ $moduleDevProject = Join-Path $sourcesPath "module-dev\SharpClaw.Modules.ModuleD
 
 Restore-And-Pack -Label "contracts" -Target $contractsProject -ArtifactGroup "contracts"
 Restore-And-Pack -Label "gateway-contracts" -Target $gatewayProject -ArtifactGroup "gateway-contracts"
-Restore-And-Pack -Label "core" -Target $coreProject -ArtifactGroup "core"
+Restore-Target -Label "core" -Target $coreProject -ArtifactGroup "core"
+Pack-Target `
+    -Label "core" `
+    -Target $coreProject `
+    -ArtifactGroup "core" `
+    -PackageVersionOverride $corePackageVersion
 Restore-And-Pack -Label "module-sdk" -Target $moduleSdkProject -ArtifactGroup "module-sdk"
 Restore-Target -Label "persistence" -Target $persistenceSolution -ArtifactGroup "persistence"
 Pack-Target `
@@ -337,10 +349,15 @@ Pack-Target `
     -ArtifactGroup "persistence" `
     -PackageVersionOverride $persistencePackageVersion
 
-Restore-Target -Label "module-hosts" -Target $moduleHostsSolution -ArtifactGroup "module-hosts"
-Pack-Target -Label "module-in-process" -Target $moduleInProcessProject -ArtifactGroup "module-hosts"
-Pack-Target -Label "module-testing" -Target $moduleTestingProject -ArtifactGroup "module-hosts"
-Pack-Target -Label "module-host-operations" -Target $moduleHostOperationsProject -ArtifactGroup "module-hosts"
+Restore-And-Pack -Label "module-in-process" -Target $moduleInProcessProject -ArtifactGroup "module-hosts"
+Restore-Target -Label "module-testing" -Target $moduleTestingProject -ArtifactGroup "module-hosts"
+Pack-Target `
+    -Label "module-testing" `
+    -Target $moduleTestingProject `
+    -ArtifactGroup "module-hosts" `
+    -PackageVersionOverride $moduleTestingPackageVersion
+Restore-And-Pack -Label "module-host-operations" -Target $moduleHostOperationsProject -ArtifactGroup "module-hosts"
+Restore-Target -Label "module-out-of-process" -Target $moduleOutOfProcessProject -ArtifactGroup "module-hosts"
 
 $moduleHostsArtifacts = Join-Path $artifactsPath "module-hosts"
 Invoke-BoundedProcess `
@@ -369,6 +386,9 @@ foreach ($payloadName in @(
     "SharpClaw.SidecarHost.OutOfProcess.runtimeconfig.json",
     "SharpClaw.Contracts.dll",
     "SharpClaw.Core.dll",
+    "JsonSchema.Net.dll",
+    "JsonPointer.Net.dll",
+    "Json.More.dll",
     "SharpClaw.SidecarHost.InProcess.dll"
 ))
 {
@@ -399,7 +419,8 @@ Pack-Target `
     -Label "module-out-of-process" `
     -Target $moduleOutOfProcessProject `
     -ArtifactGroup "module-hosts" `
-    -ExtraArguments @("-p:OutOfProcessHostPayloadSource=$outOfProcessPayload")
+    -ExtraArguments @("-p:OutOfProcessHostPayloadSource=$outOfProcessPayload") `
+    -PackageVersionOverride $moduleHostPackageVersion
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"
 Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -ArtifactGroup "provider-integrations"
@@ -412,13 +433,13 @@ Pack-Target `
 
 $expectedPackages = @(
     "SharpClaw.Contracts.$packageVersion.nupkg",
-    "SharpClaw.Core.$packageVersion.nupkg",
+    "SharpClaw.Core.$corePackageVersion.nupkg",
     "SharpClaw.Gateway.Contracts.$packageVersion.nupkg",
     "SharpClaw.SidecarHost.InProcess.$packageVersion.nupkg",
-    "SharpClaw.SidecarHost.OutOfProcess.$packageVersion.nupkg",
+    "SharpClaw.SidecarHost.OutOfProcess.$moduleHostPackageVersion.nupkg",
     "SharpClaw.ModuleSDK.$packageVersion.nupkg",
     "SharpClaw.ModuleSDK.HostOperations.$packageVersion.nupkg",
-    "SharpClaw.ModuleSDK.Testing.$packageVersion.nupkg",
+    "SharpClaw.ModuleSDK.Testing.$moduleTestingPackageVersion.nupkg",
     "SharpClaw.Modules.EditorCommon.$packageVersion.nupkg",
     "SharpClaw.Modules.Metrics.$packageVersion.nupkg",
     "SharpClaw.Modules.ModuleDev.$moduleDevPackageVersion.nupkg",
@@ -475,6 +496,9 @@ foreach ($repository in $sourceRepositories)
 }
 
 $packageVersionOverrides = @{
+    "SharpClaw.Core" = $corePackageVersion
+    "SharpClaw.ModuleSDK.Testing" = $moduleTestingPackageVersion
+    "SharpClaw.SidecarHost.OutOfProcess" = $moduleHostPackageVersion
     "SharpClaw.Modules.ModuleDev" = $moduleDevPackageVersion
     "SharpClaw.Persistence" = $persistencePackageVersion
     "SharpClaw.Persistence.JSONColdStore" = $persistencePackageVersion
