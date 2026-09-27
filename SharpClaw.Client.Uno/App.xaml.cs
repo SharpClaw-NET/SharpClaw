@@ -20,7 +20,19 @@ public partial class App : Application
     /// </summary>
     public App()
     {
-        this.InitializeComponent();
+        ClientStartupDiagnostics.Current.Record(ClientStartupStage.AppInitializing);
+        UnhandledException += (_, eventArgs) =>
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, eventArgs.Exception);
+        try
+        {
+            this.InitializeComponent();
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.AppInitialized);
+        }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.StartupFailed, exception);
+            throw;
+        }
     }
 
     internal Window? MainWindow { get; private set; }
@@ -28,9 +40,40 @@ public partial class App : Application
 
     internal static IServiceProvider? Services { get; private set; }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "The top-level async-void startup boundary must persist any failure and show a failure window rather than leave an invisible process; failure is not treated as startup success.")]
     protected async override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        try
+        {
+            await LaunchAsync(args).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.StartupFailed, exception);
+            // A startup failure must never leave a responsive, invisible process.
+            MainWindow ??= new Window();
+            MainWindow.Title = "SharpClaw — startup failed";
+            MainWindow.Content = new Border
+            {
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Black),
+                Child = new TextBlock
+                {
+                    Text = $"SharpClaw could not start.\nStartup diagnostics: {ClientStartupDiagnostics.Current.JournalPath}",
+                    Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(24),
+                },
+            };
+            MainWindow.Activate();
+        }
+    }
+
+    private async Task LaunchAsync(LaunchActivatedEventArgs args)
+    {
+        ClientStartupDiagnostics.Current.Record(ClientStartupStage.LaunchStarting);
         var frontendInstance = new FrontendInstanceService();
+        ClientStartupDiagnostics.Current.Record(ClientStartupStage.InstanceReady);
         var loggingOptions = SharpClawLoggingOptions.FromConfiguration(
             new ConfigurationBuilder()
                 .AddLocalEnvironment(isDevelopment: false, instancePaths: frontendInstance.Paths)
@@ -151,23 +194,36 @@ public partial class App : Application
                 .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
             );
         MainWindow = builder.Window;
+        MainWindow.Title = "SharpClaw";
+        ClientStartupDiagnostics.Current.Record(ClientStartupStage.BuilderReady);
 
 #if DEBUG
         MainWindow.UseStudio();
 #endif
-        SetWindowIconFromFile(MainWindow);
-
-        Host = await builder.NavigateAsync<Shell>
+        var navigation = builder.NavigateAsync<Shell>
             (initialNavigate: async (services, navigator) =>
             {
+                ClientStartupDiagnostics.Current.Record(ClientStartupStage.InitialNavigationStarting);
                 // Capture the service provider early — Host is not yet
                 // assigned at this point, but BootPage needs services.
                 Services = services;
 
                 // Verify the Runtime connection before opening direct chat.
-                await services.GetRequiredService<ClientNavigationService>()
-                    .NavigateRouteAsync(this, "Boot", Qualifiers.Nested);
+                // Use the scoped navigator supplied by Uno for this shell, while
+                // retaining the same client action boundary as later navigation.
+                await new ClientNavigationService(navigator, services.GetRequiredService<ClientActionDispatcher>())
+                    .NavigateRouteAsync(this, "Boot", Qualifiers.Nested).ConfigureAwait(true);
             });
+        ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationScheduled);
+        // NavigateAsync installs the Shell synchronously before yielding. The
+        // toolkit otherwise defers activation when its native splash is disabled,
+        // although host/window initialization may itself require a loaded window.
+        // Activate the installed shell BEFORE awaiting host/navigation completion.
+        MainWindow.Activate();
+        ClientStartupDiagnostics.Current.Record(ClientStartupStage.WindowActivated);
+        SetWindowIconFromFile(MainWindow);
+        Host = await navigation.ConfigureAwait(true);
+        ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationReady);
 
         // Dispose managed processes when the app window closes.
         // Persistent mode → Detach (keep running); otherwise → Stop + Kill.

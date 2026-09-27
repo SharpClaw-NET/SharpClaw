@@ -47,7 +47,8 @@ exports a private key, imports a certificate, or installs an application.
 
 After personally reviewing the MSIX, its hashes, and certificate, double-click
 the MSIX if the signer is already trusted. Otherwise run the delivered
-`Install-SharpClaw.ps1` with the reviewed package/certificate paths and their
+`Install-SharpClaw.ps1` in Windows PowerShell 5.1 (the stock Windows shell) or
+PowerShell 7 with the reviewed package/certificate paths and their
 expected SHA-256 values. Its optional `-TrustDevelopmentCertificate` switch
 requires administrator access and explicit confirmation before importing that
 particular development signer into LocalMachine TrustedPeople; installation
@@ -56,6 +57,20 @@ the stable `com.mkn8rn.SharpClaw` / `CN=SharpClaw Dev` identity; a higher numeri
 version upgrades that identity. Instance configuration, keys, logs, and storage
 are kept outside the read-only installed binaries. Keep a backup of instance
 state before an upgrade; uninstalling/reinstalling is not a data rollback.
+
+Before independent review or delivery, run `scripts/test-installed-msix.ps1` in
+stock Windows PowerShell 5.1 (`powershell.exe`, for its UI Automation assemblies)
+against the exact signed package in an interactive `SharpClawMSIXTest*` account
+or a disposable Windows Sandbox user. It refuses an existing installation or
+SharpClaw profile, checks the package/source/certificate identities, launches the
+registered AUMID, and requires one visible window, a real UI Automation boot
+element plus screenshot, and the configured Runtime/Gateway processes within a
+deadline. Repeated activation must not leave duplicate windowless processes.
+Only this test user's temporary signer trust is added if necessary and removed;
+the package is uninstalled and removal verified. This gate is not owner delivery
+or approval. The startup journal is flushed independently of the window and DI
+under the user's `SharpClaw/diagnostics/startup` directory; it records stages and
+exception types/codes, never exception messages or configuration values.
 
 Runtime readiness requires an explicitly selected provider (`Provider:Key` or
 `Providers:Default`); installers do not silently choose a provider or supply
@@ -94,7 +109,11 @@ configuration, keys, discovery, logs, and storage live in `/var/lib/sharpclaw`.
 Administrator environment overrides take precedence over protected instance
 files in installed mode. dpkg preserves edited `/etc` conffiles on upgrades;
 existing protected instance files and data are never replaced. An upgrade
-quiesces the old services and resumes only those previously running. Removal
+quiesces the old services and resumes only those previously running, even if
+they were manually started without boot enablement. Masking, administrator
+`policy-rc.d` restrictions, or a failed restart prevent restoration: configuration
+reports failure and retains the resume marker for an explicit retry; it never
+enables a service or treats a skipped start as success. Removal
 stops services; even purge preserves `/var/lib/sharpclaw` and its account. For
 rollback, stop both services and restore a compatible installer and an explicit
 pre-upgrade state backup; do not run an older binary against migrated data

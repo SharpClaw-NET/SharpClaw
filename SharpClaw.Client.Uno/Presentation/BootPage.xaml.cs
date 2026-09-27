@@ -23,6 +23,7 @@ public sealed partial class BootPage : Page
     public BootPage()
     {
         this.InitializeComponent();
+        Loaded += (_, _) => ClientStartupDiagnostics.Current.Record(ClientStartupStage.BootLoaded);
         KeyDown += OnKeyDown;
         Tapped += OnPageTapped;
 

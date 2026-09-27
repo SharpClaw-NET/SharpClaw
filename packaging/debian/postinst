@@ -15,13 +15,50 @@ case "$1" in
             /var/lib/sharpclaw/backend /var/lib/sharpclaw/gateway /var/lib/sharpclaw/user-data
         if [ -d /run/systemd/system ]; then
             systemctl daemon-reload
-            # Resume only services that were running before this upgrade.
+            # Restore recorded runtime state, not boot enablement. Debian's
+            # deb-systemd-invoke start intentionally skips stopped disabled units.
+            failed=0
             for unit in sharpclaw-api sharpclaw-gateway; do
                 if [ -f "/run/sharpclaw-package-resume/$unit" ]; then
-                    deb-systemd-invoke start "$unit.service"
-                    rm -f "/run/sharpclaw-package-resume/$unit"
+                    if systemctl is-active --quiet "$unit.service"; then
+                        rm -f "/run/sharpclaw-package-resume/$unit"
+                        continue
+                    fi
+                    load_state=$(systemctl show --property=LoadState --value "$unit.service")
+                    case "$load_state" in
+                        masked|not-found|error)
+                            echo "Cannot resume $unit: load state $load_state; preserving resume marker." >&2
+                            failed=1
+                            continue
+                            ;;
+                    esac
+                    if [ -x /usr/sbin/policy-rc.d ]; then
+                        policy=0
+                        /usr/sbin/policy-rc.d "$unit.service" start || policy=$?
+                        case "$policy" in
+                            0|104) ;;
+                            *)
+                                echo "Cannot resume $unit: policy-rc.d returned $policy; preserving resume marker." >&2
+                                failed=1
+                                continue
+                                ;;
+                        esac
+                    fi
+                    # Do not let Gateway's Requires= start an unrecorded API.
+                    if [ "$unit" = sharpclaw-gateway ] && ! systemctl is-active --quiet sharpclaw-api.service; then
+                        echo 'Cannot resume Gateway while API is inactive; preserving resume marker.' >&2
+                        failed=1
+                        continue
+                    fi
+                    if systemctl start "$unit.service" && systemctl is-active --quiet "$unit.service"; then
+                        rm -f "/run/sharpclaw-package-resume/$unit"
+                    else
+                        echo "Failed to restore active state for $unit; preserving resume marker." >&2
+                        failed=1
+                    fi
                 fi
             done
+            if [ "$failed" -ne 0 ]; then exit 1; fi
         fi
         ;;
 esac

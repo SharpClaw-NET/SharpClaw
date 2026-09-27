@@ -1,3 +1,4 @@
+#requires -Version 5.1
 # Run personally only after reviewing the package, hashes, and signing certificate.
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -9,7 +10,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if (-not $IsWindows) { throw 'Windows is required.' }
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Windows is required.' }
 if ((Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash -ne $ExpectedPackageSha256 -or
     (Get-FileHash -LiteralPath $CertificatePath -Algorithm SHA256).Hash -ne $ExpectedCertificateSha256) {
     throw 'Package or certificate SHA-256 differs from the reviewed delivery.'

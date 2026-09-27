@@ -10,6 +10,12 @@ case "$1" in
                 fi
             done
             deb-systemd-invoke stop sharpclaw-gateway.service sharpclaw-api.service
+            for unit in sharpclaw-gateway sharpclaw-api; do
+                if systemctl is-active --quiet "$unit.service"; then
+                    echo "Cannot quiesce $unit; refusing removal/upgrade and preserving resume marker." >&2
+                    exit 1
+                fi
+            done
         fi
         ;;
 esac
