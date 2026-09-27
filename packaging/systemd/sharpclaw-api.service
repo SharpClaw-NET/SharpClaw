@@ -6,13 +6,17 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/usr/lib/sharpclaw/api
-ExecStart=/usr/lib/sharpclaw/api/SharpClaw.Runtime.Host
+WorkingDirectory=/usr/lib/sharpclaw/backend
+ExecStart=/usr/lib/sharpclaw/backend/SharpClaw.Runtime.Host
+ExecStartPost=/usr/lib/sharpclaw/wait-ready
+TimeoutStartSec=100
+TimeoutStopSec=90
 Restart=on-failure
 RestartSec=5
 User=sharpclaw
 Group=sharpclaw
-EnvironmentFile=-/etc/sharpclaw/.env
+EnvironmentFile=/etc/sharpclaw/runtime.env
+UMask=0077
 
 # Hardening
 NoNewPrivileges=true

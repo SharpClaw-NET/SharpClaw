@@ -328,6 +328,7 @@ public sealed class GatewayProcessManager : IDisposable
         {
             psi.EnvironmentVariables["SHARPCLAW_INSTANCE_ROOT"] = BundledGatewayInstanceRoot;
             psi.EnvironmentVariables["SHARPCLAW_DATA_DIR"] = Path.Combine(BundledGatewayInstanceRoot, "Data");
+            psi.EnvironmentVariables["SHARPCLAW_ENVIRONMENT_DIR"] = Path.Combine(BundledGatewayInstanceRoot, "config");
         }
 
         if (_frontendInstance is not null)

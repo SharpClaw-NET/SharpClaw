@@ -40,6 +40,8 @@ service-worker-assets.js
 # .env file
 *.env
 **/*.env
+!packaging/debian/runtime.env
+!packaging/debian/gateway.env
 
 ## Original below: https://gist.github.com/takekazuomi/10955889
 ## Ignore Visual Studio temporary files, build results, and

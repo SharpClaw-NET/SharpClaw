@@ -99,7 +99,8 @@ public static class LocalRuntimeHost
                 cancellationToken => new ValueTask(
                     databaseReadiness.ValidateAsync(cancellationToken)));
             await registrationSet.ConnectCapabilitiesAsync(app.Services, cancellationToken);
-            await kernel.StartAsync("0.1.0-beta");
+            await kernel.StartAsync(
+                typeof(LocalRuntimeHost).Assembly.GetName().Version?.ToString() ?? "0.5.0.0");
             runtimeStarted = true;
 
             if (RuntimeCliCommandLine.IsRequested(args))

@@ -21,7 +21,7 @@
     <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
     <ApplicationVersion>$([MSBuild]::Add($([MSBuild]::Add($([MSBuild]::Multiply($([System.Version]::Parse('$(_VersionClean)').Major), 10000)), $([MSBuild]::Multiply($([System.Version]::Parse('$(_VersionClean)').Minor), 100)))), $([System.Version]::Parse('$(_VersionClean)').Build)))</ApplicationVersion>
     <!-- Package Publisher -->
-    <ApplicationPublisher>marko</ApplicationPublisher>
+    <ApplicationPublisher>CN=SharpClaw Dev</ApplicationPublisher>
     <!-- Package Description -->
     <Description>SharpClaw powered by Uno Platform.</Description>
 
@@ -107,7 +107,7 @@
       <_BackendSelfContained Condition="'$(SelfContained)' == 'true'">--self-contained -r $(RuntimeIdentifier) -p:PublishReadyToRun=true -p:PublishTrimmed=false</_BackendSelfContained>
       <_BackendSelfContained Condition="'$(SelfContained)' != 'true'">--no-self-contained</_BackendSelfContained>
     </PropertyGroup>
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Runtime\Host\SharpClaw.Runtime.Host.csproj&quot; -c $(Configuration) $(_BackendSelfContained) -o &quot;$(PublishDir)backend&quot;" ConsoleToMsBuild="true" StandardOutputImportance="low" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Runtime\Host\SharpClaw.Runtime.Host.csproj&quot; -c $(Configuration) $(_BackendSelfContained) -p:SharpClawContributionPayloadRoot=&quot;$(SharpClawContributionPayloadRoot)&quot; -p:RestoreConfigFile=&quot;$(RestoreConfigFile)&quot; -p:Version=&quot;$(Version)&quot; -p:AssemblyVersion=&quot;$(AssemblyVersion)&quot; -p:FileVersion=&quot;$(FileVersion)&quot; -p:InformationalVersion=&quot;$(InformationalVersion)&quot; -p:IncludeSourceRevisionInInformationalVersion=false -o &quot;$(PublishDir)backend&quot;" ConsoleToMsBuild="true" StandardOutputImportance="low" />
   </Target>
 
   <!--
@@ -119,7 +119,7 @@
       <_GatewaySelfContained Condition="'$(SelfContained)' == 'true'">--self-contained -r $(RuntimeIdentifier) -p:PublishReadyToRun=true -p:PublishTrimmed=false</_GatewaySelfContained>
       <_GatewaySelfContained Condition="'$(SelfContained)' != 'true'">--no-self-contained</_GatewaySelfContained>
     </PropertyGroup>
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Gateway\SharpClaw.Gateway.csproj&quot; -c $(Configuration) $(_GatewaySelfContained) -o &quot;$(PublishDir)gateway&quot;" ConsoleToMsBuild="true" StandardOutputImportance="low" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Gateway\SharpClaw.Gateway.csproj&quot; -c $(Configuration) $(_GatewaySelfContained) -p:RestoreConfigFile=&quot;$(RestoreConfigFile)&quot; -p:Version=&quot;$(Version)&quot; -p:AssemblyVersion=&quot;$(AssemblyVersion)&quot; -p:FileVersion=&quot;$(FileVersion)&quot; -p:InformationalVersion=&quot;$(InformationalVersion)&quot; -p:IncludeSourceRevisionInInformationalVersion=false -o &quot;$(PublishDir)gateway&quot;" ConsoleToMsBuild="true" StandardOutputImportance="low" />
   </Target>
 
   <ItemGroup>
@@ -172,29 +172,7 @@
     </Page>
   </ItemGroup>
 
-  <!-- Auto-stamp Package.appxmanifest Identity/Version from Directory.Build.props at build time -->
-  <UsingTask TaskName="StampManifestVersion" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
-    <ParameterGroup>
-      <FilePath ParameterType="System.String" Required="true" />
-      <NewVersion ParameterType="System.String" Required="true" />
-    </ParameterGroup>
-    <Task>
-      <Code Type="Fragment" Language="cs"><![CDATA[
-var text = System.IO.File.ReadAllText(FilePath);
-var updated = System.Text.RegularExpressions.Regex.Replace(
-    text,
-    @"(<Identity[^>]*?Version="")([\d.]+)("")",
-    "${1}" + NewVersion + "${3}");
-if (text != updated)
-    System.IO.File.WriteAllText(FilePath, updated);
-]]>
-      </Code>
-    </Task>
-  </UsingTask>
-
-  <Target Name="StampAppxManifestVersion" BeforeTargets="BeforeBuild" Condition="Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')">
-    <StampManifestVersion FilePath="$(MSBuildProjectDirectory)\Package.appxmanifest" NewVersion="$(AssemblyVersion)" />
-  </Target>
+  <!-- Installer identity is stamped into staging, never into tracked source. -->
 
   <ItemGroup>
     <Page Update="Presentation\UserGuidePage.xaml">

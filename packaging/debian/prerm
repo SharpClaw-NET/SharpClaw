@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|upgrade)
+        if [ -d /run/systemd/system ]; then
+            install -d -o root -g root -m 0700 /run/sharpclaw-package-resume
+            for unit in sharpclaw-api sharpclaw-gateway; do
+                if systemctl is-active --quiet "$unit.service"; then
+                    touch "/run/sharpclaw-package-resume/$unit"
+                fi
+            done
+            deb-systemd-invoke stop sharpclaw-gateway.service sharpclaw-api.service
+        fi
+        ;;
+esac
+exit 0

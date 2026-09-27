@@ -39,6 +39,13 @@ param(
     [string]$ServerRid = "all",
     [string]$RuntimeRid = "all",
     [string]$Configuration = "Release",
+    [Parameter(Mandatory = $true)]
+    [string]$BomRoot,
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[a-fA-F0-9]{64}$')]
+    [string]$BomManifestSha256,
+    [ValidateRange(1, 65535)]
+    [int]$InstallerRevision = 1,
     [string]$OutputDir = (Join-Path (Split-Path -Parent $PSScriptRoot) "publish"),
     [switch]$SkipZip,
     [switch]$Parallel
@@ -48,6 +55,35 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $repoRoot 'build/PublishSupport.ps1')
+if ($Parallel) { throw 'Parallel publishing is not supported; shared project outputs require a sequential loop.' }
+$bom = Assert-PublishBom $BomRoot $BomManifestSha256
+$version = "0.5.0-preview.$InstallerRevision"
+$installerVersion = "0.5.0.$InstallerRevision"
+$sourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[a-f0-9]{40}$') { throw 'Cannot determine source commit.' }
+if (& git -C $repoRoot status --porcelain) { throw 'Publish only a clean, committed source tree.' }
+$branch = (& git -C $repoRoot branch --show-current).Trim()
+if ($branch -notin @('main', 'dev')) { throw 'Publish only from main or dev.' }
+$OutputDir = [IO.Path]::GetFullPath($OutputDir)
+New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+if (Get-ChildItem -LiteralPath $OutputDir -Force) { throw 'Publish output must be empty; use a fresh directory.' }
+$restoreConfig = Join-Path $OutputDir 'NuGet.config'
+$feed = [Security.SecurityElement]::Escape((Join-Path $bom.Root 'feed'))
+@"
+<configuration>
+  <packageSources><clear /><add key="frozen" value="$feed" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources>
+  <packageSourceMapping><packageSource key="frozen"><package pattern="SharpClaw.*" /></packageSource><packageSource key="nuget.org"><package pattern="*" /></packageSource></packageSourceMapping>
+</configuration>
+"@ | Set-Content -LiteralPath $restoreConfig -Encoding utf8
+$env:NUGET_PACKAGES = Join-Path $OutputDir '.nuget/packages'
+$env:NUGET_HTTP_CACHE_PATH = Join-Path $OutputDir '.nuget/http-cache'
+$publishProperties = @(
+    "-p:SharpClawContributionPayloadRoot=$($bom.BundleRoot)",
+    "-p:RestoreConfigFile=$restoreConfig",
+    "-p:Version=$version", '-p:AssemblyVersion=0.5.0.0', "-p:FileVersion=$installerVersion",
+    "-p:InformationalVersion=$version+$sourceCommit", '-p:IncludeSourceRevisionInInformationalVersion=false'
+)
 $clientProject = Join-Path (Join-Path $repoRoot "SharpClaw.Client.Uno") "SharpClaw.Client.Uno.csproj"
 $runtimeProject = Join-Path (Join-Path (Join-Path $repoRoot "SharpClaw.Runtime") "Host") "SharpClaw.Runtime.Host.csproj"
 $gatewayProject = Join-Path (Join-Path $repoRoot "SharpClaw.Gateway") "SharpClaw.Gateway.csproj"
@@ -109,15 +145,16 @@ function Get-DirSizeMB {
 
 function New-ZipArchive {
     param([string]$SourceDir, [string]$ZipPath)
-    if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
-    Compress-Archive -Path "$SourceDir\*" -DestinationPath $ZipPath -Force
+    [IO.Compression.ZipFile]::CreateFromDirectory($SourceDir, $ZipPath)
 }
 
 function Strip-ForeignNatives {
     param([string]$StageDir, [string]$TargetRid)
 
     $ridOs = ($TargetRid -split "-")[0]
-    foreach ($runtimesDir in (Get-ChildItem $StageDir -Recurse -Directory -Filter "runtimes" -ErrorAction SilentlyContinue)) {
+    # Contribution files are immutable reviewed package bytes, including all RID assets.
+    foreach ($runtimesDir in (Get-ChildItem $StageDir -Recurse -Directory -Filter "runtimes" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '[/\\]contributions[/\\]' })) {
         foreach ($subdir in (Get-ChildItem $runtimesDir.FullName -Directory -ErrorAction SilentlyContinue)) {
             if ($subdir.Name -notlike "$ridOs-*" -and $subdir.Name -ne $ridOs) {
                 Remove-Item $subdir.FullName -Recurse -Force -ErrorAction SilentlyContinue
@@ -139,10 +176,69 @@ function Add-Result {
 
 function Invoke-Dotnet {
     param([string[]]$Arguments)
-    & dotnet @Arguments
+    "dotnet $($Arguments -join ' ') $($publishProperties -join ' ')" |
+        Add-Content -LiteralPath $script:currentBuildLog
+    & dotnet @Arguments @publishProperties 2>&1 | Tee-Object -FilePath $script:currentBuildLog -Append
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet $($Arguments -join ' ') failed with exit code $LASTEXITCODE."
     }
+}
+
+function Complete-Deployment {
+    param([string]$Type, [string]$TargetRid, [string]$StageDir, [string]$RuntimeDir, [string]$ZipPath)
+    $null = Assert-PublishBom $BomRoot $BomManifestSha256
+    Assert-NoActiveSecrets $StageDir
+    Assert-NativeLauncher (Join-Path $RuntimeDir (Get-ExeName 'SharpClaw.Runtime.Host' $TargetRid)) $TargetRid
+    Assert-NativeLauncher (Join-Path $RuntimeDir (Get-ExeName 'SharpClaw.SidecarHost.OutOfProcess' $TargetRid)) $TargetRid
+    if ($Type -ne 'Runtime') {
+        Assert-NativeLauncher (Join-Path $StageDir "gateway/$(Get-ExeName 'SharpClaw.Gateway' $TargetRid)") $TargetRid
+    }
+    if ($Type -eq 'Application') {
+        Assert-NativeLauncher (Join-Path $StageDir (Get-ExeName 'SharpClaw.Client.Uno' $TargetRid)) $TargetRid
+    }
+    $runtimeFiles = @($bom.BundleFiles | ForEach-Object {
+        [pscustomobject]@{ Path = $_.Path; Length = $_.Length; Sha256 = $_.Sha256 }
+    })
+    foreach ($file in $runtimeFiles) {
+        Assert-FileDigest (Resolve-PayloadPath $RuntimeDir $file.Path) $file.Sha256 $file.Length
+    }
+    Assert-FileInventory (Join-Path $RuntimeDir 'contributions') @($runtimeFiles | ForEach-Object {
+        [pscustomobject]@{ Path = $_.Path.Substring('contributions/'.Length); Length = $_.Length; Sha256 = $_.Sha256 }
+    })
+    foreach ($required in @(
+        (Get-ExeName 'SharpClaw.SidecarHost.OutOfProcess' $TargetRid),
+        'SharpClaw.SidecarHost.OutOfProcess.dll', 'SharpClaw.SidecarHost.OutOfProcess.deps.json',
+        'SharpClaw.SidecarHost.OutOfProcess.runtimeconfig.json', 'SharpClaw.SidecarHost.THIRD-PARTY-NOTICES.txt')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir $required))) { throw "Missing sidecar payload '$required'." }
+    }
+    $config = Get-Content -LiteralPath (Join-Path $RuntimeDir 'SharpClaw.SidecarHost.OutOfProcess.runtimeconfig.json') -Raw | ConvertFrom-Json
+    if (-not $config.runtimeOptions.PSObject.Properties['includedFrameworks']) {
+        throw 'The sidecar must use the bundled self-contained runtime.'
+    }
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE.md') -Destination $StageDir
+    Copy-PackageNotices (Join-Path $bom.Root 'feed') $StageDir
+    $provenance = Join-Path $StageDir 'provenance'
+    New-Item -ItemType Directory -Path $provenance | Out-Null
+    Copy-Item -LiteralPath (Join-Path $bom.Root 'bom-manifest.json'),
+        (Join-Path $bom.BundleRoot 'contribution-bundle-manifest.json') -Destination $provenance
+    Strip-ForeignNatives $StageDir $TargetRid
+    $manifest = [pscustomobject]@{
+        DeploymentType = $Type; Rid = $TargetRid; Version = $version; InstallerVersion = $installerVersion
+        SourceCommit = $sourceCommit; BomManifestSha256 = $BomManifestSha256
+        ContributionBundleManifestSha256 = $bom.Manifest.ContributionBundleManifestSha256
+        Files = @(Get-PayloadInventory $StageDir)
+    }
+    $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $StageDir 'publish-manifest.json') -Encoding utf8
+    if (-not $SkipZip) { New-ZipArchive $StageDir $ZipPath }
+    Add-Result $Type $TargetRid $true $StageDir (Get-DirSizeMB $StageDir)
+}
+
+function Publish-ServerComponents {
+    param([string]$TargetRid, [string]$RuntimeDir, [string]$GatewayDir)
+    Invoke-Dotnet @('publish', $runtimeProject, '-c', $Configuration, '-r', $TargetRid,
+        '--self-contained', '-p:PublishReadyToRun=true', '-p:PublishTrimmed=false', '-o', $RuntimeDir)
+    Invoke-Dotnet @('publish', $gatewayProject, '-c', $Configuration, '-r', $TargetRid,
+        '--self-contained', '-p:PublishReadyToRun=true', '-p:PublishTrimmed=false', '-o', $GatewayDir)
 }
 
 function Publish-Application {
@@ -153,8 +249,6 @@ function Publish-Application {
 
     Write-Host ""
     Write-Host "-- Application: $TargetRid ------------------------" -ForegroundColor Green
-    if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
-    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
     Invoke-Dotnet @(
         "publish", $clientProject,
@@ -162,21 +256,21 @@ function Publish-Application {
         "-f", $clientTfm,
         "-r", $TargetRid,
         "--self-contained",
-        "-p:BundleBackend=true",
+        "-p:BundleBackend=false",
+        "-p:BundleGateway=false",
         "-p:UseMonoRuntime=false",
         "-p:PublishReadyToRun=true",
         "-o", $stageDir
     )
+
+    Publish-ServerComponents $TargetRid (Join-Path $stageDir 'backend') (Join-Path $stageDir 'gateway')
 
     $runtimeExe = Join-Path (Join-Path $stageDir "backend") (Get-ExeName "SharpClaw.Runtime.Host" $TargetRid)
     $gatewayExe = Join-Path (Join-Path $stageDir "gateway") (Get-ExeName "SharpClaw.Gateway" $TargetRid)
     if (-not (Test-Path $runtimeExe)) { throw "Application deployment did not produce bundled Runtime at $runtimeExe." }
     if (-not (Test-Path $gatewayExe)) { throw "Application deployment did not produce bundled Gateway at $gatewayExe." }
 
-    Strip-ForeignNatives $stageDir $TargetRid
-    $size = Get-DirSizeMB $stageDir
-    if (-not $SkipZip) { New-ZipArchive $stageDir $zipPath }
-    Add-Result "Application" $TargetRid $true $stageDir $size
+    Complete-Deployment 'Application' $TargetRid $stageDir (Join-Path $stageDir 'backend') $zipPath
 }
 
 function Publish-Server {
@@ -189,38 +283,14 @@ function Publish-Server {
 
     Write-Host ""
     Write-Host "-- Server: $TargetRid -----------------------------" -ForegroundColor Magenta
-    if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
-    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-
-    Invoke-Dotnet @(
-        "publish", $runtimeProject,
-        "-c", $Configuration,
-        "-r", $TargetRid,
-        "--self-contained",
-        "-p:PublishReadyToRun=true",
-        "-p:PublishTrimmed=false",
-        "-o", $runtimeDir
-    )
-
-    Invoke-Dotnet @(
-        "publish", $gatewayProject,
-        "-c", $Configuration,
-        "-r", $TargetRid,
-        "--self-contained",
-        "-p:PublishReadyToRun=true",
-        "-p:PublishTrimmed=false",
-        "-o", $gatewayDir
-    )
+    Publish-ServerComponents $TargetRid $runtimeDir $gatewayDir
 
     $runtimeExe = Join-Path $runtimeDir (Get-ExeName "SharpClaw.Runtime.Host" $TargetRid)
     $gatewayExe = Join-Path $gatewayDir (Get-ExeName "SharpClaw.Gateway" $TargetRid)
     if (-not (Test-Path $runtimeExe)) { throw "Server deployment did not produce Runtime at $runtimeExe." }
     if (-not (Test-Path $gatewayExe)) { throw "Server deployment did not produce Gateway at $gatewayExe." }
 
-    Strip-ForeignNatives $stageDir $TargetRid
-    $size = Get-DirSizeMB $stageDir
-    if (-not $SkipZip) { New-ZipArchive $stageDir $zipPath }
-    Add-Result "Server" $TargetRid $true $stageDir $size
+    Complete-Deployment 'Server' $TargetRid $stageDir $runtimeDir $zipPath
 }
 
 function Publish-Runtime {
@@ -231,8 +301,6 @@ function Publish-Runtime {
 
     Write-Host ""
     Write-Host "-- Runtime: $TargetRid ----------------------------" -ForegroundColor Cyan
-    if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
-    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
     Invoke-Dotnet @(
         "publish", $runtimeProject,
@@ -247,10 +315,7 @@ function Publish-Runtime {
     $runtimeExe = Join-Path $stageDir (Get-ExeName "SharpClaw.Runtime.Host" $TargetRid)
     if (-not (Test-Path $runtimeExe)) { throw "Runtime deployment did not produce Runtime at $runtimeExe." }
 
-    Strip-ForeignNatives $stageDir $TargetRid
-    $size = Get-DirSizeMB $stageDir
-    if (-not $SkipZip) { New-ZipArchive $stageDir $zipPath }
-    Add-Result "Runtime" $TargetRid $true $stageDir $size
+    Complete-Deployment 'Runtime' $TargetRid $stageDir $stageDir $zipPath
 }
 
 $selectedTypes = Resolve-DeploymentTypes $Include $Exclude
@@ -260,15 +325,19 @@ Write-Host ""
 Write-Host "SharpClaw publish: $($selectedTypes -join ', ') ($Configuration)" -ForegroundColor White
 
 foreach ($type in $selectedTypes) {
-    switch ($type) {
-        "Application" {
-            foreach ($targetRid in (Resolve-Rids $Rid)) { Publish-Application $targetRid }
-        }
-        "Server" {
-            foreach ($targetRid in (Resolve-Rids $ServerRid)) { Publish-Server $targetRid }
-        }
-        "Runtime" {
-            foreach ($targetRid in (Resolve-Rids $RuntimeRid)) { Publish-Runtime $targetRid }
+    $ridValue = switch ($type) { 'Application' { $Rid }; 'Server' { $ServerRid }; 'Runtime' { $RuntimeRid } }
+    foreach ($targetRid in (Resolve-Rids $ridValue)) {
+        $script:currentBuildLog = Join-Path $OutputDir "$type-$targetRid.log"
+        try {
+            switch ($type) {
+                'Application' { Publish-Application $targetRid }
+                'Server' { Publish-Server $targetRid }
+                'Runtime' { Publish-Runtime $targetRid }
+            }
+        } catch {
+            $_ | Out-String | Add-Content -LiteralPath $script:currentBuildLog
+            Write-Host "FAILED $type/$targetRid : $_" -ForegroundColor Red
+            Add-Result $type $targetRid $false
         }
     }
 }
@@ -280,4 +349,5 @@ foreach ($result in $results) {
     Write-Host "  [$status] $($result.Type)/$($result.Target) $($result.SizeMB) MB $($result.Artifact)"
 }
 
-if (($results | Where-Object { -not $_.Ok }).Count -gt 0) { exit 1 }
+if (@($results | Where-Object { -not $_.Ok }).Count -gt 0) { exit 1 }
+exit 0

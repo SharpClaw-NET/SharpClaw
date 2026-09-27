@@ -75,6 +75,17 @@
   <Target Name="CopyPackagedContributionsToTestOutput"
           AfterTargets="Build"
           DependsOnTargets="_ResolvePackagedContributionPayloadFiles">
+    <MSBuild Projects="..\SharpClaw.Runtime\Host\SharpClaw.Runtime.Host.csproj" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);TargetFramework=net10.0">
+      <Output TaskParameter="TargetOutputs" ItemName="_RuntimeHostTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <_TestAppHostExtension Condition="$([MSBuild]::IsOSPlatform('Windows'))">.exe</_TestAppHostExtension>
+    </PropertyGroup>
+    <ItemGroup>
+      <_RuntimeSidecarLauncher Include="@(_RuntimeHostTarget->'%(RootDir)%(Directory)SharpClaw.SidecarHost.OutOfProcess$(_TestAppHostExtension)')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_RuntimeSidecarLauncher)" DestinationFolder="$(OutDir)" />
     <ItemGroup>
       <_BundledRegistrationDll Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll"
                          Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' != ''" />

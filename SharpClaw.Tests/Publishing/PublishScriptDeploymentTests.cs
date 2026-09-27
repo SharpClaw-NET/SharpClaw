@@ -30,19 +30,32 @@ public sealed class PublishScriptDeploymentTests
 
         var application = ExtractFunction(script, "Publish-Application");
         application.Should().Contain("$clientProject");
-        application.Should().Contain("-p:BundleBackend=true");
+        application.Should().Contain("Publish-ServerComponents");
         application.Should().Contain("SharpClaw.Runtime.Host");
         application.Should().Contain("SharpClaw.Gateway");
 
         var server = ExtractFunction(script, "Publish-Server");
-        server.Should().Contain("$runtimeProject");
-        server.Should().Contain("$gatewayProject");
+        server.Should().Contain("Publish-ServerComponents");
+        var components = ExtractFunction(script, "Publish-ServerComponents");
+        components.Should().Contain("$runtimeProject");
+        components.Should().Contain("$gatewayProject");
         server.Should().NotContain("$clientProject");
 
         var runtime = ExtractFunction(script, "Publish-Runtime");
         runtime.Should().Contain("$runtimeProject");
         runtime.Should().NotContain("$gatewayProject");
         runtime.Should().NotContain("$clientProject");
+    }
+
+    [Test]
+    public void PublishScriptRequiresVerifiedPayloadAndReturnsSuccessWithoutStrictModeNullCount()
+    {
+        var script = ReadPublishScript();
+        script.Should().Contain("Assert-PublishBom $BomRoot $BomManifestSha256");
+        script.Should().Contain("-p:SharpClawContributionPayloadRoot=$($bom.BundleRoot)");
+        script.Should().Contain("if (@($results | Where-Object { -not $_.Ok }).Count -gt 0)");
+        script.Should().Contain("CreateFromDirectory", "ZIPs must retain dotfiles such as configuration templates");
+        script.Should().Contain("Assert-FileInventory", "omitted or extra contribution files must fail publishing");
     }
 
     [Test]

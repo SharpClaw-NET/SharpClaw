@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|purge)
+        if [ -d /run/systemd/system ]; then systemctl daemon-reload; fi
+        deb-systemd-helper purge sharpclaw-gateway.service sharpclaw-api.service
+        rm -f /run/sharpclaw-package-resume/sharpclaw-api /run/sharpclaw-package-resume/sharpclaw-gateway
+        # Never delete the account or /var/lib/sharpclaw, even on purge.
+        ;;
+esac
+exit 0

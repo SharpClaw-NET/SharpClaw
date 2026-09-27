@@ -312,6 +312,7 @@ public sealed class BackendProcessManager : IDisposable
         {
             psi.EnvironmentVariables["SHARPCLAW_INSTANCE_ROOT"] = instanceRoot;
             psi.EnvironmentVariables["SHARPCLAW_DATA_DIR"] = Path.Combine(instanceRoot, "Data");
+            psi.EnvironmentVariables["SHARPCLAW_ENVIRONMENT_DIR"] = Path.Combine(instanceRoot, "config");
         }
 
         if (_processStartObserver is not null)

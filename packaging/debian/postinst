@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    configure|abort-upgrade|abort-remove|abort-deconfigure)
+        if getent passwd sharpclaw >/dev/null; then
+            uid=$(id -u sharpclaw)
+            if [ "$uid" -eq 0 ] || [ "$uid" -ge 1000 ]; then
+                echo 'Refusing to use a pre-existing non-system sharpclaw account.' >&2
+                exit 1
+            fi
+        else
+            adduser --system --group --home /var/lib/sharpclaw --no-create-home sharpclaw
+        fi
+        install -d -o sharpclaw -g sharpclaw -m 0700 /var/lib/sharpclaw \
+            /var/lib/sharpclaw/backend /var/lib/sharpclaw/gateway /var/lib/sharpclaw/user-data
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload
+            # Resume only services that were running before this upgrade.
+            for unit in sharpclaw-api sharpclaw-gateway; do
+                if [ -f "/run/sharpclaw-package-resume/$unit" ]; then
+                    deb-systemd-invoke start "$unit.service"
+                    rm -f "/run/sharpclaw-package-resume/$unit"
+                fi
+            done
+        fi
+        ;;
+esac
+exit 0

@@ -15,6 +15,7 @@
                                         Condition="'$(_SharpClawContributionPayloadRoot)' != ''" />
 
       <_PackagedSidecarHostFile Include="$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\SharpClaw.SidecarHost.OutOfProcess*"
+                                Exclude="$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\*.exe"
                                 Condition="'$(PkgSharpClaw_SidecarHost_OutOfProcess)' != ''" />
     </ItemGroup>
   </Target>

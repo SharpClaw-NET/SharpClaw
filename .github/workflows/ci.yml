@@ -53,7 +53,7 @@ jobs:
             ${{ runner.temp }}\sharpclaw-frozen-bom\bundle\**\*
             ${{ runner.temp }}\sharpclaw-frozen-bom\bom-manifest.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
           compression-level: 0
 
   dependency-submission:
@@ -153,7 +153,7 @@ jobs:
           - domain: Production Module Graph
             filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.DefaultModuleSetHostGateTests'
           - domain: Publishing
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Publishing.PublishScriptDeploymentTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Publishing'
           - domain: CI Guardrails
             filter: 'FullyQualifiedName~SharpClaw.Tests.Ci.CiRequiredStatusCheckTests'
     steps:
@@ -210,3 +210,8 @@ jobs:
           --no-restore
           --logger GitHubActions
           --filter "TestCategory!=PerformanceDiagnostic&TestCategory!=PerformanceGate&(${{ matrix.filter }})"
+
+      - name: Run publishing integrity behavior
+        if: matrix.domain == 'Publishing'
+        shell: pwsh
+        run: ./build/Test-PublishSupport.ps1

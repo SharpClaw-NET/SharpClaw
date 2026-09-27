@@ -15,9 +15,9 @@ public static class GatewayEnvironment
         this IConfigurationBuilder builder,
         bool isDevelopment = false)
     {
-        var envDir = Path.Combine(
+        var envDir = SharpClawEnvironmentDirectory.Resolve(Path.Combine(
             Path.GetDirectoryName(typeof(GatewayEnvironment).Assembly.Location)!,
-            "Environment");
+            "Environment"));
 
         return builder.AddSupprocomSecrets(
             CreateSecretsOptions(envDir, isDevelopment));
@@ -38,7 +38,8 @@ public static class GatewayEnvironment
         new()
         {
             EnvironmentName = isDevelopment ? "Development" : "Production",
-            FileOverridesProcessEnvironment = true,
+            FileOverridesProcessEnvironment = string.IsNullOrWhiteSpace(
+                Environment.GetEnvironmentVariable(SharpClawEnvironmentDirectory.OverrideVariable)),
             File =
             {
                 Directory = envDir,

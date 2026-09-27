@@ -20,7 +20,6 @@
     <PackageReference Include="Supprocom.Secrets" />
     <PackageReference Include="SharpClaw.SidecarHost.InProcess" />
     <PackageReference Include="SharpClaw.SidecarHost.OutOfProcess" GeneratePathProperty="true" PrivateAssets="all" />
-    <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
   <ItemGroup>
@@ -36,6 +35,35 @@
       <_BundledContributionOutputFile Remove="@(_BundledContributionOutputFile)" />
       <_BundledContributionOutputFile Include="@(_PackagedSidecarHostFile)" />
     </ItemGroup>
+  </Target>
+
+  <!-- Bind the SDK's RID-specific apphost to the reviewed package DLL, without
+       rebuilding the sidecar or requiring a system-wide dotnet installation. -->
+  <Target Name="CreateBundledSidecarAppHost" AfterTargets="CopyBundledContributions"
+          DependsOnTargets="_GetAppHostPaths">
+    <Error Condition="!Exists('$(AppHostSourcePath)')" Text="A target-platform apphost is required for the bundled sidecar." />
+    <CreateAppHost AppHostSourcePath="$(AppHostSourcePath)"
+                   AppHostDestinationPath="$(OutputPath)SharpClaw.SidecarHost.OutOfProcess$(_NativeExecutableExtension)"
+                   AppBinaryName="SharpClaw.SidecarHost.OutOfProcess.dll"
+                   IntermediateAssembly="$(OutputPath)SharpClaw.SidecarHost.OutOfProcess.dll"
+                   EnableMacOSCodeSign="$(_EnableMacOSCodeSign)" />
+    <Copy SourceFiles="$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\THIRD-PARTY-NOTICES.txt"
+          DestinationFiles="$(OutputPath)SharpClaw.SidecarHost.THIRD-PARTY-NOTICES.txt" />
+  </Target>
+
+  <Target Name="CreatePublishedSidecarAppHost" AfterTargets="Publish"
+          DependsOnTargets="CopyBundledContributionsToPublish;_GetAppHostPaths">
+    <Error Condition="!Exists('$(AppHostSourcePath)')" Text="A target-platform apphost is required for the published sidecar." />
+    <CreateAppHost AppHostSourcePath="$(AppHostSourcePath)"
+                   AppHostDestinationPath="$(PublishDir)SharpClaw.SidecarHost.OutOfProcess$(_NativeExecutableExtension)"
+                   AppBinaryName="SharpClaw.SidecarHost.OutOfProcess.dll"
+                   IntermediateAssembly="$(PublishDir)SharpClaw.SidecarHost.OutOfProcess.dll"
+                   EnableMacOSCodeSign="$(_EnableMacOSCodeSign)" />
+    <Copy SourceFiles="$(PublishDir)SharpClaw.Runtime.Host.runtimeconfig.json"
+          DestinationFiles="$(PublishDir)SharpClaw.SidecarHost.OutOfProcess.runtimeconfig.json"
+          Condition="'$(SelfContained)' == 'true'" />
+    <Copy SourceFiles="$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\THIRD-PARTY-NOTICES.txt"
+          DestinationFiles="$(PublishDir)SharpClaw.SidecarHost.THIRD-PARTY-NOTICES.txt" />
   </Target>
 
   <Target Name="CopyBundledContributions"

@@ -1,0 +1,12 @@
+Package: sharpclaw-server
+Version: @VERSION@
+Architecture: @ARCHITECTURE@
+Maintainer: SharpClaw-NET <noreply@github.com>
+Section: net
+Priority: optional
+Depends: adduser, ca-certificates, curl, init-system-helpers, libc6 (>= 2.38), libgcc-s1, libgssapi-krb5-2, libicu76, libssl3t64, libstdc++6, zlib1g
+Homepage: https://github.com/SharpClaw-NET/SharpClaw
+Description: Modular SharpClaw Runtime and Gateway for Debian 13
+ Self-contained .NET server with verified bundled provider and persistence
+ modules. Configuration and data remain outside the read-only binaries.
+ Fresh installation does not start or enable services automatically.

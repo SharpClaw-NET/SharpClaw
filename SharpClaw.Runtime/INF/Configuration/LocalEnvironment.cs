@@ -17,9 +17,9 @@ public static class LocalEnvironment
         bool isDevelopment = false,
         SharpClawInstancePaths? instancePaths = null)
     {
-        var envDir = Path.Combine(
+        var envDir = SharpClawEnvironmentDirectory.Resolve(Path.Combine(
             Path.GetDirectoryName(typeof(LocalEnvironment).Assembly.Location)!,
-            "Environment");
+            "Environment"));
 
         return builder.AddSupprocomSecrets(
             CreateSecretsOptions(envDir, isDevelopment, instancePaths));
@@ -52,7 +52,8 @@ public static class LocalEnvironment
         return new SupprocomSecretsOptions
         {
             EnvironmentName = isDevelopment ? "Development" : "Production",
-            FileOverridesProcessEnvironment = true,
+            FileOverridesProcessEnvironment = string.IsNullOrWhiteSpace(
+                Environment.GetEnvironmentVariable(SharpClawEnvironmentDirectory.OverrideVariable)),
             File =
             {
                 Directory = envDir,
@@ -71,10 +72,8 @@ public static class LocalEnvironment
     }
 
     public static string ResolveActiveEnvFilePath() =>
-        Path.Combine(
-            Path.GetDirectoryName(typeof(LocalEnvironment).Assembly.Location)!,
-            "Environment",
-            ".env");
+        Path.Combine(SharpClawEnvironmentDirectory.Resolve(Path.Combine(
+            Path.GetDirectoryName(typeof(LocalEnvironment).Assembly.Location)!, "Environment")), ".env");
 
     private static string ResolveInstallationKeyPath(SharpClawInstancePaths? instancePaths) =>
         instancePaths?.GetSecretFilePath("encryption-key")
