@@ -1,9 +1,12 @@
+using System.Diagnostics.CodeAnalysis;
 using SharpClaw.Shared.Security;
 using SharpClaw.Services;
 
 namespace SharpClaw.Tests.Publishing;
 
 [TestFixture]
+[SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes",
+    Justification = "NUnit discovers and instantiates this test fixture through reflection.")]
 internal sealed class InstallerEnvironmentTests
 {
     [Test]

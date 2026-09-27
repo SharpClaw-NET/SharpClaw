@@ -57,6 +57,13 @@ version upgrades that identity. Instance configuration, keys, logs, and storage
 are kept outside the read-only installed binaries. Keep a backup of instance
 state before an upgrade; uninstalling/reinstalling is not a data rollback.
 
+Runtime readiness requires an explicitly selected provider (`Provider:Key` or
+`Providers:Default`); installers do not silently choose a provider or supply
+credentials. Configure the installed user's environment or writable backend
+configuration before starting Runtime, and select the model and any required
+key before inference. A keyless local provider still needs its actual backend
+and model for chat.
+
 ## Debian 13 Server
 
 Transfer the verified `Server-linux-x64` directory to Debian, retaining hidden
@@ -75,7 +82,8 @@ installation, verify the Debian package hash and use
 `sudo apt install ./sharpclaw-server_0.5.0~preview.1_amd64.deb`. Fresh installation
 creates the restricted `sharpclaw` system account and private state directories
 but does not start or enable services. Review `/etc/sharpclaw/runtime.env` and
-`gateway.env`, then explicitly run
+`gateway.env`; set `Provider__Key`, the model, and any required credentials
+before explicitly running
 `sudo systemctl enable --now sharpclaw-api.service sharpclaw-gateway.service`.
 Runtime readiness must pass before the Gateway starts; both bind to loopback by
 default. Expose only the Gateway after arranging the required access controls

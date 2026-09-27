@@ -223,6 +223,25 @@ function Complete-Deployment {
     if (-not $config.runtimeOptions.PSObject.Properties['includedFrameworks']) {
         throw 'The sidecar must use the bundled self-contained runtime.'
     }
+    $runtimeDependencies = Get-Content -LiteralPath (Join-Path $RuntimeDir 'SharpClaw.Runtime.Host.deps.json') -Raw | ConvertFrom-Json -AsHashtable
+    if (@($runtimeDependencies.libraries.Keys | Where-Object { $_ -like 'SharpClaw.SidecarHost.OutOfProcess/*' }).Count -ne 1) {
+        throw 'Runtime dependency metadata must contain its out-of-process host reference.'
+    }
+    foreach ($suffix in @('deps.json', 'runtimeconfig.json')) {
+        $runtimeHash = (Get-FileHash -LiteralPath (Join-Path $RuntimeDir "SharpClaw.Runtime.Host.$suffix") -Algorithm SHA256).Hash
+        $sidecarHash = (Get-FileHash -LiteralPath (Join-Path $RuntimeDir "SharpClaw.SidecarHost.OutOfProcess.$suffix") -Algorithm SHA256).Hash
+        if ($runtimeHash -cne $sidecarHash) { throw "The sidecar must share the local Runtime $suffix closure." }
+    }
+    $sidecarStream = [IO.File]::OpenRead((Join-Path $RuntimeDir 'SharpClaw.SidecarHost.OutOfProcess.dll'))
+    $sidecarPe = [Reflection.PortableExecutable.PEReader]::new($sidecarStream)
+    try {
+        if ($sidecarPe.PEHeaders.CoffHeader.Machine -ne [Reflection.PortableExecutable.Machine]::I386 -or
+            -not $sidecarPe.PEHeaders.CorHeader.Flags.HasFlag([Reflection.PortableExecutable.CorFlags]::ILOnly) -or
+            $sidecarPe.PEHeaders.CorHeader.Flags.HasFlag([Reflection.PortableExecutable.CorFlags]::Requires32Bit) -or
+            $sidecarPe.PEHeaders.CorHeader.EntryPointTokenOrRelativeVirtualAddress -eq 0) {
+            throw 'The shared sidecar entry assembly must be portable AnyCPU IL with a managed entry point.'
+        }
+    } finally { $sidecarPe.Dispose(); $sidecarStream.Dispose() }
     Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE.md') -Destination $StageDir
     Copy-PackageNotices (Join-Path $bom.Root 'feed') $StageDir
     $provenance = Join-Path $StageDir 'provenance'

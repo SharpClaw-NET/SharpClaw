@@ -19,7 +19,7 @@
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Supprocom.Secrets" />
     <PackageReference Include="SharpClaw.SidecarHost.InProcess" />
-    <PackageReference Include="SharpClaw.SidecarHost.OutOfProcess" GeneratePathProperty="true" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.SidecarHost.OutOfProcess" GeneratePathProperty="true" PrivateAssets="all" Publish="true" />
   </ItemGroup>
 
   <ItemGroup>
@@ -61,6 +61,11 @@
                    EnableMacOSCodeSign="$(_EnableMacOSCodeSign)" />
     <Copy SourceFiles="$(PublishDir)SharpClaw.Runtime.Host.runtimeconfig.json"
           DestinationFiles="$(PublishDir)SharpClaw.SidecarHost.OutOfProcess.runtimeconfig.json"
+          Condition="'$(SelfContained)' == 'true'" />
+    <!-- Both entry points use the SDK-generated local runtime/dependency
+         closure. The framework-dependent tools deps file has no CoreCLR assets. -->
+    <Copy SourceFiles="$(PublishDir)SharpClaw.Runtime.Host.deps.json"
+          DestinationFiles="$(PublishDir)SharpClaw.SidecarHost.OutOfProcess.deps.json"
           Condition="'$(SelfContained)' == 'true'" />
     <Copy SourceFiles="$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\THIRD-PARTY-NOTICES.txt"
           DestinationFiles="$(PublishDir)SharpClaw.SidecarHost.THIRD-PARTY-NOTICES.txt" />

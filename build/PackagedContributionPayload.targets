@@ -15,7 +15,11 @@
                                         Condition="'$(_SharpClawContributionPayloadRoot)' != ''" />
 
       <_PackagedSidecarHostFile Include="$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\SharpClaw.SidecarHost.OutOfProcess*"
-                                Exclude="$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\*.exe"
+                                Exclude="$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\*.exe;$(PkgSharpClaw_SidecarHost_OutOfProcess)\tools\$(TargetFramework)\any\*.dll"
+                                Condition="'$(PkgSharpClaw_SidecarHost_OutOfProcess)' != ''" />
+      <!-- The tools DLL is published win-x64. Use the package's AnyCPU entry
+           assembly for both the Runtime reference and every platform apphost. -->
+      <_PackagedSidecarHostFile Include="$(PkgSharpClaw_SidecarHost_OutOfProcess)\lib\$(TargetFramework)\SharpClaw.SidecarHost.OutOfProcess.dll"
                                 Condition="'$(PkgSharpClaw_SidecarHost_OutOfProcess)' != ''" />
     </ItemGroup>
   </Target>

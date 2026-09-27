@@ -55,6 +55,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'docs/Installers.md') -Destination (
 $directoryMode = [IO.UnixFileMode]493 # 0755
 $fileMode = [IO.UnixFileMode]420 # 0644
 $secretMode = [IO.UnixFileMode]384 # 0600
+[IO.File]::SetUnixFileMode($root, $directoryMode)
 foreach ($directory in Get-ChildItem -LiteralPath $root -Recurse -Directory -Force) {
     [IO.File]::SetUnixFileMode($directory.FullName, $directoryMode)
 }

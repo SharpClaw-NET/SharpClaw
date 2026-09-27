@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 namespace SharpClaw.Tests.Publishing;
 
@@ -56,6 +57,25 @@ public sealed class PublishScriptDeploymentTests
         script.Should().Contain("if (@($results | Where-Object { -not $_.Ok }).Count -gt 0)");
         script.Should().Contain("CreateFromDirectory", "ZIPs must retain dotfiles such as configuration templates");
         script.Should().Contain("Assert-FileInventory", "omitted or extra contribution files must fail publishing");
+    }
+
+    [Test]
+    public void RuntimePublishesItsPrivateSidecarReferenceIntoDependencyMetadata()
+    {
+        var project = XDocument.Load(Path.Combine(FindSolutionRoot(), "SharpClaw.Runtime", "Host", "SharpClaw.Runtime.Host.csproj"));
+        var reference = project.Descendants("PackageReference")
+            .Single(node => node.Attribute("Include")?.Value == "SharpClaw.SidecarHost.OutOfProcess");
+        reference.Attribute("PrivateAssets")?.Value.Should().Be("all");
+        reference.Attribute("Publish")?.Value.Should().Be("true",
+            "the SDK otherwise removes a private reference from the self-contained dependency manifest");
+        foreach (var suffix in new[] { "deps.json", "runtimeconfig.json" })
+        {
+            project.Descendants("Copy").Should().Contain(node =>
+                node.Attribute("SourceFiles")!.Value == $"$(PublishDir)SharpClaw.Runtime.Host.{suffix}"
+                && node.Attribute("DestinationFiles")!.Value == $"$(PublishDir)SharpClaw.SidecarHost.OutOfProcess.{suffix}"
+                && node.Attribute("Condition")!.Value == "'$(SelfContained)' == 'true'",
+                "both entry points must have the SDK-generated self-contained runtime closure");
+        }
     }
 
     [Test]
