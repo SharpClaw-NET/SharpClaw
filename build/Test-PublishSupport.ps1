@@ -59,12 +59,12 @@ try {
     Test-Case 'extra contribution file' {
         $path = Join-Path $contribution 'unexpected.dll'
         try { [IO.File]::WriteAllText($path, 'extra'); Assert-Rejected { Assert-PublishBom $root $bomHash } }
-        finally { Remove-Item -LiteralPath $path }
+        finally { Remove-Item -LiteralPath $path -Force }
     }
     Test-Case 'extra package' {
         $path = Join-Path $feed 'Extra.1.0.0.nupkg'
         try { [IO.File]::WriteAllText($path, 'extra'); Assert-Rejected { Assert-PublishBom $root $bomHash } }
-        finally { Remove-Item -LiteralPath $path }
+        finally { Remove-Item -LiteralPath $path -Force }
     }
     Test-Case 'length mismatch' { Assert-Rejected { Assert-FileDigest (Join-Path $feed $bom.Packages[0].Name) $bom.Packages[0].Sha256 0 } }
     foreach ($unsafe in @('../escape', 'a/../escape', '/absolute', 'C:\absolute', 'a//b', 'a/./b')) {
@@ -118,7 +118,7 @@ try {
     Test-Case 'active secrets never ship' {
         $path = Join-Path $stage '.env'
         try { [IO.File]::WriteAllText($path, 'unit-test only'); Assert-Rejected { Assert-NoActiveSecrets $stage } }
-        finally { Remove-Item -LiteralPath $path }
+        finally { Remove-Item -LiteralPath $path -Force }
         Assert-NoActiveSecrets $stage
     }
     Test-Case 'RID-specific launcher validation' {
