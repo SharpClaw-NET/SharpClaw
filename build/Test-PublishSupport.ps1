@@ -21,6 +21,16 @@ function Save-Json {
     param([object]$Value, [string]$Path)
     $Value | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $Path -Encoding utf8
 }
+function New-NoticePackage {
+    param([string]$Directory, [string]$Name, [hashtable]$Entries)
+    $zip = [IO.Compression.ZipFile]::Open((Join-Path $Directory "$Name.nupkg"), [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($path in $Entries.Keys) {
+            $writer = [IO.StreamWriter]::new($zip.CreateEntry($path).Open(), [Text.UTF8Encoding]::new($false))
+            try { $writer.Write($Entries[$path]) } finally { $writer.Dispose() }
+        }
+    } finally { $zip.Dispose() }
+}
 try {
     $feed = Join-Path $root 'feed'
     $bundle = Join-Path $root 'bundle'
@@ -131,6 +141,108 @@ try {
         Assert-Rejected { Assert-NativeLauncher $path 'linux-arm64' }
         Assert-Rejected { Assert-NativeLauncher $path 'win-x64' }
         Assert-Rejected { Assert-NativeLauncher $path 'osx-x64' }
+    }
+    foreach ($rid in @('osx-x64', 'osx-arm64')) {
+        Test-Case "valid and wrong-architecture Mach-O $rid" {
+            $path = Join-Path $stage "unit-only-$rid-header"
+            $bytes = [byte[]]::new(64)
+            $bytes[0] = 0xcf; $bytes[1] = 0xfa; $bytes[2] = 0xed; $bytes[3] = 0xfe
+            $cpu = if ($rid -eq 'osx-x64') { 0x1000007 } else { 0x100000c }
+            [BitConverter]::GetBytes([uint32]$cpu).CopyTo($bytes, 4)
+            [IO.File]::WriteAllBytes($path, $bytes)
+            Assert-NativeLauncher $path $rid
+            $other = if ($rid -eq 'osx-x64') { 'osx-arm64' } else { 'osx-x64' }
+            Assert-Rejected { Assert-NativeLauncher $path $other }
+            $bytes[0] = 0
+            [IO.File]::WriteAllBytes($path, $bytes)
+            Assert-Rejected { Assert-NativeLauncher $path $rid }
+        }
+    }
+    Test-Case 'valid and wrong-architecture Windows PE' {
+        $path = Join-Path $stage 'unit-only-pe-header'
+        $bytes = [byte[]]::new(128)
+        $bytes[0] = 0x4d; $bytes[1] = 0x5a; $bytes[60] = 64
+        [BitConverter]::GetBytes([uint32]0x4550).CopyTo($bytes, 64)
+        [BitConverter]::GetBytes([uint16]0x8664).CopyTo($bytes, 68)
+        [IO.File]::WriteAllBytes($path, $bytes)
+        Assert-NativeLauncher $path 'win-x64'
+        $bytes[68] = 0
+        [IO.File]::WriteAllBytes($path, $bytes)
+        Assert-Rejected { Assert-NativeLauncher $path 'win-x64' }
+    }
+    Test-Case 'valid and wrong-architecture Linux arm64 ELF' {
+        $path = Join-Path $stage 'unit-only-arm64-elf-header'
+        $bytes = [byte[]]::new(64)
+        $bytes[0] = 0x7f; $bytes[1] = 0x45; $bytes[2] = 0x4c; $bytes[3] = 0x46
+        $bytes[4] = 2; $bytes[5] = 1; $bytes[18] = 183
+        [IO.File]::WriteAllBytes($path, $bytes)
+        Assert-NativeLauncher $path 'linux-arm64'
+        Assert-Rejected { Assert-NativeLauncher $path 'linux-x64' }
+    }
+    Test-Case 'all Persistence package source-offer READMEs retained byte-for-byte' {
+        $noticeFeed = Join-Path $root 'notice-feed'
+        $noticeStage = Join-Path $root 'notice-stage'
+        New-Item -ItemType Directory -Path $noticeFeed, $noticeStage | Out-Null
+        foreach ($id in @('SharpClaw.Persistence', 'SharpClaw.Persistence.JSONColdStore',
+            'SharpClaw.Persistence.PostgreSQL', 'SharpClaw.Persistence.SQLite', 'SharpClaw.Persistence.SQLServer')) {
+            New-NoticePackage $noticeFeed "$id.1.0.0" @{
+                "$id.nuspec" = '<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd"><metadata><readme>README.md</readme></metadata></package>'
+                'README.md' = "Source offer for $id`nhttps://github.com/SharpClaw-NET/SharpClaw.Persistence`n"
+                'LICENSE.md' = 'unit-test license notice'
+                'THIRD-PARTY-NOTICES.txt' = 'unit-test third-party notice'
+            }
+        }
+        Copy-PackageNotices $noticeFeed $noticeStage
+        foreach ($archive in Get-ChildItem $noticeFeed -Filter '*.nupkg') {
+            $zip = [IO.Compression.ZipFile]::OpenRead($archive.FullName)
+            try {
+                foreach ($entry in $zip.Entries) {
+                    $stream = $entry.Open()
+                    try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)) }
+                    finally { $stream.Dispose() }
+                    Assert-FileDigest (Join-Path $noticeStage "legal/$($archive.BaseName)/$($entry.FullName)") $hash $entry.Length
+                }
+            } finally { $zip.Dispose() }
+        }
+    }
+    Test-Case 'nuspec-named nonstandard README retained' {
+        $noticeFeed = Join-Path $root 'named-readme-feed'
+        $noticeStage = Join-Path $root 'named-readme-stage'
+        New-Item -ItemType Directory -Path $noticeFeed, $noticeStage | Out-Null
+        New-NoticePackage $noticeFeed 'Named.Module.1.0.0' @{
+            'Named.Module.nuspec' = '<package><metadata><readme>docs/SourceOffer.md</readme></metadata></package>'
+            'docs/SourceOffer.md' = 'unit-test source offer'
+        }
+        Copy-PackageNotices $noticeFeed $noticeStage
+        if ([IO.File]::ReadAllText((Join-Path $noticeStage 'legal/Named.Module.1.0.0/docs/SourceOffer.md')) -cne 'unit-test source offer') {
+            throw 'Declared source-offer readme omitted or modified.'
+        }
+    }
+    Test-Case 'root source offer identifies SharpClaw and its repository' {
+        $license = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../LICENSE.md'))
+        if ($license -notmatch 'included with SharpClaw' -or $license -match 'mk8\.identity' -or
+            $license -notmatch 'https://github\.com/SharpClaw-NET/SharpClaw') { throw 'Incorrect root source offer.' }
+    }
+    Test-Case 'unsafe or missing declared README fails closed' {
+        foreach ($readme in @('../escape.md', '/absolute.md', 'https://example.invalid/offer.md', 'missing.md')) {
+            $caseRoot = Join-Path $root ([guid]::NewGuid().ToString('N'))
+            $noticeFeed = Join-Path $caseRoot 'feed'
+            $noticeStage = Join-Path $caseRoot 'stage'
+            New-Item -ItemType Directory -Path $noticeFeed, $noticeStage -Force | Out-Null
+            New-NoticePackage $noticeFeed 'Unsafe.Module.1.0.0' @{
+                'Unsafe.Module.nuspec' = "<package><metadata><readme>$readme</readme></metadata></package>"
+            }
+            Assert-Rejected { Copy-PackageNotices $noticeFeed $noticeStage }
+        }
+    }
+    Test-Case 'nuspec cannot resolve external XML entities' {
+        $noticeFeed = Join-Path $root 'dtd-feed'
+        $noticeStage = Join-Path $root 'dtd-stage'
+        New-Item -ItemType Directory -Path $noticeFeed, $noticeStage | Out-Null
+        New-NoticePackage $noticeFeed 'Entity.Module.1.0.0' @{
+            'Entity.Module.nuspec' = '<!DOCTYPE package [<!ENTITY offer SYSTEM "https://example.invalid/offer">]><package><metadata><readme>&offer;</readme></metadata></package>'
+        }
+        Assert-Rejected { Copy-PackageNotices $noticeFeed $noticeStage }
     }
     Write-Host "Publishing behavioral tests: $script:passed passed; zero skipped."
 } finally {

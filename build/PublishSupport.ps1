@@ -144,8 +144,31 @@ function Copy-PackageNotices {
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
         $zip = [IO.Compression.ZipFile]::OpenRead($archive.FullName)
         try {
+            $declaredReadmes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            foreach ($nuspec in $zip.Entries | Where-Object { $_.FullName -match '^[^/]+\.nuspec$' }) {
+                $settings = [Xml.XmlReaderSettings]::new()
+                $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
+                $settings.XmlResolver = $null
+                $stream = $nuspec.Open()
+                $reader = $null
+                try {
+                    $reader = [Xml.XmlReader]::Create($stream, $settings)
+                    $document = [Xml.Linq.XDocument]::Load($reader)
+                    foreach ($readme in $document.Root.Elements() | Where-Object { $_.Name.LocalName -eq 'metadata' } |
+                        ForEach-Object { $_.Elements() } | Where-Object { $_.Name.LocalName -eq 'readme' }) {
+                        $path = $readme.Value
+                        $null = Resolve-PayloadPath $directory $path
+                        if ($null -eq $zip.GetEntry($path)) { throw "Missing declared package readme '$path'." }
+                        $null = $declaredReadmes.Add($path)
+                    }
+                } finally {
+                    if ($null -ne $reader) { $reader.Dispose() }
+                    $stream.Dispose()
+                }
+            }
             foreach ($entry in $zip.Entries | Where-Object {
-                $_.FullName -match '(^|/)(LICENSE[^/]*|THIRD-PARTY-NOTICES[^/]*)$|^[^/]+\.nuspec$'
+                $_.FullName -match '(^|/)(LICENSE[^/]*|THIRD-PARTY-NOTICES[^/]*|README[^/]*)$|^[^/]+\.nuspec$' -or
+                $declaredReadmes.Contains($_.FullName)
             }) {
                 $destination = Resolve-PayloadPath $directory $entry.FullName
                 New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
@@ -188,7 +211,8 @@ function Assert-NativeLauncher {
             }
             { $_ -in @('osx-x64', 'osx-arm64') } {
                 $cpu = if ($Rid -eq 'osx-x64') { 0x1000007 } else { 0x100000c }
-                if ([BitConverter]::ToUInt32($header, 0) -ne 0xfeedfacf -or [BitConverter]::ToUInt32($header, 4) -ne $cpu) {
+                # MH_MAGIC_64: an untyped 0xfeedfacf PowerShell literal is signed.
+                if ([BitConverter]::ToUInt32($header, 0) -ne [uint32]4277009103 -or [BitConverter]::ToUInt32($header, 4) -ne $cpu) {
                     throw "macOS launcher does not match $Rid Mach-O architecture."
                 }
             }
