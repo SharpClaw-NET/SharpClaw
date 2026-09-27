@@ -27,10 +27,17 @@
     Runtime identifier shorthand for Runtime builds. Valid shorthands are win,
     linux, osx, and all.
 
+.PARAMETER BomRoot
+    Required frozen graph directory containing feed, bundle, and bom-manifest.json.
+
+.PARAMETER BomManifestSha256
+    Required independently verified SHA-256 of bom-manifest.json.
+
+.PARAMETER InstallerRevision
+    Monotonic 0.5.0 preview revision, shared by binary, MSIX, and Debian identities.
+
 .EXAMPLE
-    .\scripts\publish.ps1 -Include Application -Rid win
-    .\scripts\publish.ps1 -Include Server -ServerRid linux
-    .\scripts\publish.ps1 -Include Runtime -RuntimeRid win -SkipZip
+    .\scripts\publish.ps1 -BomRoot C:\artifacts\bom -BomManifestSha256 <verified-sha256>
 #>
 param(
     [string]$Include = "All",
@@ -187,6 +194,7 @@ function Invoke-Dotnet {
 function Complete-Deployment {
     param([string]$Type, [string]$TargetRid, [string]$StageDir, [string]$RuntimeDir, [string]$ZipPath)
     $null = Assert-PublishBom $BomRoot $BomManifestSha256
+    Assert-InstallerSource $repoRoot $sourceCommit
     Assert-NoActiveSecrets $StageDir
     Assert-NativeLauncher (Join-Path $RuntimeDir (Get-ExeName 'SharpClaw.Runtime.Host' $TargetRid)) $TargetRid
     Assert-NativeLauncher (Join-Path $RuntimeDir (Get-ExeName 'SharpClaw.SidecarHost.OutOfProcess' $TargetRid)) $TargetRid

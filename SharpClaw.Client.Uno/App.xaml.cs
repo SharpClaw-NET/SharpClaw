@@ -33,7 +33,7 @@ public partial class App : Application
         var frontendInstance = new FrontendInstanceService();
         var loggingOptions = SharpClawLoggingOptions.FromConfiguration(
             new ConfigurationBuilder()
-                .AddLocalEnvironment(isDevelopment: false)
+                .AddLocalEnvironment(isDevelopment: false, instancePaths: frontendInstance.Paths)
                 .Build());
         _logging = SharpClawLogRuntime.Create(
             "uno",

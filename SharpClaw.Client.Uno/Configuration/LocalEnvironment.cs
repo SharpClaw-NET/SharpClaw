@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Shared.Security;
+using SharpClaw.Services;
 using Supprocom.Secrets;
 
 namespace SharpClaw.Configuration;
@@ -60,7 +61,17 @@ public static class LocalEnvironment
         bool isDevelopment = false,
         SharpClawInstancePaths? instancePaths = null)
     {
-        var envDir = GetEnvironmentDirectory();
+        var assemblyDirectory = GetEnvironmentDirectory();
+        string envDir;
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(SharpClawEnvironmentDirectory.OverrideVariable)))
+            envDir = SharpClawEnvironmentDirectory.Resolve(assemblyDirectory);
+        else if (isDevelopment)
+            envDir = assemblyDirectory;
+        else
+        {
+            instancePaths ??= new FrontendInstanceService().Paths;
+            envDir = SharpClawEnvironmentDirectory.Prepare(assemblyDirectory, instancePaths.ConfigDirectory);
+        }
         return builder.AddSupprocomSecrets(
             CreateSecretsOptions(envDir, isDevelopment, instancePaths));
     }
@@ -82,7 +93,8 @@ public static class LocalEnvironment
         new()
         {
             EnvironmentName = isDevelopment ? "Development" : "Production",
-            FileOverridesProcessEnvironment = true,
+            FileOverridesProcessEnvironment = string.IsNullOrWhiteSpace(
+                Environment.GetEnvironmentVariable(SharpClawEnvironmentDirectory.OverrideVariable)),
             File =
             {
                 Directory = envDir,

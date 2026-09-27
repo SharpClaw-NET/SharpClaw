@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Configuration;
 using SharpClaw.Shared.Instances;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Services;
 
@@ -29,6 +30,20 @@ public sealed class FrontendInstanceService
             ? Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT")
             : explicitInstanceRoot;
 
+        var installedRoot = ResolveInstalledFrontendRoot(
+            AppContext.BaseDirectory,
+            string.IsNullOrWhiteSpace(sharedRootOverride)
+                ? SharpClawAppDataPaths.GetSharpClawRootDirectory()
+                : Path.GetFullPath(sharedRootOverride),
+            OperatingSystem.IsWindows());
+        if (string.IsNullOrWhiteSpace(resolvedInstanceRoot) && installedRoot is not null)
+        {
+            resolvedInstanceRoot = installedRoot;
+            // MSIX's physical directory contains the version. Use a stable identity
+            // anchor so an upgrade retains instance IDs, keys, configuration, and data.
+            installAnchorOverride ??= installedRoot;
+        }
+
         Paths = new SharpClawInstancePaths(
             SharpClawInstanceKind.Frontend,
             resolvedInstanceRoot,
@@ -39,6 +54,11 @@ public sealed class FrontendInstanceService
     }
 
     public SharpClawInstancePaths Paths { get; }
+
+    internal static string? ResolveInstalledFrontendRoot(string installDirectory, string sharedRoot, bool isWindows)
+        => isWindows && File.Exists(Path.Combine(installDirectory, "sharpclaw-installation.json"))
+            ? Path.Combine(sharedRoot, "installed", "com.mkn8rn.SharpClaw", "frontend")
+            : null;
 
     public string BundledBackendInstanceRoot => Path.Combine(Paths.InstanceRoot, "stack", "backend");
 

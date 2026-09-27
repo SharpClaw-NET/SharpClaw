@@ -42,6 +42,8 @@ if (Get-ChildItem -LiteralPath $OutputDir -Force) { throw 'Installer output must
 $work = Join-Path $OutputDir '.msix-stage'
 New-Item -ItemType Directory -Path $work | Out-Null
 Get-ChildItem -LiteralPath $stage -Force | Copy-Item -Destination $work -Recurse
+[pscustomobject]@{ Identity = 'com.mkn8rn.SharpClaw'; SourceCommit = $manifest.SourceCommit } |
+    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $work 'sharpclaw-installation.json') -Encoding utf8
 [xml]$appx = Get-Content -LiteralPath (Join-Path $repoRoot 'packaging/windows/AppxManifest.xml') -Raw
 $appx.Package.Identity.Version = $manifest.InstallerVersion
 $appx.Save((Join-Path $work 'AppxManifest.xml'))

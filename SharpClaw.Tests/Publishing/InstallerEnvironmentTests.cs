@@ -1,4 +1,5 @@
 using SharpClaw.Shared.Security;
+using SharpClaw.Services;
 
 namespace SharpClaw.Tests.Publishing;
 
@@ -37,5 +38,28 @@ internal sealed class InstallerEnvironmentTests
     {
         Action prepare = () => SharpClawEnvironmentDirectory.Prepare("unused", "relative/config");
         prepare.Should().Throw<InvalidOperationException>();
+    }
+
+    [Test]
+    public void MsixStateRootDoesNotDependOnTheVersionedInstallationDirectory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"sharpclaw-install-profile-test-{Guid.NewGuid():N}");
+        var first = Path.Combine(root, "package-0.5.0.1");
+        var second = Path.Combine(root, "package-0.5.0.2");
+        var shared = Path.Combine(root, "user-state");
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(second);
+        try
+        {
+            File.WriteAllText(Path.Combine(first, "sharpclaw-installation.json"), "{}");
+            File.WriteAllText(Path.Combine(second, "sharpclaw-installation.json"), "{}");
+            var initial = FrontendInstanceService.ResolveInstalledFrontendRoot(first, shared, isWindows: true);
+            var upgraded = FrontendInstanceService.ResolveInstalledFrontendRoot(second, shared, isWindows: true);
+            initial.Should().Be(upgraded);
+            initial.Should().StartWith(shared);
+            FrontendInstanceService.ResolveInstalledFrontendRoot(first, shared, isWindows: false).Should().BeNull();
+            FrontendInstanceService.ResolveInstalledFrontendRoot(root, shared, isWindows: true).Should().BeNull();
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 }
