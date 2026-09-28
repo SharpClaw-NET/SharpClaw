@@ -60,14 +60,18 @@ state before an upgrade; uninstalling/reinstalling is not a data rollback.
 
 Before independent review or delivery, run `scripts/test-installed-msix.ps1` in
 stock Windows PowerShell 5.1 (`powershell.exe`, for its UI Automation assemblies)
-against the exact signed package in an interactive `SharpClawMSIXTest*` account
-or a disposable Windows Sandbox user. It refuses an existing installation or
-SharpClaw profile, checks the package/source/certificate identities, launches the
-registered AUMID, and requires one visible window, a real UI Automation boot
+against the exact signed package in an elevated, interactive `SharpClawMSIXTest*`
+account inside a disposable Windows VM. Pass its exact name through
+`-ExpectedGuestComputerName`; the gate refuses a different machine, account,
+existing installation, or SharpClaw profile. It checks the package, source, and
+certificate identities, launches the registered AUMID, and requires one visible
+window, a real UI Automation boot
 element plus screenshot, and the configured Runtime/Gateway processes within a
 deadline. Repeated activation must not leave duplicate windowless processes.
-Only this test user's temporary signer trust is added if necessary and removed;
-the package is uninstalled and removal verified. This gate is not owner delivery
+Full MSIX registration requires the signer in the machine's Trusted People store,
+so the gate adds it **only inside the disposable VM**, removes that exact certificate
+after testing, and checks its removal; it never changes the host's trust store.
+The package is uninstalled and removal verified. This gate is not owner delivery
 or approval. The startup journal is flushed independently of the window and DI
 under the user's `SharpClaw/diagnostics/startup` directory; it records stages and
 exception types/codes, never exception messages or configuration values.

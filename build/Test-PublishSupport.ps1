@@ -244,6 +244,21 @@ try {
         }
         Assert-Rejected { Copy-PackageNotices $noticeFeed $noticeStage }
     }
+    Test-Case 'installed MSIX gate requires an isolated guest and owns machine trust cleanup' {
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        $tokens = $null
+        $errors = $null
+        $null = [Management.Automation.Language.Parser]::ParseInput($gate, [ref]$tokens, [ref]$errors)
+        if (@($errors).Count -ne 0 -or
+            $gate -notmatch 'ExpectedGuestComputerName' -or
+            $gate -notmatch 'WindowsBuiltInRole\]::Administrator' -or
+            $gate -notmatch 'Cert:\\LocalMachine\\TrustedPeople' -or
+            $gate -match 'Cert:\\CurrentUser\\TrustedPeople' -or
+            $gate -notmatch 'Remove-Item -LiteralPath \$guestTrustPath' -or
+            $gate -notmatch 'Temporary guest signer trust survived cleanup') {
+            throw 'The installed gate must use the disposable guest machine store and verify exact trust cleanup.'
+        }
+    }
     Write-Host "Publishing behavioral tests: $script:passed passed; zero skipped."
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force

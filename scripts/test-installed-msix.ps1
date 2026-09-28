@@ -1,13 +1,15 @@
 #requires -Version 5.1
 <# Destructive ONLY to a dedicated clean test user's exact SharpClaw installation.
-   Run in that user's interactive desktop (or disposable Windows Sandbox).
-   Never run as the owner's normal account; never modifies machine-wide trust. #>
+   Run elevated in that user's interactive, disposable Windows VM desktop.
+   Temporarily trusts the exact signer in that GUEST's machine store, not on the host.
+   Never run as the owner's normal account. #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$PackagePath,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedPackageSha256,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{40}$')][string]$ExpectedSourceCommit,
     [Parameter(Mandatory)][string]$ExpectedTestUserSid,
+    [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9-]{1,15}$')][string]$ExpectedGuestComputerName,
     [Parameter(Mandatory)][string]$CertificatePath,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedCertificateSha256,
     [Parameter(Mandatory)][string]$ReportDirectory,
@@ -23,6 +25,13 @@ if ($identity.User.Value -ne $ExpectedTestUserSid -or
     $account -notmatch '^(SharpClawMSIXTest[A-Za-z0-9_]*|WDAGUtilityAccount)$' -or
     [Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) {
     throw 'Run only as the specified dedicated test user in an interactive desktop.'
+}
+if (-not [string]::Equals([Environment]::MachineName, $ExpectedGuestComputerName,
+    [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Run only in the specified disposable Windows guest.'
+}
+if (-not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'Run in an elevated PowerShell desktop inside the disposable guest to trust this full MSIX.'
 }
 foreach ($expected in @(@($PackagePath, $ExpectedPackageSha256), @($CertificatePath, $ExpectedCertificateSha256))) {
     if ((Get-FileHash -LiteralPath $expected[0] -Algorithm SHA256).Hash -ne $expected[1]) { throw 'Test input hash mismatch.' }
@@ -94,11 +103,16 @@ public static class SharpClawInstalledProbe {
 }
 '@
 $package = $null
-$trustedByTest = $false
+$trustOwnedByTest = $false
 $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new([IO.File]::ReadAllBytes($CertificatePath))
 if ($certificate.Subject -ne 'CN=SharpClaw Dev' -or $certificate.NotAfter -le (Get-Date)) {
     $certificate.Dispose()
     throw 'Unexpected or expired test signer.'
+}
+$guestTrustPath = "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)"
+if (Test-Path -LiteralPath $guestTrustPath) {
+    $certificate.Dispose()
+    throw 'The guest already trusts this signer; use a clean VM so the gate can own and remove temporary trust.'
 }
 $result = [ordered]@{
     SourceCommit = $ExpectedSourceCommit; PackageSha256 = $ExpectedPackageSha256
@@ -134,10 +148,13 @@ try {
             throw 'Reject obsolete or mismatched installer identity.'
         }
     } finally { $zip.Dispose() }
-    # Scope any required development-signer trust exclusively to this disposable user.
-    if (-not (Test-Path "Cert:\CurrentUser\TrustedPeople\$($certificate.Thumbprint)")) {
-        $null = Import-Certificate -FilePath $CertificatePath -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople'
-        $trustedByTest = $true
+    # Full MSIX deployment checks the machine store. This is the disposable
+    # guest's TrustedPeople store, never the owner/host or a broad Root store.
+    # Own cleanup even when Import-Certificate fails after partially writing.
+    $trustOwnedByTest = $true
+    $null = Import-Certificate -FilePath $CertificatePath -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople'
+    if (-not (Test-Path -LiteralPath $guestTrustPath)) {
+        throw 'The exact signer was not added to the disposable guest TrustedPeople store.'
     }
     Add-AppxPackage -Path $PackagePath
     $package = Get-AppxPackage -Name 'com.mkn8rn.SharpClaw'
@@ -255,8 +272,14 @@ try {
         # Exact validated dedicated-user state only; never a broad profile or home.
         try { if (Test-Path -LiteralPath $profileRoot) { Remove-Item -LiteralPath $profileRoot -Recurse -Force } }
         catch { $cleanupFailures.Add('Test state cleanup failed: ' + $_.Exception.Message) }
-        try { if ($trustedByTest) { Remove-Item "Cert:\CurrentUser\TrustedPeople\$($certificate.Thumbprint)" } }
-        catch { $cleanupFailures.Add('Temporary test trust removal failed: ' + $_.Exception.Message) }
+        try {
+            if ($trustOwnedByTest -and (Test-Path -LiteralPath $guestTrustPath)) {
+                Remove-Item -LiteralPath $guestTrustPath -Force -Confirm:$false
+            }
+            if ($trustOwnedByTest -and (Test-Path -LiteralPath $guestTrustPath)) {
+                $cleanupFailures.Add('Temporary guest signer trust survived cleanup.')
+            }
+        } catch { $cleanupFailures.Add('Temporary guest signer trust removal failed: ' + $_.Exception.Message) }
         $result.CleanupVerified = $cleanupFailures.Count -eq 0
         if (-not $result.CleanupVerified) {
             $result.Success = $false
