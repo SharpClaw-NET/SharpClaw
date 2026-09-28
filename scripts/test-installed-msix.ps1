@@ -55,6 +55,8 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Automation;
 public static class SharpClawInstalledProbe {
+    static Task<bool> bootUiProbe;
+    static long bootUiProbeHandle;
     public delegate bool EnumCallback(IntPtr window, IntPtr state);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumCallback callback, IntPtr state);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
@@ -88,17 +90,25 @@ public static class SharpClawInstalledProbe {
         try { uint pid; Marshal.ThrowExceptionForHR(manager.ActivateApplication(aumid, "", 0, out pid)); return pid; }
         finally { Marshal.ReleaseComObject(manager); }
     }
-    public static bool HasVisibleBootUi(long handle, int timeoutMilliseconds) {
-        // UIA is an out-of-process COM call. Bound it independently so a stuck
-        // provider cannot defeat the enclosing installed-startup deadline.
-        var probe = Task.Run(() => {
-            var root = AutomationElement.FromHandle(new IntPtr(handle));
-            var condition = new PropertyCondition(AutomationElement.AutomationIdProperty, "SharpClawBoot");
-            var boot = root.FindFirst(TreeScope.Descendants, condition);
-            return boot != null && !boot.Current.IsOffscreen;
-        });
-        if (!probe.Wait(timeoutMilliseconds)) throw new TimeoutException("Boot UI Automation probe timed out.");
-        return probe.Result;
+    public static bool HasVisibleBootUi(long handle) {
+        // A slow UIA provider must not end the startup test after one short
+        // probe. Keep at most one outstanding COM call per visible window and
+        // let the caller's overall startup deadline bound the observation.
+        if (bootUiProbe == null || bootUiProbeHandle != handle) {
+            bootUiProbeHandle = handle;
+            bootUiProbe = Task.Run(() => FindVisibleBootUi(handle));
+            return false;
+        }
+        if (!bootUiProbe.IsCompleted) return false;
+        var visible = bootUiProbe.GetAwaiter().GetResult();
+        if (!visible) bootUiProbe = null;
+        return visible;
+    }
+    static bool FindVisibleBootUi(long handle) {
+        var root = AutomationElement.FromHandle(new IntPtr(handle));
+        var condition = new PropertyCondition(AutomationElement.AutomationIdProperty, "SharpClawBoot");
+        var boot = root.FindFirst(TreeScope.Descendants, condition);
+        return boot != null && !boot.Current.IsOffscreen;
     }
 }
 '@
@@ -188,14 +198,18 @@ try {
     do {
         $processes = @(Get-TestPackageProcesses)
         $clients = @($processes | Where-Object Name -eq 'SharpClaw.Client.Uno.exe')
-        if ($clients.Count -ne 1) { throw "Expected one client process, observed $($clients.Count)." }
+        if ($clients.Count -gt 1) { throw "Expected one client process, observed $($clients.Count)." }
+        if ($clients.Count -eq 0) {
+            Start-Sleep -Milliseconds 200
+            continue
+        }
         $windows = @([SharpClawInstalledProbe]::VisibleWindows([uint32]$clients[0].ProcessId))
         if ($windows.Count -gt 1) { throw 'Duplicate top-level application windows.' }
         if ($windows.Count -eq 1 -and $windows[0].Handle -ne 0) {
             $client = Get-Process -Id $clients[0].ProcessId
             if ($client.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Visible window lacks the expected main window handle.' }
             $result.Window = $windows[0]
-            if (-not $result.BootUiObserved -and [SharpClawInstalledProbe]::HasVisibleBootUi($windows[0].Handle, 2000)) {
+            if (-not $result.BootUiObserved -and [SharpClawInstalledProbe]::HasVisibleBootUi($windows[0].Handle)) {
                 $result.BootUiObserved = $true
                 Save-WindowCapture $windows[0].Handle
             }
