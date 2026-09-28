@@ -13,7 +13,7 @@ param(
     [Parameter(Mandatory)][string]$CertificatePath,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedCertificateSha256,
     [Parameter(Mandatory)][string]$ReportDirectory,
-    [ValidateRange(10, 120)][int]$StartupTimeoutSeconds = 60
+    [ValidateRange(10, 600)][int]$StartupTimeoutSeconds = 60
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -128,13 +128,25 @@ $result = [ordered]@{
     SourceCommit = $ExpectedSourceCommit; PackageSha256 = $ExpectedPackageSha256
     TestUserSid = $ExpectedTestUserSid; StartUtc = [DateTime]::UtcNow.ToString('O')
     Aumid = $null; ActivatedProcessId = 0; Window = $null; BootUiObserved = $false
-    RuntimeObserved = $false; GatewayObserved = $false; CleanupVerified = $false; Success = $false
+    RuntimeObserved = $false; GatewayObserved = $false; ProcessSnapshotTimeouts = 0
+    CleanupVerified = $false; Success = $false
 }
 function Get-TestPackageProcesses {
+    param([switch]$AllowTransientTimeout)
     if ($null -eq $package) { return @() }
-    return @(Get-CimInstance Win32_Process -OperationTimeoutSec 3 | Where-Object {
-        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($package.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase)
-    })
+    try {
+        return @(Get-CimInstance Win32_Process -Filter "Name LIKE 'SharpClaw%'" -OperationTimeoutSec 10 | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath.StartsWith($package.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase)
+        })
+    } catch {
+        # A cold Windows guest can temporarily time out the process provider.
+        # Only observation may retry; cleanup must still prove an exact snapshot.
+        if ($AllowTransientTimeout -and $_.Exception.Message -match 'Timed out') {
+            $result.ProcessSnapshotTimeouts++
+            return @()
+        }
+        throw
+    }
 }
 function Save-WindowCapture {
     param([long]$Handle)
@@ -196,7 +208,7 @@ try {
     $result.ActivatedProcessId = [SharpClawInstalledProbe]::Activate($result.Aumid)
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     do {
-        $processes = @(Get-TestPackageProcesses)
+        $processes = @(Get-TestPackageProcesses -AllowTransientTimeout)
         $clients = @($processes | Where-Object Name -eq 'SharpClaw.Client.Uno.exe')
         if ($clients.Count -gt 1) { throw "Expected one client process, observed $($clients.Count)." }
         if ($clients.Count -eq 0) {
@@ -243,6 +255,8 @@ try {
     $result.Success = $true
 } catch {
     $result['Failure'] = $_.Exception.Message
+    $result['FailureType'] = $_.Exception.GetType().FullName
+    $result['FailurePosition'] = $_.InvocationInfo.ScriptLineNumber
     throw
 } finally {
     $cleanupFailures = [Collections.Generic.List[string]]::new()

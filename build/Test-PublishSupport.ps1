@@ -257,6 +257,9 @@ try {
             $gate -notmatch 'Remove-Item -LiteralPath \$guestTrustPath' -or
             $gate -notmatch 'Temporary guest signer trust survived cleanup' -or
             $gate -notmatch 'if \(!bootUiProbe.IsCompleted\) return false;' -or
+            $gate -notmatch 'Get-TestPackageProcesses -AllowTransientTimeout' -or
+            $gate -notmatch 'ProcessSnapshotTimeouts' -or
+            $gate -notmatch 'Name LIKE ''SharpClaw%''' -or
             $gate -match 'Boot UI Automation probe timed out') {
             throw 'The installed gate must use the disposable guest machine store and verify exact trust cleanup.'
         }
