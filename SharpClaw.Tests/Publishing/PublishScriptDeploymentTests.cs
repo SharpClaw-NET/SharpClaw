@@ -16,7 +16,6 @@ public sealed class PublishScriptDeploymentTests
             "$deploymentTypes = @(\"Application\", \"Server\", \"Runtime\")",
             "the publish selector must expose the requested public deployment type names exactly");
         script.Should().NotContain("return \"Uno\"");
-        script.Should().NotContain("Desktop");
         script.Should().NotContain("Publish-Uno");
         script.Should().NotContain("Publish-Core");
         script.Should().NotContain("Publish-MSIX");
@@ -91,6 +90,7 @@ public sealed class PublishScriptDeploymentTests
             "default publish output should remain at the repository publish/ directory");
     }
 
+    [TestCase("Desktop")]
     [TestCase("Uno")]
     [TestCase("Core")]
     [TestCase("MSIX")]
