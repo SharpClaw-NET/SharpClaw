@@ -336,6 +336,18 @@ try {
             throw 'Uno desktop publish must not restore unrelated mobile workloads.'
         }
     }
+    Test-Case 'both native ICU package variants retain upstream licensing' {
+        $policy = Get-Content (Join-Path $PSScriptRoot 'ThirdPartyNotices.json') -Raw | ConvertFrom-Json -AsHashtable
+        $windows = $policy.PackageDocuments['Uno.icu-win/77.3.2']
+        $macos = $policy.PackageDocuments['Uno.icu-macos/77.3.2']
+        if ($windows.License -ne 'Apache-2.0 AND Unicode-3.0' -or
+            $macos.License -ne $windows.License -or
+            @($windows.Documents).Count -ne 2 -or
+            @($macos.Documents).Count -ne 2 -or
+            $macos.Documents[1].Sha256 -ne $windows.Documents[1].Sha256) {
+            throw 'A native ICU package variant has no complete pinned licence pair.'
+        }
+    }
     Write-Host "Publishing behavioral tests: $script:passed passed; zero skipped."
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force

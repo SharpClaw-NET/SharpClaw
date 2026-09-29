@@ -62,6 +62,21 @@
         }
       ]
     },
+    "Uno.icu-macos/77.3.2": {
+      "License": "Apache-2.0 AND Unicode-3.0",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-UNO-LICENSE.md",
+          "Url": "https://raw.githubusercontent.com/unoplatform/uno.icu/03cf285e603cb3e2f9db0b129e844ed5a43a90eb/LICENSE.md",
+          "Sha256": "b07751cab211249b07c0e67610304824bbd462772f8b1268030992b71c2a580f"
+        },
+        {
+          "Name": "UPSTREAM-ICU-LICENSE.txt",
+          "Url": "https://raw.githubusercontent.com/unicode-org/icu/release-77-1/icu4c/LICENSE",
+          "Sha256": "1e881ecf2862d01e6e5bc2b861e46886d2a6fb01499c0c508a209a7271b13cf2"
+        }
+      ]
+    },
     "Supprocom.JSONColdStore/0.1.0-alpha.10": {
       "License": "AGPL-3.0-only",
       "Documents": [
