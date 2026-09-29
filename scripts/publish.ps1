@@ -282,6 +282,7 @@ function Publish-Application {
         "publish", $clientProject,
         "-c", $Configuration,
         "-f", $clientTfm,
+        "-p:SharpClawDesktopPublish=true",
         "-r", $TargetRid,
         "--self-contained",
         "-p:BundleBackend=false",

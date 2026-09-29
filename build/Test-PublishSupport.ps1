@@ -328,6 +328,14 @@ try {
             throw 'The installed gate must use the disposable guest machine store and verify exact trust cleanup.'
         }
     }
+    Test-Case 'desktop publish narrows the multi-target restore graph' {
+        $publisher = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/publish.ps1'))
+        $project = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../SharpClaw.Client.Uno/SharpClaw.Client.Uno.csproj'))
+        if ($publisher -notmatch '-p:SharpClawDesktopPublish=true' -or
+            -not $project.Contains('<TargetFrameworks Condition="''$(SharpClawDesktopPublish)''==''true''">net10.0-desktop</TargetFrameworks>')) {
+            throw 'Uno desktop publish must not restore unrelated mobile workloads.'
+        }
+    }
     Write-Host "Publishing behavioral tests: $script:passed passed; zero skipped."
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force

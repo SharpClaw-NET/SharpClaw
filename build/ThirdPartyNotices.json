@@ -194,6 +194,11 @@
       "Package": "System.Interactive.Async/7.0.0"
     },
     {
+      "ContributionPath": "sharpclaw_providers_llamasharp/System.Linq.Async.dll",
+      "Sha256": "9023bdc38c02823fd86a2100350455ec0521fbef0267ad7e62ce38b3c44df608",
+      "Package": "System.Linq.Async/7.0.0"
+    },
+    {
       "ContributionPath": "sharpclaw_providers_llamasharp/System.Numerics.Tensors.dll",
       "Sha256": "cd6878734a1fee6ecb50e3e151576cb7c7547bf2ddf5d480e95c01549e156c8c",
       "Package": "System.Numerics.Tensors/10.0.5"
