@@ -159,7 +159,7 @@ public sealed class DefaultModuleSetHostGateTests
     }
 
     private static HashSet<int> FindSidecarProcessIds() =>
-        Process.GetProcessesByName("SharpClaw.SidecarHost.OutOfProcess")
+        Process.GetProcessesByName("SharpClaw.Runtime.Host")
             .Select(process => process.Id)
             .ToHashSet();
 

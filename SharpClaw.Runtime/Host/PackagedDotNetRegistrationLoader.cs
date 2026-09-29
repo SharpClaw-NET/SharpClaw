@@ -788,13 +788,14 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             CancellationToken cancellationToken)
         {
             var configuredPath = configuration["Packages:OutOfProcessSidecarHostPath"];
-            var executablePath = string.IsNullOrWhiteSpace(configuredPath)
+            var useBundledRuntime = string.IsNullOrWhiteSpace(configuredPath);
+            var executablePath = useBundledRuntime
                 ? Path.Combine(
                     AppContext.BaseDirectory,
                     OperatingSystem.IsWindows()
-                        ? "SharpClaw.SidecarHost.OutOfProcess.exe"
-                        : "SharpClaw.SidecarHost.OutOfProcess")
-                : Path.GetFullPath(configuredPath);
+                        ? "SharpClaw.Runtime.Host.exe"
+                        : "SharpClaw.Runtime.Host")
+                : Path.GetFullPath(configuredPath!);
             if (!File.Exists(executablePath))
             {
                 throw new FileNotFoundException(
@@ -819,6 +820,8 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             };
             if (executablePath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
                 start.ArgumentList.Add(executablePath);
+            if (useBundledRuntime)
+                start.ArgumentList.Add(RuntimeLauncher.SidecarModeArgument);
             start.Environment[OutOfProcessSidecarHostProtocol.RegistrationDirectoryEnvironmentVariable] =
                 registrationDirectory;
             start.Environment[OutOfProcessSidecarHostProtocol.ControlAddressEnvironmentVariable] =
