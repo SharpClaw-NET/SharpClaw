@@ -125,6 +125,7 @@ function Assert-PublishedStage {
         throw 'Invalid SharpClaw 0.5.0 installer identity.'
     }
     Assert-FileInventory $rootPath @($manifest.Files) @('publish-manifest.json')
+    Assert-RedistributionInventory $rootPath
     return $manifest
 }
 
@@ -175,6 +176,383 @@ function Copy-PackageNotices {
                 [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destination, $false)
             }
         } finally { $zip.Dispose() }
+    }
+}
+
+function Get-VerifiedLegalDocument {
+    param([string]$Url, [string]$Sha256, [string]$CacheRoot)
+    if ($Url -notmatch '^https://(raw\.githubusercontent\.com|www\.apache\.org|www\.gnu\.org)/' -or
+        $Sha256 -notmatch '^[a-fA-F0-9]{64}$') {
+        throw "Unapproved legal-document source '$Url'."
+    }
+    New-Item -ItemType Directory -Path $CacheRoot -Force | Out-Null
+    $path = Join-Path $CacheRoot "$($Sha256.ToLowerInvariant()).txt"
+    if (-not (Test-Path -LiteralPath $path)) {
+        $temporary = "$path.partial"
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $temporary -MaximumRedirection 5
+            Assert-FileDigest $temporary $Sha256
+            Move-Item -LiteralPath $temporary -Destination $path
+        } finally {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        }
+    }
+    Assert-FileDigest $path $Sha256
+    return $path
+}
+
+function Get-ResolvedPackageArchive {
+    param([string]$Id, [string]$Version, [string]$CacheRoot)
+    $name = "$($Id.ToLowerInvariant()).$($Version.ToLowerInvariant()).nupkg"
+    $globalCache = $env:NUGET_PACKAGES
+    if (-not [string]::IsNullOrWhiteSpace($globalCache)) {
+        $restored = Join-Path $globalCache "$($Id.ToLowerInvariant())/$($Version.ToLowerInvariant())/$name"
+        if (Test-Path -LiteralPath $restored -PathType Leaf) { return $restored }
+    }
+    New-Item -ItemType Directory -Path $CacheRoot -Force | Out-Null
+    $path = Join-Path $CacheRoot $name
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        $temporary = "$path.partial"
+        $url = "https://api.nuget.org/v3-flatcontainer/$($Id.ToLowerInvariant())/$($Version.ToLowerInvariant())/$name"
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $temporary -MaximumRedirection 5
+            Move-Item -LiteralPath $temporary -Destination $path
+        } finally {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        }
+    }
+    return $path
+}
+
+function Get-NuspecMetadata {
+    param([IO.Compression.ZipArchive]$Archive, [string]$ExpectedId, [string]$ExpectedVersion)
+    $nuspecs = @($Archive.Entries | Where-Object { $_.FullName -match '^[^/\\]+\.nuspec$' })
+    if ($nuspecs.Count -ne 1) { throw "Package $ExpectedId/$ExpectedVersion needs exactly one root nuspec." }
+    $settings = [Xml.XmlReaderSettings]::new()
+    $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
+    $settings.XmlResolver = $null
+    $stream = $nuspecs[0].Open()
+    $reader = $null
+    try {
+        $reader = [Xml.XmlReader]::Create($stream, $settings)
+        $document = [Xml.Linq.XDocument]::Load($reader)
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        $stream.Dispose()
+    }
+    $metadata = @($document.Root.Elements() | Where-Object { $_.Name.LocalName -eq 'metadata' })
+    if ($metadata.Count -ne 1) { throw "Package $ExpectedId/$ExpectedVersion has no unique nuspec metadata." }
+    $values = @{}
+    foreach ($element in $metadata[0].Elements()) { $values[$element.Name.LocalName] = $element }
+    if (-not $values.ContainsKey('id') -or -not $values.ContainsKey('version') -or
+        $values['id'].Value -ine $ExpectedId -or $values['version'].Value -ine $ExpectedVersion) {
+        throw "Package archive identity does not match $ExpectedId/$ExpectedVersion."
+    }
+    $license = if ($values.ContainsKey('license')) { $values['license'].Value.Trim() } else { '' }
+    $licenseType = if ($values.ContainsKey('license') -and $null -ne $values['license'].Attribute('type')) {
+        $values['license'].Attribute('type').Value
+    } else { '' }
+    $repository = if ($values.ContainsKey('repository')) { $values['repository'] } else { $null }
+    return [pscustomobject]@{
+        Nuspec = $nuspecs[0]
+        License = $license
+        LicenseType = $licenseType
+        Copyright = if ($values.ContainsKey('copyright')) { $values['copyright'].Value.Trim() } else { '' }
+        Readme = if ($values.ContainsKey('readme')) { $values['readme'].Value.Trim() } else { '' }
+        RepositoryUrl = if ($null -ne $repository -and $null -ne $repository.Attribute('url')) {
+            $repository.Attribute('url').Value
+        } else { '' }
+        RepositoryCommit = if ($null -ne $repository -and $null -ne $repository.Attribute('commit')) {
+            $repository.Attribute('commit').Value
+        } else { '' }
+    }
+}
+
+function Copy-ResolvedDependencyNotices {
+    param([string]$StageRoot, [string]$CacheRoot,
+        [string]$PolicyPath = (Join-Path $PSScriptRoot 'ThirdPartyNotices.json'))
+    $policy = Get-Content -LiteralPath $PolicyPath -Raw | ConvertFrom-Json -AsHashtable
+    if ($policy.SchemaVersion -ne 1) { throw 'Unknown third-party-notice policy version.' }
+    $depsFiles = @(Get-ChildItem -LiteralPath $StageRoot -Recurse -File -Filter '*.deps.json')
+    if ($depsFiles.Count -eq 0) { throw 'A published stage needs resolved dependency manifests.' }
+    $resolved = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($depsFile in $depsFiles) {
+        $deps = Get-Content -LiteralPath $depsFile.FullName -Raw | ConvertFrom-Json -AsHashtable
+        foreach ($key in $deps.libraries.Keys) {
+            $type = $deps.libraries[$key].type
+            if ($type -notin @('package', 'runtimepack')) { continue }
+            if ($key -notmatch '^(?:runtimepack\.)?([A-Za-z0-9][A-Za-z0-9_.+-]*)/([A-Za-z0-9][A-Za-z0-9.+-]*)$') {
+                throw "Unsafe dependency identity '$key'."
+            }
+            $id = $Matches[1]; $version = $Matches[2]
+            if ($id.StartsWith('SharpClaw.', [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $identity = "$id/$version"
+            if (-not $resolved.ContainsKey($identity)) {
+                $resolved.Add($identity, [pscustomobject]@{ Id = $id; Version = $version })
+            }
+        }
+    }
+    if ($resolved.Count -eq 0) { throw 'No resolved third-party dependencies were found.' }
+
+    # Some reviewed contribution nupkgs embed third-party DLLs as contentFiles
+    # without a .deps.json. Bind those exact bytes to their source packages.
+    $bundled = [Collections.Generic.List[object]]::new()
+    $bundledByPackage = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($rule in @($policy.BundledAssets)) {
+        if ($rule.ContributionPath -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
+            $rule.Package -notmatch '^([A-Za-z0-9][A-Za-z0-9_.+-]*)/([A-Za-z0-9][A-Za-z0-9.+-]*)$') {
+            throw 'Unsafe bundled dependency policy entry.'
+        }
+        $packageId = $Matches[1]; $packageVersion = $Matches[2]
+        $module = $rule.ContributionPath.Split('/')[0]
+        $present = $false
+        foreach ($prefix in @('contributions', 'backend/contributions')) {
+            $moduleDirectory = Join-Path $StageRoot "$prefix/$module"
+            if (-not (Test-Path -LiteralPath $moduleDirectory -PathType Container)) { continue }
+            $present = $true
+            $relative = "$prefix/$($rule.ContributionPath)"
+            Assert-FileDigest (Resolve-PayloadPath $StageRoot $relative) $rule.Sha256
+            $bundled.Add([pscustomobject]@{
+                Path = $relative; Sha256 = $rule.Sha256; Package = $rule.Package
+            })
+        }
+        if (-not $present) { continue }
+        if (-not $resolved.ContainsKey($rule.Package)) {
+            $resolved.Add($rule.Package, [pscustomobject]@{ Id = $packageId; Version = $packageVersion })
+        }
+        if (-not $bundledByPackage.ContainsKey($rule.Package)) {
+            $bundledByPackage.Add($rule.Package, [Collections.Generic.List[object]]::new())
+        }
+        $bundledByPackage[$rule.Package].Add($rule)
+    }
+
+    $assetNames = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    $assetPaths = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in Get-ChildItem -LiteralPath $StageRoot -Recurse -File) {
+        $relative = [IO.Path]::GetRelativePath($StageRoot, $file.FullName).Replace('\', '/')
+        if ($relative -match '^(legal|provenance)/' -or
+            $file.Name -notmatch '(?i)\.(dll|exe|so|dylib|a|dat|ttf|otf|woff2?)$' -or
+            $file.Name -match '^SharpClaw\.') { continue }
+        if (-not $assetNames.ContainsKey($file.Name)) {
+            $assetNames.Add($file.Name, [Collections.Generic.List[string]]::new())
+        }
+        $assetNames[$file.Name].Add($relative)
+        $assetPaths[$relative] = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    }
+
+    $records = [Collections.Generic.List[object]]::new()
+    $noticeCache = Join-Path $CacheRoot 'documents'
+    foreach ($identity in @($resolved.Keys | Sort-Object)) {
+        $item = $resolved[$identity]
+        $archivePath = Get-ResolvedPackageArchive $item.Id $item.Version (Join-Path $CacheRoot 'packages')
+        $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+        $zip = [IO.Compression.ZipFile]::OpenRead($archivePath)
+        try {
+            $metadata = Get-NuspecMetadata $zip $item.Id $item.Version
+            if ($bundledByPackage.ContainsKey($identity)) {
+                foreach ($rule in $bundledByPackage[$identity]) {
+                    $verified = $false
+                    foreach ($entry in $zip.Entries | Where-Object { $_.Name -ieq $rule.ContributionPath.Split('/')[-1] }) {
+                        $stream = $entry.Open()
+                        try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)) }
+                        finally { $stream.Dispose() }
+                        if ($hash -eq $rule.Sha256) { $verified = $true; break }
+                    }
+                    if (-not $verified) { throw "Source package $identity does not contain its bundled asset." }
+                }
+            }
+            $override = if ($policy.PackageDocuments.ContainsKey($identity)) { $policy.PackageDocuments[$identity] } else { $null }
+            $license = $metadata.License
+            if ($metadata.LicenseType -eq 'file') {
+                if ([string]::IsNullOrWhiteSpace($license)) { throw "Missing declared license file for $identity." }
+                $licenseExpression = "file:$license"
+            } elseif ($metadata.LicenseType -eq 'expression') {
+                $licenseExpression = $license
+            } elseif ($null -ne $override) {
+                $licenseExpression = $override.License
+            } else {
+                throw "No approved license expression or exact override for $identity."
+            }
+            if ($null -ne $override -and $metadata.LicenseType -eq 'expression' -and
+                -not $override.License.StartsWith($licenseExpression, [StringComparison]::Ordinal)) {
+                throw "Curated license identity disagrees with the nuspec for $identity."
+            }
+            if ($null -ne $override -and $metadata.LicenseType -eq 'expression') {
+                $licenseExpression = $override.License
+            }
+            if ([string]::IsNullOrWhiteSpace($licenseExpression)) { throw "Blank license for $identity." }
+            if ($licenseExpression -notmatch '^(file:|MIT$|Apache-2\.0(?: AND .+)?$|PostgreSQL$|AGPL-3\.0-(?:only|or-later)$|LGPL-2\.1-or-later$|MS-PL$)') {
+                throw "Unreviewed license expression '$licenseExpression' in $identity."
+            }
+            $directory = Join-Path $StageRoot "legal/third-party/$($item.Id).$($item.Version)"
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+            $documents = [Collections.Generic.List[object]]::new()
+            $seenEntries = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            $packageAssets = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            $declaredLicenseFound = $metadata.LicenseType -ne 'file'
+            $declaredReadmeFound = [string]::IsNullOrWhiteSpace($metadata.Readme)
+            foreach ($entry in $zip.Entries) {
+                if ([string]::IsNullOrEmpty($entry.Name)) { continue }
+                $null = Resolve-PayloadPath $directory $entry.FullName
+                if (-not $seenEntries.Add($entry.FullName)) { throw "Case-colliding archive entry in $identity." }
+                if ($assetNames.ContainsKey($entry.Name)) {
+                    foreach ($path in $assetNames[$entry.Name]) {
+                        $null = $assetPaths[$path].Add($identity)
+                        $null = $packageAssets.Add($path)
+                    }
+                }
+                $isDeclaredLicense = $metadata.LicenseType -eq 'file' -and $entry.FullName -ceq $metadata.License
+                $isDeclaredReadme = -not [string]::IsNullOrWhiteSpace($metadata.Readme) -and $entry.FullName -ceq $metadata.Readme
+                if ($isDeclaredLicense) { $declaredLicenseFound = $true }
+                if ($isDeclaredReadme) { $declaredReadmeFound = $true }
+                if ($entry.FullName -cne $metadata.Nuspec.FullName -and -not $isDeclaredLicense -and
+                    -not $isDeclaredReadme -and
+                    $entry.Name -notmatch '(?i)^(LICENSE[^/]*|COPYING[^/]*|NOTICE[^/]*|THIRD[-_.]?PARTY[-_.]?NOTICES?[^/]*|README[^/]*)$') {
+                    continue
+                }
+                $destination = Resolve-PayloadPath $directory $entry.FullName
+                New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destination, $false)
+                $documents.Add([pscustomobject]@{
+                    Path = [IO.Path]::GetRelativePath($StageRoot, $destination).Replace('\', '/')
+                    Sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+                    Source = 'package-archive'
+                })
+            }
+            if (-not $declaredLicenseFound -or -not $declaredReadmeFound) {
+                throw "Declared license/readme was absent from $identity."
+            }
+            $baseLicense = $licenseExpression.Split(' ')[0]
+            $embeddedLicenseCount = @($documents | Where-Object {
+                $_.Path -match '(?i)(^|/)(LICENSE|COPYING)[^/]*$'
+            }).Count
+            if ($baseLicense -eq 'MIT' -and [string]::IsNullOrWhiteSpace($metadata.Copyright) -and
+                $embeddedLicenseCount -eq 0) {
+                throw "MIT package $identity has no retained copyright notice."
+            }
+            if ($policy.StandardLicenses.ContainsKey($baseLicense) -and
+                -not ($baseLicense -eq 'MIT' -and $embeddedLicenseCount -gt 0)) {
+                $source = $policy.StandardLicenses[$baseLicense]
+                $sourcePath = Get-VerifiedLegalDocument $source.Url $source.Sha256 $noticeCache
+                $destination = Join-Path $directory "SPDX-$baseLicense.txt"
+                if ($baseLicense -eq 'MIT') {
+                    $template = [IO.File]::ReadAllText($sourcePath)
+                    if (-not $template.Contains('Copyright (c) <year> <copyright holders>')) {
+                        throw 'The pinned MIT license template changed unexpectedly.'
+                    }
+                    [IO.File]::WriteAllText($destination,
+                        $template.Replace('Copyright (c) <year> <copyright holders>', $metadata.Copyright),
+                        [Text.UTF8Encoding]::new($false))
+                } else {
+                    Copy-Item -LiteralPath $sourcePath -Destination $destination
+                }
+                $documents.Add([pscustomobject]@{
+                    Path = [IO.Path]::GetRelativePath($StageRoot, $destination).Replace('\', '/')
+                    Sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+                    Source = $source.Url
+                })
+            }
+            $extra = [Collections.Generic.List[object]]::new()
+            if ($null -ne $override) {
+                foreach ($doc in @($override.Documents)) { $extra.Add($doc) }
+            }
+            $repositoryUrl = $metadata.RepositoryUrl -replace '\.git$', ''
+            foreach ($rule in @($policy.RepositoryDocuments)) {
+                if ($repositoryUrl -ieq $rule.Url -and $metadata.RepositoryCommit -ceq $rule.Commit) {
+                    foreach ($doc in @($rule.Documents)) { $extra.Add($doc) }
+                }
+            }
+            foreach ($doc in $extra) {
+                if ($doc.Name -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*$') {
+                    throw "Unsafe curated document name for $identity."
+                }
+                $sourcePath = Get-VerifiedLegalDocument $doc.Url $doc.Sha256 $noticeCache
+                $destination = Join-Path $directory $doc.Name
+                if (Test-Path -LiteralPath $destination) { throw "Duplicate curated document in $identity." }
+                Copy-Item -LiteralPath $sourcePath -Destination $destination
+                $documents.Add([pscustomobject]@{
+                    Path = [IO.Path]::GetRelativePath($StageRoot, $destination).Replace('\', '/')
+                    Sha256 = $doc.Sha256.ToUpperInvariant()
+                    Source = $doc.Url
+                })
+            }
+            if (@($documents | Where-Object { $_.Path -match '(?i)(LICENSE|COPYING|^legal/third-party/.+/SPDX-)' }).Count -eq 0) {
+                throw "No distributable license text was collected for $identity."
+            }
+            $records.Add([pscustomobject]@{
+                Id = $item.Id; Version = $item.Version; License = $licenseExpression
+                Copyright = $metadata.Copyright; RepositoryUrl = $metadata.RepositoryUrl
+                RepositoryCommit = $metadata.RepositoryCommit; ArchiveSha256 = $archiveHash
+                Documents = @($documents); PayloadFiles = @($packageAssets | Sort-Object)
+            })
+        } finally { $zip.Dispose() }
+    }
+    foreach ($path in $assetPaths.Keys) {
+        if ($assetPaths[$path].Count -eq 0) { throw "Unattributed redistributed binary, native asset, or font '$path'." }
+    }
+    $inventory = [pscustomobject]@{
+        SchemaVersion = 1
+        PolicySha256 = (Get-FileHash -LiteralPath $PolicyPath -Algorithm SHA256).Hash
+        DependencyManifests = @($depsFiles | ForEach-Object { [IO.Path]::GetRelativePath($StageRoot, $_.FullName).Replace('\', '/') } | Sort-Object)
+        BundledDependencies = @($bundled)
+        Packages = @($records)
+    }
+    $inventoryPath = Join-Path $StageRoot 'legal/redistribution-inventory.json'
+    $inventory | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $inventoryPath -Encoding utf8
+    Assert-RedistributionInventory $StageRoot
+}
+
+function Assert-RedistributionInventory {
+    param([string]$StageRoot)
+    $path = Join-Path $StageRoot 'legal/redistribution-inventory.json'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Missing redistribution inventory.' }
+    $inventory = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    if ($inventory.SchemaVersion -ne 1 -or @($inventory.Packages).Count -eq 0 -or
+        $inventory.PolicySha256 -notmatch '^[a-fA-F0-9]{64}$') {
+        throw 'Invalid redistribution inventory.'
+    }
+    $expected = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $covered = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($depsPath in @($inventory.DependencyManifests)) {
+        $deps = Get-Content -LiteralPath (Resolve-PayloadPath $StageRoot $depsPath) -Raw | ConvertFrom-Json -AsHashtable
+        foreach ($key in $deps.libraries.Keys) {
+            if ($deps.libraries[$key].type -notin @('package', 'runtimepack')) { continue }
+            $normalized = $key -replace '^runtimepack\.', ''
+            if ($normalized -notlike 'SharpClaw.*') { $null = $expected.Add($normalized) }
+        }
+    }
+    foreach ($asset in @($inventory.BundledDependencies)) {
+        if ($asset.Path -notmatch '(^|/)contributions/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
+            $asset.Package -notmatch '^[A-Za-z0-9][A-Za-z0-9_.+-]*/[A-Za-z0-9][A-Za-z0-9.+-]*$') {
+            throw 'Invalid bundled dependency provenance.'
+        }
+        Assert-FileDigest (Resolve-PayloadPath $StageRoot $asset.Path) $asset.Sha256
+        $null = $expected.Add($asset.Package)
+    }
+    $represented = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($package in @($inventory.Packages)) {
+        $identity = "$($package.Id)/$($package.Version)"
+        if (-not $represented.Add($identity) -or -not $expected.Contains($identity) -or
+            $package.ArchiveSha256 -notmatch '^[a-fA-F0-9]{64}$' -or
+            @($package.Documents).Count -eq 0) { throw "Invalid legal package identity '$identity'." }
+        foreach ($document in @($package.Documents)) {
+            if ($document.Path -notmatch '^legal/third-party/' -or [string]::IsNullOrWhiteSpace($document.Source)) {
+                throw "Invalid legal document path for $identity."
+            }
+            Assert-FileDigest (Resolve-PayloadPath $StageRoot $document.Path) $document.Sha256
+        }
+        foreach ($asset in @($package.PayloadFiles)) {
+            $null = Resolve-PayloadPath $StageRoot $asset
+            $null = $covered.Add($asset)
+        }
+    }
+    if ($represented.Count -ne $expected.Count) { throw 'Redistribution inventory misses a resolved dependency.' }
+    foreach ($file in Get-ChildItem -LiteralPath $StageRoot -Recurse -File) {
+        $relative = [IO.Path]::GetRelativePath($StageRoot, $file.FullName).Replace('\', '/')
+        if ($relative -match '^(legal|provenance)/' -or
+            $file.Name -notmatch '(?i)\.(dll|exe|so|dylib|a|dat|ttf|otf|woff2?)$' -or
+            $file.Name -match '^SharpClaw\.') { continue }
+        if (-not $covered.Contains($relative)) { throw "Redistribution inventory misses '$relative'." }
     }
 }
 

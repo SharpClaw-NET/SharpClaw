@@ -1,0 +1,202 @@
+{
+  "SchemaVersion": 1,
+  "StandardLicenses": {
+    "Apache-2.0": {
+      "Url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+      "Sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "MIT": {
+      "Url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+      "Sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+    },
+    "PostgreSQL": {
+      "Url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/PostgreSQL.txt",
+      "Sha256": "d443a7dc550da2be365b4e924bb8779101e1c318d15bb78e5cb6374cadd8b6c0"
+    },
+    "AGPL-3.0-only": {
+      "Url": "https://www.gnu.org/licenses/agpl-3.0.txt",
+      "Sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+    },
+    "AGPL-3.0-or-later": {
+      "Url": "https://www.gnu.org/licenses/agpl-3.0.txt",
+      "Sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+    },
+    "LGPL-2.1-or-later": {
+      "Url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt",
+      "Sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+    }
+  },
+  "PackageDocuments": {
+    "CommonServiceLocator/2.0.5": {
+      "License": "MS-PL",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-LICENSE.txt",
+          "Url": "https://raw.githubusercontent.com/unitycontainer/commonservicelocator/f143a7a122b50bd6d15bbc5cf339d928cf397891/LICENSE",
+          "Sha256": "7835930219ad12abb2761b565b38a8f229b582c5c59ef6fbca6624d8124a6721"
+        }
+      ]
+    },
+    "Uno.Diagnostics.Eventing/2.0.1": {
+      "License": "Apache-2.0",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-LICENSE.md",
+          "Url": "https://raw.githubusercontent.com/unoplatform/Uno.Diagnostics.Eventing/60b69b8d743d612350cbd3214a7211159e6f0d4f/License.md",
+          "Sha256": "0823c6be76d6db28fed4f338b233729008119736ee3d7157f302fd218a07676c"
+        }
+      ]
+    },
+    "Uno.icu-win/77.3.2": {
+      "License": "Apache-2.0 AND Unicode-3.0",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-UNO-LICENSE.md",
+          "Url": "https://raw.githubusercontent.com/unoplatform/uno.icu/03cf285e603cb3e2f9db0b129e844ed5a43a90eb/LICENSE.md",
+          "Sha256": "b07751cab211249b07c0e67610304824bbd462772f8b1268030992b71c2a580f"
+        },
+        {
+          "Name": "UPSTREAM-ICU-LICENSE.txt",
+          "Url": "https://raw.githubusercontent.com/unicode-org/icu/release-77-1/icu4c/LICENSE",
+          "Sha256": "1e881ecf2862d01e6e5bc2b861e46886d2a6fb01499c0c508a209a7271b13cf2"
+        }
+      ]
+    },
+    "Supprocom.JSONColdStore/0.1.0-alpha.10": {
+      "License": "AGPL-3.0-only",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-LICENSE.md",
+          "Url": "https://raw.githubusercontent.com/Supprocom/JSONColdStore/b631e62c2ca7acbb9a56f4ae0ffaef36eb5b380b/LICENSE.md",
+          "Sha256": "129340ed26d88b9261abe3a68b0f8b84c84df3ad89ac550cf626ddee04c938cc"
+        }
+      ]
+    },
+    "LibVLCSharp/3.9.7.1": {
+      "License": "LGPL-2.1-or-later",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-LICENSE.txt",
+          "Url": "https://raw.githubusercontent.com/videolan/libvlcsharp/1f84e0679cd48b73c3a3f6176c45a3c554398b6a/LICENSE",
+          "Sha256": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331"
+        }
+      ]
+    },
+    "LlamaSharp.ToolCallEnvelopes/0.1.0": {
+      "License": "AGPL-3.0-or-later",
+      "Rationale": "The 0.1.0 nuspec omitted license metadata. The same rightsholder subsequently published an AGPL-3.0-or-later LICENSE and written source offer for the project's original material at the pinned repository commit.",
+      "Documents": [
+        {
+          "Name": "RIGHTSHOLDER-LICENSE.txt",
+          "Url": "https://raw.githubusercontent.com/Supprocom/LlamaSharp.ToolCallEnvelopes/23a8802fed40a9154ef999120513694cc5411161/LICENSE",
+          "Sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+        },
+        {
+          "Name": "RIGHTSHOLDER-NOTICE.txt",
+          "Url": "https://raw.githubusercontent.com/Supprocom/LlamaSharp.ToolCallEnvelopes/23a8802fed40a9154ef999120513694cc5411161/NOTICE",
+          "Sha256": "2f11d1475262d79ba31c2b08e1a672bd96a0dc404f8492f0b22df2fa2f249e13"
+        }
+      ]
+    },
+    "Npgsql/10.0.2": {
+      "License": "PostgreSQL",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-LICENSE.txt",
+          "Url": "https://raw.githubusercontent.com/npgsql/npgsql/4d57e27b370e2ab2a350ad8bcef78d7ddd97e5ea/LICENSE",
+          "Sha256": "2e1d9cc6ed4eb7fe6fa82091846c06b4f58571a2c3b54777db6baeca10dd2d74"
+        }
+      ]
+    },
+    "Npgsql.EntityFrameworkCore.PostgreSQL/10.0.1": {
+      "License": "PostgreSQL",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-LICENSE.txt",
+          "Url": "https://raw.githubusercontent.com/npgsql/efcore.pg/2679a9d768d14f34d077e037311f80acb6f6b3b4/LICENSE",
+          "Sha256": "bc2fdab8551ca4022196dbbd3dc582ca65211209196a3459b1bab60cb71a9979"
+        }
+      ]
+    },
+    "Uno.Fonts.Fluent/2.6.1": {
+      "License": "Apache-2.0",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-LICENSE.md",
+          "Url": "https://raw.githubusercontent.com/unoplatform/uno.fonts/257665e95a75fe43240f7bfdbe25260360682093/LICENSE.md",
+          "Sha256": "7afed34064d93afd447bb2ef72398f68789792e302b0792d1bcc3217b204f88e"
+        }
+      ]
+    },
+    "Uno.Fonts.OpenSans/2.9.4": {
+      "License": "Apache-2.0 AND OFL-1.1",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-UNO-LICENSE.md",
+          "Url": "https://raw.githubusercontent.com/unoplatform/uno.fonts/a5a82943e36c97ce02cea3b0fba105f309216948/LICENSE.md",
+          "Sha256": "7afed34064d93afd447bb2ef72398f68789792e302b0792d1bcc3217b204f88e"
+        },
+        {
+          "Name": "UPSTREAM-OPEN-SANS-OFL.txt",
+          "Url": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/OFL.txt",
+          "Sha256": "01cd5ffb3a528c219a86e49a814c6c53bd8a69b9a3c305dd237074ba1c811af7"
+        }
+      ]
+    }
+  },
+  "RepositoryDocuments": [
+    {
+      "Url": "https://github.com/unoplatform/uno",
+      "Commit": "cd452e3ee242c9a2a8dee5e65ad8088b6f5dbf83",
+      "Documents": [
+        {
+          "Name": "UPSTREAM-UNO-LICENSE.md",
+          "Url": "https://raw.githubusercontent.com/unoplatform/uno/cd452e3ee242c9a2a8dee5e65ad8088b6f5dbf83/License.md",
+          "Sha256": "6db2897a75935879602522668bb2ed4e6e3a35c402b0ae81d4035617f5ef2e8e"
+        },
+        {
+          "Name": "UPSTREAM-UNO-THIRD-PARTY-NOTICES.md",
+          "Url": "https://raw.githubusercontent.com/unoplatform/uno/cd452e3ee242c9a2a8dee5e65ad8088b6f5dbf83/THIRD-PARTY-NOTICES.md",
+          "Sha256": "63fad6a25a5c41700fadc414caedd14bb29bc1a6885599fb953a92183a3529b7"
+        }
+      ]
+    }
+  ],
+  "BundledAssets": [
+    {
+      "ContributionPath": "sharpclaw_providers_llamasharp/CommunityToolkit.HighPerformance.dll",
+      "Sha256": "196607c6d4d704b5ee95c80f8e3cd799595b7d8a08108701894c211b138d2839",
+      "Package": "CommunityToolkit.HighPerformance/8.4.2"
+    },
+    {
+      "ContributionPath": "sharpclaw_providers_llamasharp/LLamaSharp.dll",
+      "Sha256": "559fd41e6a9757ccd7aaec61255ecde33bc0294894510e10b94d095e02ad7c10",
+      "Package": "LLamaSharp/0.27.0"
+    },
+    {
+      "ContributionPath": "sharpclaw_providers_llamasharp/LlamaSharp.ToolCallEnvelopes.dll",
+      "Sha256": "070fec114cc3229871f8749599b17164880da7a7739b7dc484e3f9046a53305a",
+      "Package": "LlamaSharp.ToolCallEnvelopes/0.1.0"
+    },
+    {
+      "ContributionPath": "sharpclaw_providers_llamasharp/Microsoft.Bcl.Memory.dll",
+      "Sha256": "d844a2e31b7a0abc10911608e0a819523aa055774a5b46e8e12de14cd5a44b32",
+      "Package": "Microsoft.Bcl.Memory/10.0.5"
+    },
+    {
+      "ContributionPath": "sharpclaw_providers_llamasharp/Microsoft.Extensions.AI.Abstractions.dll",
+      "Sha256": "688fea67d5323883bd10086a83a6aac01f791830dcebbefb03515c9002a9d8f3",
+      "Package": "Microsoft.Extensions.AI.Abstractions/10.4.1"
+    },
+    {
+      "ContributionPath": "sharpclaw_providers_llamasharp/System.Interactive.Async.dll",
+      "Sha256": "ffac755159ef51c4b119a6d68650d0e8e5d392d54bcfd27513cb30aa45393f0d",
+      "Package": "System.Interactive.Async/7.0.0"
+    },
+    {
+      "ContributionPath": "sharpclaw_providers_llamasharp/System.Numerics.Tensors.dll",
+      "Sha256": "cd6878734a1fee6ecb50e3e151576cb7c7547bf2ddf5d480e95c01549e156c8c",
+      "Package": "System.Numerics.Tensors/10.0.5"
+    }
+  ]
+}

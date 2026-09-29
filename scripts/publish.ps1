@@ -249,6 +249,7 @@ function Complete-Deployment {
     Copy-Item -LiteralPath (Join-Path $bom.Root 'bom-manifest.json'),
         (Join-Path $bom.BundleRoot 'contribution-bundle-manifest.json') -Destination $provenance
     Strip-ForeignNatives $StageDir $TargetRid
+    Copy-ResolvedDependencyNotices $StageDir (Join-Path $OutputDir '.nuget/legal-cache') (Join-Path $repoRoot 'build/ThirdPartyNotices.json')
     $manifest = [pscustomobject]@{
         DeploymentType = $Type; Rid = $TargetRid; Version = $version; InstallerVersion = $installerVersion
         SourceCommit = $sourceCommit; BomManifestSha256 = $BomManifestSha256

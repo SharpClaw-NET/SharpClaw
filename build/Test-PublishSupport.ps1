@@ -95,6 +95,20 @@ try {
     $stage = Join-Path $root 'stage'
     New-Item -ItemType Directory -Path $stage | Out-Null
     [IO.File]::WriteAllText((Join-Path $stage '.env.template'), 'retained dotfile')
+    [IO.File]::WriteAllText((Join-Path $stage 'ThirdParty.dll'), 'unit-only binary fixture')
+    $fixturePackageRoot = Join-Path $root 'nuget-packages'
+    $fixturePackageDirectory = Join-Path $fixturePackageRoot 'thirdparty/1.0.0'
+    New-Item -ItemType Directory -Path $fixturePackageDirectory -Force | Out-Null
+    New-NoticePackage $fixturePackageDirectory 'thirdparty.1.0.0' @{
+        'ThirdParty.nuspec' = '<package><metadata><id>ThirdParty</id><version>1.0.0</version><license type="file">LICENSE.txt</license></metadata></package>'
+        'LICENSE.txt' = 'unit-only license text'
+        'lib/ThirdParty.dll' = 'unit-only binary fixture'
+    }
+    Save-Json ([pscustomobject]@{ libraries = @{ 'ThirdParty/1.0.0' = @{ type = 'package' } } }) (Join-Path $stage 'SharpClaw.Test.deps.json')
+    $originalNugetPackages = $env:NUGET_PACKAGES
+    $env:NUGET_PACKAGES = $fixturePackageRoot
+    try { Copy-ResolvedDependencyNotices $stage (Join-Path $root 'legal-cache') }
+    finally { $env:NUGET_PACKAGES = $originalNugetPackages }
     $stageManifest = [pscustomobject]@{
         SourceCommit = 'a' * 40; Version = '0.5.0-preview.1'; InstallerVersion = '0.5.0.1'
         DeploymentType = 'Server'; Rid = 'linux-x64'; BomManifestSha256 = $bomHash
@@ -103,6 +117,56 @@ try {
     $stagePath = Join-Path $stage 'publish-manifest.json'
     Save-Json $stageManifest $stagePath
     Test-Case 'valid stage' { $null = Assert-PublishedStage $stage (Get-FileHash $stagePath).Hash }
+    Test-Case 'resolved package licence and binary are attributed' {
+        $inventory = Get-Content (Join-Path $stage 'legal/redistribution-inventory.json') -Raw | ConvertFrom-Json
+        if (@($inventory.Packages).Count -ne 1 -or
+            $inventory.Packages[0].License -ne 'file:LICENSE.txt' -or
+            'ThirdParty.dll' -notin @($inventory.Packages[0].PayloadFiles) -or
+            -not (Test-Path (Join-Path $stage 'legal/third-party/ThirdParty.1.0.0/LICENSE.txt'))) {
+            throw 'Resolved package audit omitted its exact licence or binary.'
+        }
+    }
+    Test-Case 'unattributed binary fails closed' {
+        $path = Join-Path $stage 'Rogue.dll'
+        try {
+            [IO.File]::WriteAllText($path, 'not in a resolved package')
+            Assert-Rejected { Assert-RedistributionInventory $stage }
+        } finally { Remove-Item -LiteralPath $path -Force }
+    }
+    Test-Case 'missing package licence fails closed' {
+        $path = Join-Path $stage 'legal/third-party/ThirdParty.1.0.0/LICENSE.txt'
+        $original = [IO.File]::ReadAllBytes($path)
+        try {
+            [IO.File]::WriteAllText($path, 'changed licence')
+            Assert-Rejected { Assert-RedistributionInventory $stage }
+        } finally { [IO.File]::WriteAllBytes($path, $original) }
+    }
+    Test-Case 'new resolved dependency needs a licence inventory record' {
+        $path = Join-Path $stage 'SharpClaw.Test.deps.json'
+        $original = [IO.File]::ReadAllBytes($path)
+        try {
+            Save-Json ([pscustomobject]@{ libraries = @{
+                'ThirdParty/1.0.0' = @{ type = 'package' }
+                'Unknown/2.0.0' = @{ type = 'package' }
+            } }) $path
+            Assert-Rejected { Assert-RedistributionInventory $stage }
+        } finally { [IO.File]::WriteAllBytes($path, $original) }
+    }
+    Test-Case 'unlicensed source package fails closed' {
+        $caseStage = Join-Path $root 'unlicensed-stage'
+        $casePackage = Join-Path $fixturePackageRoot 'unlicensed/1.0.0'
+        New-Item -ItemType Directory -Path $caseStage, $casePackage -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $caseStage 'Unlicensed.dll'), 'unit-only unlicensed binary')
+        Save-Json ([pscustomobject]@{ libraries = @{ 'Unlicensed/1.0.0' = @{ type = 'package' } } }) (Join-Path $caseStage 'Unlicensed.deps.json')
+        New-NoticePackage $casePackage 'unlicensed.1.0.0' @{
+            'Unlicensed.nuspec' = '<package><metadata><id>Unlicensed</id><version>1.0.0</version></metadata></package>'
+            'lib/Unlicensed.dll' = 'unit-only unlicensed binary'
+        }
+        $original = $env:NUGET_PACKAGES
+        $env:NUGET_PACKAGES = $fixturePackageRoot
+        try { Assert-Rejected { Copy-ResolvedDependencyNotices $caseStage (Join-Path $root 'legal-cache') } }
+        finally { $env:NUGET_PACKAGES = $original }
+    }
     Test-Case 'contradictory version identity' {
         $stageManifest.InstallerVersion = '0.5.0.2'
         try { Save-Json $stageManifest $stagePath; Assert-Rejected { Assert-PublishedStage $stage (Get-FileHash $stagePath).Hash } }

@@ -29,6 +29,18 @@ the same clean source commit as that manifest. Contributions retain all reviewed
 native assets; each Runtime has its own platform-specific sidecar apphost and
 bundled .NET runtime, with no system-wide .NET prerequisite.
 
+Each stage also carries `legal/redistribution-inventory.json`. Publishing walks
+every resolved dependency manifest and the exact third-party DLLs embedded in
+contributions, retains package licences and notices, obtains hash-pinned
+upstream texts when a package omits them, and attributes redistributed managed,
+native, runtime-pack, and font files to their packages. Unknown licensing,
+missing notices, changed bundled bytes, and unattributed files fail the publish
+step. The stage audit runs again before either installer is built. The legal
+inventory includes the Open Sans font's own OFL notice in addition to Uno's
+package licence; the five Persistence written offers remain byte-for-byte from
+their reviewed nupkgs. The publisher needs network access to NuGet.org and the
+hash-pinned public licence sources on a cache miss.
+
 ## Windows Application MSIX
 
 On Windows with the Windows SDK, package the verified `Application-win-x64`
