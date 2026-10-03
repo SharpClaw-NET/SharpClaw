@@ -318,7 +318,10 @@ try {
             $gate -notmatch 'WindowsBuiltInRole\]::Administrator' -or
             $gate -notmatch 'Cert:\\LocalMachine\\TrustedPeople' -or
             $gate -match 'Cert:\\CurrentUser\\TrustedPeople' -or
-            $gate -notmatch 'Remove-Item -LiteralPath \$guestTrustPath' -or
+            $gate -notmatch 'X509Store\(StoreName.TrustedPeople, StoreLocation.LocalMachine\)' -or
+            $gate -notmatch 'HasGuestTrust\(\$certificate\)' -or
+            $gate -notmatch 'RemoveGuestTrust\(\$certificate\)' -or
+            $gate -notmatch 'SameCertificate\(candidate, certificate\)' -or
             $gate -notmatch 'Temporary guest signer trust survived cleanup' -or
             $gate -notmatch 'if \(!bootUiProbe.IsCompleted\) return false;' -or
             $gate -notmatch 'Get-TestPackageProcesses -AllowTransientTimeout' -or

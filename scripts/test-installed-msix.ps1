@@ -47,16 +47,43 @@ if ($ReportDirectory.StartsWith($profileRoot + [IO.Path]::DirectorySeparatorChar
 }
 New-Item -ItemType Directory -Path $ReportDirectory | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem, UIAutomationClient, UIAutomationTypes, System.Drawing
-Add-Type -ReferencedAssemblies 'UIAutomationClient', 'UIAutomationTypes', 'WindowsBase', 'System.Core' -TypeDefinition @'
+Add-Type -ReferencedAssemblies 'UIAutomationClient', 'UIAutomationTypes', 'WindowsBase', 'System', 'System.Core' -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Automation;
 public static class SharpClawInstalledProbe {
     static Task<bool> bootUiProbe;
     static long bootUiProbeHandle;
+    // Read fresh native store snapshots. Certificate-provider path checks can
+    // retain a negative result across Import-Certificate in Windows PowerShell.
+    static bool SameCertificate(X509Certificate2 left, X509Certificate2 right) {
+        return Convert.ToBase64String(left.RawData) == Convert.ToBase64String(right.RawData);
+    }
+    public static bool HasGuestTrust(X509Certificate2 certificate) {
+        using (var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine)) {
+            store.Open(OpenFlags.ReadOnly);
+            foreach (var candidate in store.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, false))
+                if (SameCertificate(candidate, certificate)) return true;
+            return false;
+        }
+    }
+    public static void AddGuestTrust(X509Certificate2 certificate) {
+        using (var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine)) {
+            store.Open(OpenFlags.ReadWrite);
+            store.Add(certificate);
+        }
+    }
+    public static void RemoveGuestTrust(X509Certificate2 certificate) {
+        using (var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine)) {
+            store.Open(OpenFlags.ReadWrite);
+            foreach (var candidate in store.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, false))
+                if (SameCertificate(candidate, certificate)) store.Remove(candidate);
+        }
+    }
     public delegate bool EnumCallback(IntPtr window, IntPtr state);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumCallback callback, IntPtr state);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
@@ -119,8 +146,8 @@ if ($certificate.Subject -ne 'CN=SharpClaw Dev' -or $certificate.NotAfter -le (G
     $certificate.Dispose()
     throw 'Unexpected or expired test signer.'
 }
-$guestTrustPath = "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)"
-if (Test-Path -LiteralPath $guestTrustPath) {
+# Only the disposable guest's Cert:\LocalMachine\TrustedPeople store.
+if ([SharpClawInstalledProbe]::HasGuestTrust($certificate)) {
     $certificate.Dispose()
     throw 'The guest already trusts this signer; use a clean VM so the gate can own and remove temporary trust.'
 }
@@ -172,10 +199,10 @@ try {
     } finally { $zip.Dispose() }
     # Full MSIX deployment checks the machine store. This is the disposable
     # guest's TrustedPeople store, never the owner/host or a broad Root store.
-    # Own cleanup even when Import-Certificate fails after partially writing.
+    # Own cleanup even when a native store write fails after partially writing.
     $trustOwnedByTest = $true
-    $null = Import-Certificate -FilePath $CertificatePath -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople'
-    if (-not (Test-Path -LiteralPath $guestTrustPath)) {
+    [SharpClawInstalledProbe]::AddGuestTrust($certificate)
+    if (-not [SharpClawInstalledProbe]::HasGuestTrust($certificate)) {
         throw 'The exact signer was not added to the disposable guest TrustedPeople store.'
     }
     Add-AppxPackage -Path $PackagePath
@@ -301,10 +328,10 @@ try {
         try { if (Test-Path -LiteralPath $profileRoot) { Remove-Item -LiteralPath $profileRoot -Recurse -Force } }
         catch { $cleanupFailures.Add('Test state cleanup failed: ' + $_.Exception.Message) }
         try {
-            if ($trustOwnedByTest -and (Test-Path -LiteralPath $guestTrustPath)) {
-                Remove-Item -LiteralPath $guestTrustPath -Force -Confirm:$false
+            if ($trustOwnedByTest) {
+                [SharpClawInstalledProbe]::RemoveGuestTrust($certificate)
             }
-            if ($trustOwnedByTest -and (Test-Path -LiteralPath $guestTrustPath)) {
+            if ($trustOwnedByTest -and [SharpClawInstalledProbe]::HasGuestTrust($certificate)) {
                 $cleanupFailures.Add('Temporary guest signer trust survived cleanup.')
             }
         } catch { $cleanupFailures.Add('Temporary guest signer trust removal failed: ' + $_.Exception.Message) }
