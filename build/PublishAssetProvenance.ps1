@@ -232,6 +232,6 @@ function Assert-ReadyToRunManagedIdentity {
         $memory.Position = 0
         $inputIdentity = [SharpClaw.Build.ManagedPublishIdentity]::Fingerprint($memory)
         $outputIdentity = [SharpClaw.Build.ManagedPublishIdentity]::Fingerprint($output)
-        if ($inputIdentity -cne $outputIdentity) { throw "ReadyToRun substituted managed metadata or IL in '$OutputPath'." }
+        if ($inputIdentity -cne $outputIdentity) { throw "ReadyToRun substituted managed metadata, IL, field initializer data or resources in '$OutputPath'." }
     } finally { $source.Dispose(); $memory.Dispose(); $output.Dispose() }
 }

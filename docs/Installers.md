@@ -39,7 +39,12 @@ final copy-source digests, and non-composite ReadyToRun input/output mappings,
 compiler identity/digest, SDK target hashes and compiler inputs. Unchanged copies
 must byte-match their archive entry; transformed files must match their captured
 output, verified original input, normalized managed metadata, method IL/exception
-state and resources. Each publish invalidates stale intermediate ReadyToRun
+state, each RVA-backed field's token/validated length/initializer bytes, and
+resources. Field addresses may relocate, but their stored values may not change.
+Initializer sizes must be fixed-width primitives or locally declared, fieldless,
+fixed-size value types with validated layout; unresolved, platform-dependent,
+generic or otherwise unsupported layouts fail closed rather than estimating a
+length from neighbouring addresses. Each publish invalidates stale intermediate ReadyToRun
 images using its new input receipt. Historical contributions without dependency
 manifests require explicit scoped archive-entry/digest pins in the notice policy;
 a shared filename is never evidence of origin. Unknown licensing, missing
