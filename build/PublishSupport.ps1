@@ -1,6 +1,7 @@
 # Shared, fail-closed verification for deployment bundles and installers.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'PublishAssetProvenance.ps1')
 
 function Resolve-PayloadPath {
     param([string]$Root, [string]$RelativePath)
@@ -270,16 +271,16 @@ function Get-NuspecMetadata {
 
 function Copy-ResolvedDependencyNotices {
     param([string]$StageRoot, [string]$CacheRoot,
-        [string]$PolicyPath = (Join-Path $PSScriptRoot 'ThirdPartyNotices.json'))
+        [string]$PolicyPath = (Join-Path $PSScriptRoot 'ThirdPartyNotices.json'), [switch]$RequirePublishReceipts)
     $policy = Get-Content -LiteralPath $PolicyPath -Raw | ConvertFrom-Json -AsHashtable
     if ($policy.SchemaVersion -ne 1) { throw 'Unknown third-party-notice policy version.' }
-    $depsFiles = @(Get-ChildItem -LiteralPath $StageRoot -Recurse -File -Filter '*.deps.json')
-    if ($depsFiles.Count -eq 0) { throw 'A published stage needs resolved dependency manifests.' }
+    $scopes = @(Get-StageDependencyScopes $StageRoot)
+    if ($scopes.Count -eq 0) { throw 'A published stage needs resolved dependency manifests.' }
+    $provenance = Get-StageAssetProvenance $StageRoot $scopes $policy -RequirePublishReceipts:$RequirePublishReceipts
     $resolved = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($depsFile in $depsFiles) {
-        $deps = Get-Content -LiteralPath $depsFile.FullName -Raw | ConvertFrom-Json -AsHashtable
-        foreach ($key in $deps.libraries.Keys) {
-            $type = $deps.libraries[$key].type
+    foreach ($scope in $scopes) {
+        foreach ($key in $scope.Libraries.Keys) {
+            $type = $scope.Libraries[$key].type
             if ($type -notin @('package', 'runtimepack')) { continue }
             if ($key -notmatch '^(?:runtimepack\.)?([A-Za-z0-9][A-Za-z0-9_.+-]*)/([A-Za-z0-9][A-Za-z0-9.+-]*)$') {
                 throw "Unsafe dependency identity '$key'."
@@ -294,50 +295,19 @@ function Copy-ResolvedDependencyNotices {
     }
     if ($resolved.Count -eq 0) { throw 'No resolved third-party dependencies were found.' }
 
-    # Some reviewed contribution nupkgs embed third-party DLLs as contentFiles
-    # without a .deps.json. Bind those exact bytes to their source packages.
-    $bundled = [Collections.Generic.List[object]]::new()
-    $bundledByPackage = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($rule in @($policy.BundledAssets)) {
-        if ($rule.ContributionPath -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
-            $rule.Package -notmatch '^([A-Za-z0-9][A-Za-z0-9_.+-]*)/([A-Za-z0-9][A-Za-z0-9.+-]*)$') {
-            throw 'Unsafe bundled dependency policy entry.'
+    foreach ($asset in $provenance.Assets) {
+        if (-not $resolved.ContainsKey($asset.Package)) {
+            $parts = $asset.Package.Split('/')
+            $resolved.Add($asset.Package, [pscustomobject]@{ Id = $parts[0]; Version = $parts[1] })
         }
-        $packageId = $Matches[1]; $packageVersion = $Matches[2]
-        $module = $rule.ContributionPath.Split('/')[0]
-        $present = $false
-        foreach ($prefix in @('contributions', 'backend/contributions')) {
-            $moduleDirectory = Join-Path $StageRoot "$prefix/$module"
-            if (-not (Test-Path -LiteralPath $moduleDirectory -PathType Container)) { continue }
-            $present = $true
-            $relative = "$prefix/$($rule.ContributionPath)"
-            Assert-FileDigest (Resolve-PayloadPath $StageRoot $relative) $rule.Sha256
-            $bundled.Add([pscustomobject]@{
-                Path = $relative; Sha256 = $rule.Sha256; Package = $rule.Package
-            })
-        }
-        if (-not $present) { continue }
-        if (-not $resolved.ContainsKey($rule.Package)) {
-            $resolved.Add($rule.Package, [pscustomobject]@{ Id = $packageId; Version = $packageVersion })
-        }
-        if (-not $bundledByPackage.ContainsKey($rule.Package)) {
-            $bundledByPackage.Add($rule.Package, [Collections.Generic.List[object]]::new())
-        }
-        $bundledByPackage[$rule.Package].Add($rule)
     }
-
-    $assetNames = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-    $assetPaths = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    $covered = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($asset in $provenance.Assets) { [void]$covered.Add($asset.Path) }
     foreach ($file in Get-ChildItem -LiteralPath $StageRoot -Recurse -File) {
         $relative = [IO.Path]::GetRelativePath($StageRoot, $file.FullName).Replace('\', '/')
-        if ($relative -match '^(legal|provenance)/' -or
-            $file.Name -notmatch '(?i)\.(dll|exe|so|dylib|a|dat|ttf|otf|woff2?)$' -or
-            $file.Name -match '^SharpClaw\.') { continue }
-        if (-not $assetNames.ContainsKey($file.Name)) {
-            $assetNames.Add($file.Name, [Collections.Generic.List[string]]::new())
+        if ((Test-RedistributableAsset $relative) -and -not $covered.Contains($relative)) {
+            throw "Unattributed redistributed binary, native asset, or font '$relative'."
         }
-        $assetNames[$file.Name].Add($relative)
-        $assetPaths[$relative] = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     }
 
     $records = [Collections.Generic.List[object]]::new()
@@ -349,16 +319,11 @@ function Copy-ResolvedDependencyNotices {
         $zip = [IO.Compression.ZipFile]::OpenRead($archivePath)
         try {
             $metadata = Get-NuspecMetadata $zip $item.Id $item.Version
-            if ($bundledByPackage.ContainsKey($identity)) {
-                foreach ($rule in $bundledByPackage[$identity]) {
-                    $verified = $false
-                    foreach ($entry in $zip.Entries | Where-Object { $_.Name -ieq $rule.ContributionPath.Split('/')[-1] }) {
-                        $stream = $entry.Open()
-                        try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)) }
-                        finally { $stream.Dispose() }
-                        if ($hash -eq $rule.Sha256) { $verified = $true; break }
-                    }
-                    if (-not $verified) { throw "Source package $identity does not contain its bundled asset." }
+            $packageAssets = @($provenance.Assets | Where-Object Package -IEQ $identity)
+            foreach ($asset in $packageAssets) {
+                Assert-ArchiveAssetDigest $zip $asset.ArchiveEntry $asset.InputSha256
+                if ($asset.Transformation -eq 'ready-to-run') {
+                    Assert-ReadyToRunManagedIdentity $zip $asset.ArchiveEntry (Resolve-PayloadPath $StageRoot $asset.Path)
                 }
             }
             $override = if ($policy.PackageDocuments.ContainsKey($identity)) { $policy.PackageDocuments[$identity] } else { $null }
@@ -388,19 +353,12 @@ function Copy-ResolvedDependencyNotices {
             New-Item -ItemType Directory -Path $directory -Force | Out-Null
             $documents = [Collections.Generic.List[object]]::new()
             $seenEntries = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-            $packageAssets = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
             $declaredLicenseFound = $metadata.LicenseType -ne 'file'
             $declaredReadmeFound = [string]::IsNullOrWhiteSpace($metadata.Readme)
             foreach ($entry in $zip.Entries) {
                 if ([string]::IsNullOrEmpty($entry.Name)) { continue }
                 $null = Resolve-PayloadPath $directory $entry.FullName
                 if (-not $seenEntries.Add($entry.FullName)) { throw "Case-colliding archive entry in $identity." }
-                if ($assetNames.ContainsKey($entry.Name)) {
-                    foreach ($path in $assetNames[$entry.Name]) {
-                        $null = $assetPaths[$path].Add($identity)
-                        $null = $packageAssets.Add($path)
-                    }
-                }
                 $isDeclaredLicense = $metadata.LicenseType -eq 'file' -and $entry.FullName -ceq $metadata.License
                 $isDeclaredReadme = -not [string]::IsNullOrWhiteSpace($metadata.Readme) -and $entry.FullName -ceq $metadata.Readme
                 if ($isDeclaredLicense) { $declaredLicenseFound = $true }
@@ -483,40 +441,92 @@ function Copy-ResolvedDependencyNotices {
                 Id = $item.Id; Version = $item.Version; License = $licenseExpression
                 Copyright = $metadata.Copyright; RepositoryUrl = $metadata.RepositoryUrl
                 RepositoryCommit = $metadata.RepositoryCommit; ArchiveSha256 = $archiveHash
-                Documents = @($documents); PayloadFiles = @($packageAssets | Sort-Object)
+                Documents = @($documents); Assets = $packageAssets; PayloadFiles = @($packageAssets | ForEach-Object Path | Sort-Object)
             })
         } finally { $zip.Dispose() }
     }
-    foreach ($path in $assetPaths.Keys) {
-        if ($assetPaths[$path].Count -eq 0) { throw "Unattributed redistributed binary, native asset, or font '$path'." }
+    foreach ($receipt in $provenance.PublishReceipts) {
+        if ($null -eq $receipt.Compiler) { continue }
+        $parts = $receipt.Compiler.Package.Split('/')
+        $archive = Get-ResolvedPackageArchive $parts[0] $parts[1] (Join-Path $CacheRoot 'packages')
+        $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+        try {
+            $null = Get-NuspecMetadata $zip $parts[0] $parts[1]
+            Assert-ArchiveAssetDigest $zip $receipt.Compiler.ArchiveEntry $receipt.Compiler.Sha256
+        } finally { $zip.Dispose() }
+        $receipt.Compiler | Add-Member -NotePropertyName ArchiveSha256 -NotePropertyValue (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
     }
+    $policyDestination = Join-Path $StageRoot 'legal/notice-policy.json'
+    Copy-Item -LiteralPath $PolicyPath -Destination $policyDestination
     $inventory = [pscustomobject]@{
-        SchemaVersion = 1
+        SchemaVersion = 2
         PolicySha256 = (Get-FileHash -LiteralPath $PolicyPath -Algorithm SHA256).Hash
-        DependencyManifests = @($depsFiles | ForEach-Object { [IO.Path]::GetRelativePath($StageRoot, $_.FullName).Replace('\', '/') } | Sort-Object)
-        BundledDependencies = @($bundled)
+        PolicyPath = 'legal/notice-policy.json'; RequirePublishReceipts = [bool]$RequirePublishReceipts
+        DependencyManifests = @($scopes.Path | Sort-Object)
+        PublishReceipts = $provenance.PublishReceipts
+        BundledDependencies = @($provenance.Assets | Where-Object { $_.DependencyManifest -eq '' })
         Packages = @($records)
     }
     $inventoryPath = Join-Path $StageRoot 'legal/redistribution-inventory.json'
     $inventory | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $inventoryPath -Encoding utf8
-    Assert-RedistributionInventory $StageRoot
+    Assert-RedistributionInventory $StageRoot $CacheRoot
 }
 
 function Assert-RedistributionInventory {
-    param([string]$StageRoot)
+    param([string]$StageRoot, [string]$CacheRoot = (Join-Path ([IO.Path]::GetTempPath()) 'sharpclaw-legal-verification'))
     $path = Join-Path $StageRoot 'legal/redistribution-inventory.json'
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Missing redistribution inventory.' }
     $inventory = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-    if ($inventory.SchemaVersion -ne 1 -or @($inventory.Packages).Count -eq 0 -or
-        $inventory.PolicySha256 -notmatch '^[a-fA-F0-9]{64}$') {
+    if ($inventory.SchemaVersion -ne 2 -or @($inventory.Packages).Count -eq 0 -or
+        $inventory.PolicySha256 -notmatch '^[a-fA-F0-9]{64}$' -or
+        $inventory.RequirePublishReceipts -isnot [bool] -or $inventory.PolicyPath -cne 'legal/notice-policy.json') {
         throw 'Invalid redistribution inventory.'
+    }
+    $policyPath = Resolve-PayloadPath $StageRoot $inventory.PolicyPath
+    Assert-FileDigest $policyPath $inventory.PolicySha256
+    $policy = Get-Content -LiteralPath $policyPath -Raw | ConvertFrom-Json -AsHashtable
+    $scopes = @(Get-StageDependencyScopes $StageRoot)
+    if ((@($scopes.Path | Sort-Object) -join '|') -cne (@($inventory.DependencyManifests | Sort-Object) -join '|')) {
+        throw 'Redistribution inventory has an incorrect dependency-scope set.'
+    }
+    $actual = Get-StageAssetProvenance $StageRoot $scopes $policy -RequirePublishReceipts:$inventory.RequirePublishReceipts
+    $actualAssets = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($asset in $actual.Assets) { $actualAssets.Add($asset.Path, $asset) }
+    if (@($actual.PublishReceipts).Count -ne @($inventory.PublishReceipts).Count) { throw 'Incorrect publish-receipt set.' }
+    foreach ($receipt in @($inventory.PublishReceipts)) {
+        $captured = @($actual.PublishReceipts | Where-Object Path -CEQ $receipt.Path)
+        if ($captured.Count -ne 1 -or $receipt.Scope -cne $captured[0].Scope -or
+            $receipt.DependencyManifest -cne $captured[0].DependencyManifest -or
+            $receipt.SdkVersion -cne $captured[0].SdkVersion -or $receipt.Framework -cne $captured[0].Framework -or
+            $receipt.Rid -cne $captured[0].Rid -or
+            ($receipt.Documents | ConvertTo-Json -Compress) -cne ($captured[0].Documents | ConvertTo-Json -Compress)) {
+            throw 'Publish input/output receipt changed.'
+        }
+        foreach ($document in @($receipt.Documents)) { Assert-FileDigest (Resolve-PayloadPath $StageRoot $document.Path) $document.Sha256 }
+        if ($null -eq $receipt.Compiler) {
+            if ($null -ne $captured[0].Compiler) { throw 'Missing ReadyToRun compiler provenance.' }
+            continue
+        }
+        $compiler = $receipt.Compiler
+        $tool = $captured[0].Compiler
+        if ($null -eq $tool -or $compiler.Package -cne $tool.Package -or $compiler.ArchiveEntry -cne $tool.ArchiveEntry -or
+            $compiler.Sha256 -ine $tool.Sha256 -or $compiler.TargetOS -cne $tool.TargetOS -or $compiler.TargetArch -cne $tool.TargetArch) {
+            throw 'Incorrect ReadyToRun compiler provenance.'
+        }
+        $parts = $compiler.Package.Split('/')
+        $archive = Get-ResolvedPackageArchive $parts[0] $parts[1] (Join-Path $CacheRoot 'packages')
+        Assert-FileDigest $archive $compiler.ArchiveSha256
+        $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+        try {
+            $null = Get-NuspecMetadata $zip $parts[0] $parts[1]
+            Assert-ArchiveAssetDigest $zip $compiler.ArchiveEntry $compiler.Sha256
+        } finally { $zip.Dispose() }
     }
     $expected = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $covered = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($depsPath in @($inventory.DependencyManifests)) {
-        $deps = Get-Content -LiteralPath (Resolve-PayloadPath $StageRoot $depsPath) -Raw | ConvertFrom-Json -AsHashtable
-        foreach ($key in $deps.libraries.Keys) {
-            if ($deps.libraries[$key].type -notin @('package', 'runtimepack')) { continue }
+    foreach ($scope in $scopes) {
+        foreach ($key in $scope.Libraries.Keys) {
+            if ($scope.Libraries[$key].type -notin @('package', 'runtimepack')) { continue }
             $normalized = $key -replace '^runtimepack\.', ''
             if ($normalized -notlike 'SharpClaw.*') { $null = $expected.Add($normalized) }
         }
@@ -526,7 +536,11 @@ function Assert-RedistributionInventory {
             $asset.Package -notmatch '^[A-Za-z0-9][A-Za-z0-9_.+-]*/[A-Za-z0-9][A-Za-z0-9.+-]*$') {
             throw 'Invalid bundled dependency provenance.'
         }
-        Assert-FileDigest (Resolve-PayloadPath $StageRoot $asset.Path) $asset.Sha256
+        if ($asset.DependencyManifest -cne '' -or -not $actualAssets.ContainsKey($asset.Path) -or
+            ($asset | ConvertTo-Json -Compress) -cne ($actualAssets[$asset.Path] | ConvertTo-Json -Compress)) {
+            throw 'Incorrect bundled dependency source coordinate.'
+        }
+        Assert-FileDigest (Resolve-PayloadPath $StageRoot $asset.Path) $asset.OutputSha256
         $null = $expected.Add($asset.Package)
     }
     $represented = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -541,17 +555,35 @@ function Assert-RedistributionInventory {
             }
             Assert-FileDigest (Resolve-PayloadPath $StageRoot $document.Path) $document.Sha256
         }
-        foreach ($asset in @($package.PayloadFiles)) {
-            $null = Resolve-PayloadPath $StageRoot $asset
-            $null = $covered.Add($asset)
+        $assets = @($package.Assets)
+        if ((@($assets | ForEach-Object Path | Sort-Object) -join '|') -cne (@($package.PayloadFiles | Sort-Object) -join '|')) {
+            throw "Incorrect payload-file set for $identity."
         }
+        if ($assets.Count -eq 0) { continue }
+        $archive = Get-ResolvedPackageArchive $package.Id $package.Version (Join-Path $CacheRoot 'packages')
+        Assert-FileDigest $archive $package.ArchiveSha256
+        $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+        try {
+            $null = Get-NuspecMetadata $zip $package.Id $package.Version
+            foreach ($asset in $assets) {
+                if ($asset.Package -ine $identity -or -not $actualAssets.ContainsKey($asset.Path) -or
+                    ($asset | ConvertTo-Json -Compress) -cne ($actualAssets[$asset.Path] | ConvertTo-Json -Compress) -or
+                    -not $covered.Add($asset.Path)) { throw "Incorrect or duplicate source attribution for '$($asset.Path)'." }
+                Assert-ArchiveAssetDigest $zip $asset.ArchiveEntry $asset.InputSha256
+                Assert-FileDigest (Resolve-PayloadPath $StageRoot $asset.Path) $asset.OutputSha256
+                if ($asset.Transformation -eq 'ready-to-run') {
+                    Assert-ReadyToRunManagedIdentity $zip $asset.ArchiveEntry (Resolve-PayloadPath $StageRoot $asset.Path)
+                }
+                if ($asset.Transformation -eq 'copy' -and $asset.InputSha256 -ine $asset.OutputSha256) {
+                    throw "Unchanged-copy digest mismatch for '$($asset.Path)'."
+                }
+            }
+        } finally { $zip.Dispose() }
     }
     if ($represented.Count -ne $expected.Count) { throw 'Redistribution inventory misses a resolved dependency.' }
     foreach ($file in Get-ChildItem -LiteralPath $StageRoot -Recurse -File) {
         $relative = [IO.Path]::GetRelativePath($StageRoot, $file.FullName).Replace('\', '/')
-        if ($relative -match '^(legal|provenance)/' -or
-            $file.Name -notmatch '(?i)\.(dll|exe|so|dylib|a|dat|ttf|otf|woff2?)$' -or
-            $file.Name -match '^SharpClaw\.') { continue }
+        if (-not (Test-RedistributableAsset $relative)) { continue }
         if (-not $covered.Contains($relative)) { throw "Redistribution inventory misses '$relative'." }
     }
 }

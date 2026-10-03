@@ -179,44 +179,196 @@
   ],
   "BundledAssets": [
     {
-      "ContributionPath": "sharpclaw_providers_llamasharp/CommunityToolkit.HighPerformance.dll",
-      "Sha256": "196607c6d4d704b5ee95c80f8e3cd799595b7d8a08108701894c211b138d2839",
-      "Package": "CommunityToolkit.HighPerformance/8.4.2"
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/CommunityToolkit.HighPerformance.dll"
+      ],
+      "Package": "CommunityToolkit.HighPerformance/8.4.2",
+      "ArchiveEntry": "lib/net8.0/CommunityToolkit.HighPerformance.dll",
+      "Sha256": "196607c6d4d704b5ee95c80f8e3cd799595b7d8a08108701894c211b138d2839"
     },
     {
-      "ContributionPath": "sharpclaw_providers_llamasharp/LLamaSharp.dll",
-      "Sha256": "559fd41e6a9757ccd7aaec61255ecde33bc0294894510e10b94d095e02ad7c10",
-      "Package": "LLamaSharp/0.27.0"
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/LlamaSharp.ToolCallEnvelopes.dll"
+      ],
+      "Package": "LlamaSharp.ToolCallEnvelopes/0.1.0",
+      "ArchiveEntry": "lib/net10.0/LlamaSharp.ToolCallEnvelopes.dll",
+      "Sha256": "070fec114cc3229871f8749599b17164880da7a7739b7dc484e3f9046a53305a"
     },
     {
-      "ContributionPath": "sharpclaw_providers_llamasharp/LlamaSharp.ToolCallEnvelopes.dll",
-      "Sha256": "070fec114cc3229871f8749599b17164880da7a7739b7dc484e3f9046a53305a",
-      "Package": "LlamaSharp.ToolCallEnvelopes/0.1.0"
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/LLamaSharp.dll"
+      ],
+      "Package": "LLamaSharp/0.27.0",
+      "ArchiveEntry": "lib/net8.0/LLamaSharp.dll",
+      "Sha256": "559fd41e6a9757ccd7aaec61255ecde33bc0294894510e10b94d095e02ad7c10"
     },
     {
-      "ContributionPath": "sharpclaw_providers_llamasharp/Microsoft.Bcl.Memory.dll",
-      "Sha256": "d844a2e31b7a0abc10911608e0a819523aa055774a5b46e8e12de14cd5a44b32",
-      "Package": "Microsoft.Bcl.Memory/10.0.5"
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Bcl.AsyncInterfaces.dll"
+      ],
+      "Package": "Microsoft.Bcl.AsyncInterfaces/10.0.5",
+      "ArchiveEntry": "lib/netstandard2.1/Microsoft.Bcl.AsyncInterfaces.dll",
+      "Sha256": "e925fe423d376b8c795c17ef57ef61a749f3bd34f044e72b2243103feadac1ec"
     },
     {
-      "ContributionPath": "sharpclaw_providers_llamasharp/Microsoft.Extensions.AI.Abstractions.dll",
-      "Sha256": "688fea67d5323883bd10086a83a6aac01f791830dcebbefb03515c9002a9d8f3",
-      "Package": "Microsoft.Extensions.AI.Abstractions/10.4.1"
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Bcl.Memory.dll"
+      ],
+      "Package": "Microsoft.Bcl.Memory/10.0.5",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Bcl.Memory.dll",
+      "Sha256": "d844a2e31b7a0abc10911608e0a819523aa055774a5b46e8e12de14cd5a44b32"
     },
     {
-      "ContributionPath": "sharpclaw_providers_llamasharp/System.Interactive.Async.dll",
-      "Sha256": "ffac755159ef51c4b119a6d68650d0e8e5d392d54bcfd27513cb30aa45393f0d",
-      "Package": "System.Interactive.Async/7.0.0"
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.AI.Abstractions.dll"
+      ],
+      "Package": "Microsoft.Extensions.AI.Abstractions/10.4.1",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.AI.Abstractions.dll",
+      "Sha256": "688fea67d5323883bd10086a83a6aac01f791830dcebbefb03515c9002a9d8f3"
     },
     {
-      "ContributionPath": "sharpclaw_providers_llamasharp/System.Linq.Async.dll",
-      "Sha256": "9023bdc38c02823fd86a2100350455ec0521fbef0267ad7e62ce38b3c44df608",
-      "Package": "System.Linq.Async/7.0.0"
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Configuration.Abstractions.dll"
+      ],
+      "Package": "Microsoft.Extensions.Configuration.Abstractions/10.0.8",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Configuration.Abstractions.dll",
+      "Sha256": "c295e6c3384ed61e4fea0fc43479aadedf81a60c9c97d3dbdb9247f562e0846f"
     },
     {
-      "ContributionPath": "sharpclaw_providers_llamasharp/System.Numerics.Tensors.dll",
-      "Sha256": "cd6878734a1fee6ecb50e3e151576cb7c7547bf2ddf5d480e95c01549e156c8c",
-      "Package": "System.Numerics.Tensors/10.0.5"
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Configuration.Binder.dll"
+      ],
+      "Package": "Microsoft.Extensions.Configuration.Binder/10.0.5",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Configuration.Binder.dll",
+      "Sha256": "99da3c074c66e16bcc37989f3a0af306895b12ba594f8a9a0ba3db48a08277d4"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Configuration.dll"
+      ],
+      "Package": "Microsoft.Extensions.Configuration/10.0.8",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Configuration.dll",
+      "Sha256": "7d913ce39a1f15768826433cc06519cf7ffa848e87521b2cbe0e537783ef93c2"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.DependencyInjection.Abstractions.dll"
+      ],
+      "Package": "Microsoft.Extensions.DependencyInjection.Abstractions/10.0.8",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "Sha256": "ca708422782fb25819941a16a057ea96d6d18b037e7e5cbfdf340b7a04362b57"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.DependencyInjection.dll"
+      ],
+      "Package": "Microsoft.Extensions.DependencyInjection/10.0.8",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.DependencyInjection.dll",
+      "Sha256": "47f8175d34e9087d3858644803c558cb9cf52b29bffda796f65c1c527d1b6a22"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Diagnostics.Abstractions.dll"
+      ],
+      "Package": "Microsoft.Extensions.Diagnostics.Abstractions/10.0.5",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "Sha256": "44063e4f4be903a152aa6e3273e86b1e645361c92de2a2ad559be270cf0c28c3"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Diagnostics.dll"
+      ],
+      "Package": "Microsoft.Extensions.Diagnostics/10.0.5",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Diagnostics.dll",
+      "Sha256": "456ad32114882c01f0bce822e7d29f303629a196f465269b118396481d703634"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Http.dll"
+      ],
+      "Package": "Microsoft.Extensions.Http/10.0.5",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Http.dll",
+      "Sha256": "f3b37a8d0950dba97ffc4b45841bb1b7bf5c0a6732e29b92aac39be2d4a48a4e"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Logging.Abstractions.dll"
+      ],
+      "Package": "Microsoft.Extensions.Logging.Abstractions/10.0.8",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Logging.Abstractions.dll",
+      "Sha256": "ec244a2db19dffe90cd299fa4b0691456ced342a078b4a93cf3726a9b431e9ac"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Logging.dll"
+      ],
+      "Package": "Microsoft.Extensions.Logging/10.0.5",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Logging.dll",
+      "Sha256": "607e91f57502684e35d1c766e84926f2e4f9d35cfb4173c0764fe6eb8a8a6b11"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Options.ConfigurationExtensions.dll"
+      ],
+      "Package": "Microsoft.Extensions.Options.ConfigurationExtensions/10.0.5",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Options.ConfigurationExtensions.dll",
+      "Sha256": "acb694ff92c66b001ec019ee05a1a88939efd8f045e842b8ae0e8b8490d5403e"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Options.dll"
+      ],
+      "Package": "Microsoft.Extensions.Options/10.0.5",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Options.dll",
+      "Sha256": "6f7a4bc2be6b35a1f28cd60c250e5471aac31cb2995ea7ec7365ea5e6f80640e"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/Microsoft.Extensions.Primitives.dll"
+      ],
+      "Package": "Microsoft.Extensions.Primitives/10.0.8",
+      "ArchiveEntry": "lib/net10.0/Microsoft.Extensions.Primitives.dll",
+      "Sha256": "a0794c3bab2d7e0c848f0dffb3b9aa4b43ce07dc0abd122ebb7bf6dc79452ec4"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/System.Interactive.Async.dll"
+      ],
+      "Package": "System.Interactive.Async/7.0.0",
+      "ArchiveEntry": "lib/net10.0/System.Interactive.Async.dll",
+      "Sha256": "ffac755159ef51c4b119a6d68650d0e8e5d392d54bcfd27513cb30aa45393f0d"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/System.Linq.Async.dll"
+      ],
+      "Package": "System.Linq.Async/7.0.0",
+      "ArchiveEntry": "lib/net10.0/System.Linq.Async.dll",
+      "Sha256": "9023bdc38c02823fd86a2100350455ec0521fbef0267ad7e62ce38b3c44df608"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/System.Numerics.Tensors.dll"
+      ],
+      "Package": "System.Numerics.Tensors/10.0.5",
+      "ArchiveEntry": "lib/net10.0/System.Numerics.Tensors.dll",
+      "Sha256": "cd6878734a1fee6ecb50e3e151576cb7c7547bf2ddf5d480e95c01549e156c8c"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/System.Security.Cryptography.Pkcs.dll"
+      ],
+      "Package": "System.Security.Cryptography.Pkcs/10.0.10",
+      "ArchiveEntry": "lib/net10.0/System.Security.Cryptography.Pkcs.dll",
+      "Sha256": "6a61b7aa008e00807a8d2a1b87eed604a2a55320800889242d1ce98531d8a076"
+    },
+    {
+      "ContributionPaths": [
+        "sharpclaw_providers_llamasharp/System.Security.Cryptography.Xml.dll"
+      ],
+      "Package": "System.Security.Cryptography.Xml/10.0.10",
+      "ArchiveEntry": "lib/net10.0/System.Security.Cryptography.Xml.dll",
+      "Sha256": "5a2053d5de6bb95ebe57a11fe9b553b9913d87fa4b3744f4e4e10ec4339cb0ed"
     }
   ]
 }

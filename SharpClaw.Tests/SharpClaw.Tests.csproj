@@ -47,6 +47,7 @@
 
   <ItemGroup>
     <Compile Include="GlobalUsings.cs" />
+    <Compile Include="..\build\ManagedPublishIdentity.cs" Link="Publishing\ManagedPublishIdentity.cs" />
     <Compile Include="Architecture\**\*.cs" />
     <Compile Include="Gateway\**\*.cs" />
     <Compile Include="Persistence\**\*.cs" />

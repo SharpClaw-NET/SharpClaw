@@ -33,9 +33,19 @@ Each stage also carries `legal/redistribution-inventory.json`. Publishing walks
 every resolved dependency manifest and the exact third-party DLLs embedded in
 contributions, retains package licences and notices, obtains hash-pinned
 upstream texts when a package omits them, and attributes redistributed managed,
-native, runtime-pack, and font files to their packages. Unknown licensing,
-missing notices, changed bundled bytes, and unattributed files fail the publish
-step. The stage audit runs again before either installer is built. The legal
+native, runtime-pack, and font files to their exact source archive entries within
+their own dependency scope. SDK publish receipts capture selected input digests,
+final copy-source digests, and non-composite ReadyToRun input/output mappings,
+compiler identity/digest, SDK target hashes and compiler inputs. Unchanged copies
+must byte-match their archive entry; transformed files must match their captured
+output, verified original input, normalized managed metadata, method IL/exception
+state and resources. Each publish invalidates stale intermediate ReadyToRun
+images using its new input receipt. Historical contributions without dependency
+manifests require explicit scoped archive-entry/digest pins in the notice policy;
+a shared filename is never evidence of origin. Unknown licensing, missing
+notices, wrong-version/replaced bytes, extra nested known-name files, unsupported
+transformations and unattributed files fail the publish step. The stage audit
+rechecks actual archives and receipts before either installer is built. The legal
 inventory includes the Open Sans font's own OFL notice in addition to Uno's
 package licence; the five Persistence written offers remain byte-for-byte from
 their reviewed nupkgs. The publisher needs network access to NuGet.org and the

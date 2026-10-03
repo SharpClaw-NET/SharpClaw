@@ -1,6 +1,7 @@
 # Portable behavioral tests; the tiny fixture files are not release packages.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$originalNugetPackages = $env:NUGET_PACKAGES
 . (Join-Path $PSScriptRoot 'PublishSupport.ps1')
 $root = Join-Path ([IO.Path]::GetTempPath()) ('sharpclaw-publish-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
@@ -20,6 +21,16 @@ function Assert-Rejected {
 function Save-Json {
     param([object]$Value, [string]$Path)
     $Value | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath $Path -Encoding utf8
+}
+function Save-FixtureDependencyManifest {
+    param([string]$Path, [string[]]$Packages)
+    $libraries = @{}
+    $target = @{}
+    foreach ($package in $Packages) {
+        $libraries[$package] = @{ type = 'package' }
+        $target[$package] = @{ runtime = @{ "lib/$($package.Split('/')[0]).dll" = @{} } }
+    }
+    Save-Json @{ runtimeTarget = @{ name = 'fixture' }; libraries = $libraries; targets = @{ fixture = $target } } $Path
 }
 function New-NoticePackage {
     param([string]$Directory, [string]$Name, [hashtable]$Entries)
@@ -104,11 +115,9 @@ try {
         'LICENSE.txt' = 'unit-only license text'
         'lib/ThirdParty.dll' = 'unit-only binary fixture'
     }
-    Save-Json ([pscustomobject]@{ libraries = @{ 'ThirdParty/1.0.0' = @{ type = 'package' } } }) (Join-Path $stage 'SharpClaw.Test.deps.json')
-    $originalNugetPackages = $env:NUGET_PACKAGES
+    Save-FixtureDependencyManifest (Join-Path $stage 'SharpClaw.Test.deps.json') @('ThirdParty/1.0.0')
     $env:NUGET_PACKAGES = $fixturePackageRoot
-    try { Copy-ResolvedDependencyNotices $stage (Join-Path $root 'legal-cache') }
-    finally { $env:NUGET_PACKAGES = $originalNugetPackages }
+    Copy-ResolvedDependencyNotices $stage (Join-Path $root 'legal-cache')
     $stageManifest = [pscustomobject]@{
         SourceCommit = 'a' * 40; Version = '0.5.0-preview.1'; InstallerVersion = '0.5.0.1'
         DeploymentType = 'Server'; Rid = 'linux-x64'; BomManifestSha256 = $bomHash
@@ -133,6 +142,56 @@ try {
             Assert-Rejected { Assert-RedistributionInventory $stage }
         } finally { Remove-Item -LiteralPath $path -Force }
     }
+    Test-Case 'same-name wrong-byte replacement fails creation and validation' {
+        $path = Join-Path $stage 'ThirdParty.dll'
+        $bytes = [IO.File]::ReadAllBytes($path)
+        try {
+            [IO.File]::WriteAllText($path, 'a different file with a known basename')
+            Assert-Rejected { Assert-RedistributionInventory $stage }
+            Assert-Rejected { Copy-ResolvedDependencyNotices $stage (Join-Path $root 'legal-cache') }
+        } finally { [IO.File]::WriteAllBytes($path, $bytes) }
+    }
+    Test-Case 'extra nested known-name copy fails creation and validation' {
+        $directory = Join-Path $stage 'unexpected'
+        New-Item -ItemType Directory -Path $directory | Out-Null
+        try {
+            Copy-Item -LiteralPath (Join-Path $stage 'ThirdParty.dll') -Destination (Join-Path $directory 'ThirdParty.dll')
+            Assert-Rejected { Assert-RedistributionInventory $stage }
+            Assert-Rejected { Copy-ResolvedDependencyNotices $stage (Join-Path $root 'legal-cache') }
+        } finally { Remove-Item -LiteralPath $directory -Recurse -Force }
+    }
+    Test-Case 'two scopes retain different versions of the same assembly name' {
+        $caseStage = Join-Path $root 'two-scopes'
+        $secondPackage = Join-Path $fixturePackageRoot 'thirdparty/2.0.0'
+        New-Item -ItemType Directory -Path $secondPackage -Force | Out-Null
+        New-NoticePackage $secondPackage 'thirdparty.2.0.0' @{
+            'ThirdParty.nuspec' = '<package><metadata><id>ThirdParty</id><version>2.0.0</version><license type="file">LICENSE.txt</license></metadata></package>'
+            'LICENSE.txt' = 'second-version unit licence'; 'lib/ThirdParty.dll' = 'second version binary'
+        }
+        foreach ($version in @('1.0.0', '2.0.0')) {
+            $directory = Join-Path $caseStage "contributions/scope-$version"
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+            $value = if ($version -eq '1.0.0') { 'unit-only binary fixture' } else { 'second version binary' }
+            [IO.File]::WriteAllText((Join-Path $directory 'ThirdParty.dll'), $value)
+            Save-FixtureDependencyManifest (Join-Path $directory 'Module.deps.json') @("ThirdParty/$version")
+        }
+        Copy-ResolvedDependencyNotices $caseStage (Join-Path $root 'legal-cache')
+        $inventory = Get-Content -LiteralPath (Join-Path $caseStage 'legal/redistribution-inventory.json') -Raw | ConvertFrom-Json
+        foreach ($package in $inventory.Packages) {
+            if (@($package.Assets).Count -ne 1 -or $package.Assets[0].Path -cne "contributions/scope-$($package.Version)/ThirdParty.dll" -or
+                $package.Assets[0].ArchiveEntry -cne 'lib/ThirdParty.dll') { throw 'Scope/version attribution leaked.' }
+        }
+        $first = Join-Path $caseStage 'contributions/scope-1.0.0/ThirdParty.dll'
+        $second = Join-Path $caseStage 'contributions/scope-2.0.0/ThirdParty.dll'
+        $bytes = [IO.File]::ReadAllBytes($first)
+        try {
+            Copy-Item -LiteralPath $second -Destination $first -Force
+            Assert-Rejected { Assert-RedistributionInventory $caseStage }
+        } finally { [IO.File]::WriteAllBytes($first, $bytes) }
+    }
+    Test-Case 'production publish requires SDK-selected asset receipts' {
+        Assert-Rejected { Copy-ResolvedDependencyNotices $stage (Join-Path $root 'legal-cache') -RequirePublishReceipts }
+    }
     Test-Case 'missing package licence fails closed' {
         $path = Join-Path $stage 'legal/third-party/ThirdParty.1.0.0/LICENSE.txt'
         $original = [IO.File]::ReadAllBytes($path)
@@ -145,10 +204,7 @@ try {
         $path = Join-Path $stage 'SharpClaw.Test.deps.json'
         $original = [IO.File]::ReadAllBytes($path)
         try {
-            Save-Json ([pscustomobject]@{ libraries = @{
-                'ThirdParty/1.0.0' = @{ type = 'package' }
-                'Unknown/2.0.0' = @{ type = 'package' }
-            } }) $path
+            Save-FixtureDependencyManifest $path @('ThirdParty/1.0.0', 'Unknown/2.0.0')
             Assert-Rejected { Assert-RedistributionInventory $stage }
         } finally { [IO.File]::WriteAllBytes($path, $original) }
     }
@@ -157,7 +213,7 @@ try {
         $casePackage = Join-Path $fixturePackageRoot 'unlicensed/1.0.0'
         New-Item -ItemType Directory -Path $caseStage, $casePackage -Force | Out-Null
         [IO.File]::WriteAllText((Join-Path $caseStage 'Unlicensed.dll'), 'unit-only unlicensed binary')
-        Save-Json ([pscustomobject]@{ libraries = @{ 'Unlicensed/1.0.0' = @{ type = 'package' } } }) (Join-Path $caseStage 'Unlicensed.deps.json')
+        Save-FixtureDependencyManifest (Join-Path $caseStage 'Unlicensed.deps.json') @('Unlicensed/1.0.0')
         New-NoticePackage $casePackage 'unlicensed.1.0.0' @{
             'Unlicensed.nuspec' = '<package><metadata><id>Unlicensed</id><version>1.0.0</version></metadata></package>'
             'lib/Unlicensed.dll' = 'unit-only unlicensed binary'
@@ -353,5 +409,6 @@ try {
     }
     Write-Host "Publishing behavioral tests: $script:passed passed; zero skipped."
 } finally {
+    $env:NUGET_PACKAGES = $originalNugetPackages
     Remove-Item -LiteralPath $root -Recurse -Force
 }

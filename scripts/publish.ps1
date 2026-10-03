@@ -86,6 +86,7 @@ $feed = [Security.SecurityElement]::Escape((Join-Path $bom.Root 'feed'))
 $env:NUGET_PACKAGES = Join-Path $OutputDir '.nuget/packages'
 $env:NUGET_HTTP_CACHE_PATH = Join-Path $OutputDir '.nuget/http-cache'
 $publishProperties = @(
+    '-p:SharpClawCapturePublishAssets=true', '-p:PublishTrimmed=false', '-p:PublishReadyToRunComposite=false',
     "-p:SharpClawContributionPayloadRoot=$($bom.BundleRoot)",
     "-p:RestoreConfigFile=$restoreConfig",
     "-p:Version=$version", '-p:AssemblyVersion=0.5.0.0', "-p:FileVersion=$installerVersion",
@@ -245,11 +246,11 @@ function Complete-Deployment {
     Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE.md') -Destination $StageDir
     Copy-PackageNotices (Join-Path $bom.Root 'feed') $StageDir
     $provenance = Join-Path $StageDir 'provenance'
-    New-Item -ItemType Directory -Path $provenance | Out-Null
+    New-Item -ItemType Directory -Path $provenance -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $bom.Root 'bom-manifest.json'),
         (Join-Path $bom.BundleRoot 'contribution-bundle-manifest.json') -Destination $provenance
     Strip-ForeignNatives $StageDir $TargetRid
-    Copy-ResolvedDependencyNotices $StageDir (Join-Path $OutputDir '.nuget/legal-cache') (Join-Path $repoRoot 'build/ThirdPartyNotices.json')
+    Copy-ResolvedDependencyNotices $StageDir (Join-Path $OutputDir '.nuget/legal-cache') (Join-Path $repoRoot 'build/ThirdPartyNotices.json') -RequirePublishReceipts
     $manifest = [pscustomobject]@{
         DeploymentType = $Type; Rid = $TargetRid; Version = $version; InstallerVersion = $installerVersion
         SourceCommit = $sourceCommit; BomManifestSha256 = $BomManifestSha256

@@ -1,0 +1,56 @@
+<Project>
+  <!-- Capture SDK-selected inputs BEFORE ReadyToRun, and the exact final copy
+       sources AFTER it. No environment dump/binlog or credentials are retained. -->
+  <Target Name="_SharpClawCapturePublishInputs" AfterTargets="ComputeResolvedFilesToPublishList">
+    <PropertyGroup>
+      <_SharpClawReceiptDir>$(PublishDir)provenance/publish-assets/$(AssemblyName)/</_SharpClawReceiptDir>
+    </PropertyGroup>
+    <Error Condition="'$(PublishTrimmed)' == 'true' or '$(PublishSingleFile)' == 'true' or '$(PublishReadyToRunComposite)' == 'true'"
+           Text="Publish asset provenance supports unchanged copies and non-composite ReadyToRun only." />
+    <MakeDir Directories="$(_SharpClawReceiptDir)" />
+    <GetFileHash Files="@(ResolvedFileToPublish)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_SharpClawPublishInput" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(_SharpClawReceiptDir)inputs.tsv" Overwrite="true" Encoding="UTF-8"
+                      Lines="@(_SharpClawPublishInput->'%(FullPath)|%(FileHash)|%(RelativePath)|%(NuGetPackageId)|%(NuGetPackageVersion)')" />
+    <PropertyGroup>
+      <!-- Force fresh compilation, even if an old obj/R2R image happens to be
+           newer than a different restored package's original timestamp. -->
+      <MSBuildAllProjects>$(MSBuildAllProjects);$(_SharpClawReceiptDir)inputs.tsv</MSBuildAllProjects>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_SharpClawReceiptDir)context.tsv" Overwrite="true" Encoding="UTF-8"
+                      Lines="$(NuGetPackageRoot)|$(NETCoreSdkVersion)|$(TargetFramework)|$(RuntimeIdentifier)|$(MSBuildProjectFullPath)" />
+    <ItemGroup>
+      <_SharpClawSdkProvenance Include="$(MSBuildSDKsPath)/Microsoft.NET.Sdk/targets/Microsoft.NET.Publish.targets;$(MSBuildSDKsPath)/Microsoft.NET.Sdk/targets/Microsoft.NET.CrossGen.targets;$(MicrosoftNETBuildTasksAssembly)" />
+    </ItemGroup>
+    <GetFileHash Files="@(_SharpClawSdkProvenance)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_SharpClawSdkProvenanceHash" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(_SharpClawReceiptDir)sdk.tsv" Overwrite="true" Encoding="UTF-8"
+                      Lines="@(_SharpClawSdkProvenanceHash->'%(Filename)%(Extension)|%(FileHash)')" />
+  </Target>
+  <Target Name="_SharpClawCaptureReadyToRunInputs" AfterTargets="_PrepareForReadyToRunCompilation">
+    <GetFileHash Files="@(_ReadyToRunCompileList)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_SharpClawReadyToRunInput" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(_SharpClawReceiptDir)ready-to-run.tsv" Overwrite="true" Encoding="UTF-8"
+                      Lines="@(_SharpClawReadyToRunInput->'%(FullPath)|%(FileHash)|%(OutputR2RImage)|%(RelativePath)')" />
+    <GetFileHash Files="@(Crossgen2Tool)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_SharpClawCompilerHash" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(_SharpClawReceiptDir)compiler.tsv" Overwrite="true" Encoding="UTF-8"
+                      Lines="@(_SharpClawCompilerHash->'%(FullPath)|%(FileHash)|%(TargetOS)|%(TargetArch)')" />
+    <GetFileHash Files="@(_ReadyToRunAssembliesToReference);@(_ReadyToRunPgoFiles)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_SharpClawCompilerInputHash" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(_SharpClawReceiptDir)compiler-inputs.tsv" Overwrite="true" Encoding="UTF-8"
+                      Lines="@(_SharpClawCompilerInputHash->'%(FullPath)|%(FileHash)')" />
+  </Target>
+  <Target Name="_SharpClawCapturePublishOutputs" AfterTargets="Publish">
+    <GetFileHash Files="@(ResolvedFileToPublish)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_SharpClawPublishOutput" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(_SharpClawReceiptDir)outputs.tsv" Overwrite="true" Encoding="UTF-8"
+                      Lines="@(_SharpClawPublishOutput->'%(FullPath)|%(FileHash)|%(RelativePath)')" />
+  </Target>
+</Project>
