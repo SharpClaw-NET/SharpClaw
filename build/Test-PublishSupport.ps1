@@ -395,6 +395,17 @@ try {
             throw 'Uno desktop publish must not restore unrelated mobile workloads.'
         }
     }
+    Test-Case 'installed MSIX gate proves clean Application Protected template seeding' {
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        $firstActivation = $gate.IndexOf('$result[''CleanFirstLaunchProcessId'']', [StringComparison]::Ordinal)
+        $configuration = $gate.IndexOf('foreach ($config in $configs)', [StringComparison]::Ordinal)
+        if ($firstActivation -lt 0 -or $configuration -le $firstActivation -or
+            $gate -notmatch 'cipher.exe /c' -or $gate -notmatch 'Application Protected' -or
+            $gate -notmatch 'MetadataCopyFailureHResult' -or $gate -notmatch 'Assert-SeededTemplate' -or
+            $gate -notmatch 'CleanFirstLaunchVerified' -or $gate -notmatch 'clean-first-launch.png') {
+            throw 'The installed gate must reproduce AppX protection and activate before pre-seeding any configuration.'
+        }
+    }
     Test-Case 'both native ICU package variants retain upstream licensing' {
         $policy = Get-Content (Join-Path $PSScriptRoot 'ThirdPartyNotices.json') -Raw | ConvertFrom-Json -AsHashtable
         $windows = $policy.PackageDocuments['Uno.icu-win/77.3.2']

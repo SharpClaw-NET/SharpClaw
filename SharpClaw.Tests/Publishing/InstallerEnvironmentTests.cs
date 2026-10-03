@@ -43,6 +43,41 @@ internal sealed class InstallerEnvironmentTests
         prepare.Should().Throw<InvalidOperationException>();
     }
 
+    [TestCase(".env.template")]
+    [TestCase(".dev.env.template")]
+    public void TemplateSeedingPreservesBytesWithoutSourceFileAttributes(string templateName)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"sharpclaw-template-content-test-{Guid.NewGuid():N}");
+        var binaries = Path.Combine(root, "binaries");
+        var writable = Path.Combine(root, "config");
+        Directory.CreateDirectory(binaries);
+        var source = Path.Combine(binaries, templateName);
+        byte[] contents = [0xef, 0xbb, 0xbf, 0x23, 0x20, 0xc5, 0xa1, 0x0d, 0x0a, 0x00];
+        try
+        {
+            File.WriteAllBytes(source, contents);
+            File.SetAttributes(source, File.GetAttributes(source) | FileAttributes.ReadOnly);
+
+            SharpClawEnvironmentDirectory.Prepare(binaries, writable);
+
+            var destination = Path.Combine(writable, templateName);
+            File.ReadAllBytes(destination).Should().Equal(contents);
+            (File.GetAttributes(destination) & (FileAttributes.ReadOnly | FileAttributes.Encrypted))
+                .Should().Be((FileAttributes)0);
+            File.WriteAllText(destination, "administrator template");
+            SharpClawEnvironmentDirectory.Prepare(binaries, writable);
+            File.ReadAllText(destination).Should().Be("administrator template");
+            File.ReadAllBytes(source).Should().Equal(contents);
+            Directory.GetFiles(writable, "*.tmp").Should().BeEmpty();
+        }
+        finally
+        {
+            if (File.Exists(source))
+                File.SetAttributes(source, File.GetAttributes(source) & ~FileAttributes.ReadOnly);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Test]
     public void MsixStateRootDoesNotDependOnTheVersionedInstallationDirectory()
     {

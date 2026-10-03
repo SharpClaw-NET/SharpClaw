@@ -140,6 +140,7 @@ public static class SharpClawInstalledProbe {
 }
 '@
 $package = $null
+$virtualProfileRoot = $null
 $trustOwnedByTest = $false
 $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new([IO.File]::ReadAllBytes($CertificatePath))
 if ($certificate.Subject -ne 'CN=SharpClaw Dev' -or $certificate.NotAfter -le (Get-Date)) {
@@ -156,6 +157,7 @@ $result = [ordered]@{
     TestUserSid = $ExpectedTestUserSid; StartUtc = [DateTime]::UtcNow.ToString('O')
     Aumid = $null; ActivatedProcessId = 0; Window = $null; BootUiObserved = $false
     RuntimeObserved = $false; GatewayObserved = $false; ProcessSnapshotTimeouts = 0
+    CleanFirstLaunchVerified = $false; ProtectedTemplateSources = @(); SeededTemplates = @()
     CleanupVerified = $false; Success = $false
 }
 function Get-TestPackageProcesses {
@@ -176,7 +178,7 @@ function Get-TestPackageProcesses {
     }
 }
 function Save-WindowCapture {
-    param([long]$Handle)
+    param([long]$Handle, [string]$FileName = 'boot-window.png')
     $rectangle = [SharpClawInstalledProbe+Rect]::new()
     if (-not [SharpClawInstalledProbe]::GetWindowRect([IntPtr]$Handle, [ref]$rectangle)) { throw 'Cannot read window geometry.' }
     $bitmap = [Drawing.Bitmap]::new($rectangle.Right - $rectangle.Left, $rectangle.Bottom - $rectangle.Top)
@@ -185,8 +187,24 @@ function Save-WindowCapture {
     try {
         if (-not [SharpClawInstalledProbe]::PrintWindow([IntPtr]$Handle, $dc, 2)) { throw 'Window capture failed.' }
     } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
-    try { $bitmap.Save((Join-Path $ReportDirectory 'boot-window.png'), [Drawing.Imaging.ImageFormat]::Png) }
+    try { $bitmap.Save((Join-Path $ReportDirectory $FileName), [Drawing.Imaging.ImageFormat]::Png) }
     finally { $bitmap.Dispose() }
+}
+function Assert-SeededTemplate {
+    param([string]$SourceRelativePath, [string]$DestinationDirectory)
+    $source = Join-Path $package.InstallLocation $SourceRelativePath
+    $destination = Join-Path $DestinationDirectory ([IO.Path]::GetFileName($source))
+    if (-not (Test-Path -LiteralPath $destination) -or
+        (Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $destination).Hash -or
+        ([IO.File]::GetAttributes($destination) -band ([IO.FileAttributes]::Encrypted -bor [IO.FileAttributes]::ReadOnly))) {
+        throw "Product did not seed unprotected, byte-identical template contents: $SourceRelativePath"
+    }
+    [pscustomobject]@{
+        Source = $SourceRelativePath; Destination = $destination
+        Sha256 = (Get-FileHash -LiteralPath $destination).Hash
+        Length = (Get-Item -LiteralPath $destination).Length
+        Attributes = [IO.File]::GetAttributes($destination).ToString()
+    }
 }
 try {
     $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $PackagePath).Path)
@@ -215,13 +233,105 @@ try {
     $applications = @($manifest.Package.Applications.Application)
     if ($applications.Count -ne 1) { throw 'Expected exactly one registered application.' }
     $result.Aumid = "$($package.PackageFamilyName)!$($applications[0].Id)"
-    # Explicit non-secret configuration, not an implicit production default.
-    # This tests the configured local stack without contacting an LLM backend.
+    $virtualProfileRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) "Packages/$($package.PackageFamilyName)/LocalCache/Local/SharpClaw"
+    if (Test-Path -LiteralPath $virtualProfileRoot) { throw 'The test user already has package-virtualized SharpClaw state.' }
     $frontend = Join-Path $profileRoot 'installed/com.mkn8rn.SharpClaw/frontend'
+    $frontendCandidates = @($frontend, (Join-Path $virtualProfileRoot 'installed/com.mkn8rn.SharpClaw/frontend'))
+    $templateScopes = @(
+        @('Environment', (Join-Path $frontend 'config')),
+        @('backend/Environment', (Join-Path $frontend 'stack/backend/config')),
+        @('gateway/Environment', (Join-Path $frontend 'stack/gateway/config'))
+    )
+    # A plain extracted archive cannot reproduce AppX protection. Require the
+    # genuinely deployed inputs and retain cipher's Application Protected proof.
+    foreach ($scope in $templateScopes) {
+        foreach ($name in @('.env.template', '.dev.env.template')) {
+            $relative = $scope[0] + '/' + $name
+            $source = Join-Path $package.InstallLocation $relative
+            $attributes = [IO.File]::GetAttributes($source)
+            $cipher = @(& cipher.exe /c $source 2>&1)
+            if ($LASTEXITCODE -ne 0 -or -not ($attributes -band [IO.FileAttributes]::Encrypted) -or
+                ($cipher -join "`n") -notmatch 'Application Protected') {
+                throw "Require deployed Application Protected template input: $relative"
+            }
+            $cipher | Set-Content -LiteralPath (Join-Path $ReportDirectory ('cipher-' + $relative.Replace('/', '_') + '.txt'))
+            $result.ProtectedTemplateSources += [pscustomobject]@{
+                Path = $relative; Sha256 = (Get-FileHash -LiteralPath $source).Hash
+                Attributes = $attributes.ToString(); ApplicationProtected = $true
+            }
+        }
+    }
+    # Negative control: the former metadata-copy operation must fail on this
+    # real deployment, rather than silently testing an unprotected fixture.
+    $copyProbe = Join-Path $ReportDirectory 'metadata-copy-negative.template'
+    try {
+        [IO.File]::Copy((Join-Path $package.InstallLocation 'Environment/.env.template'), $copyProbe, $false)
+        throw 'The old File.Copy operation unexpectedly succeeded; regression fixture is not representative.'
+    } catch [IO.IOException] {
+        if ($_.Exception.HResult -ne -2147018896) { throw }
+        $result['MetadataCopyFailureHResult'] = '0x80071770'
+    } finally {
+        if (Test-Path -LiteralPath $copyProbe) { Remove-Item -LiteralPath $copyProbe -Force }
+    }
+    # First activation must happen BEFORE any test configuration/template is
+    # created. Pre-seeding templates hid the owner's first-launch failure.
+    $result['CleanFirstLaunchProcessId'] = [SharpClawInstalledProbe]::Activate($result.Aumid)
+    $cleanDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+    do {
+        $cleanClients = @(Get-TestPackageProcesses -AllowTransientTimeout | Where-Object Name -eq 'SharpClaw.Client.Uno.exe')
+        if ($cleanClients.Count -gt 1) { throw 'Duplicate clients during clean first launch.' }
+        if ($cleanClients.Count -eq 1) {
+            $cleanWindows = @([SharpClawInstalledProbe]::VisibleWindows([uint32]$cleanClients[0].ProcessId))
+            $seededRoots = @($frontendCandidates | Where-Object {
+                (Test-Path -LiteralPath (Join-Path $_ 'config/.env.template')) -and
+                (Test-Path -LiteralPath (Join-Path $_ 'stack/backend/config/.env.template'))
+            })
+            if ($seededRoots.Count -gt 1) { throw 'Ambiguous physical/package-virtualized test configuration roots.' }
+            if ($seededRoots.Count -eq 1) {
+                $frontend = $seededRoots[0]
+                $templateScopes = @(
+                    @('Environment', (Join-Path $frontend 'config')),
+                    @('backend/Environment', (Join-Path $frontend 'stack/backend/config')),
+                    @('gateway/Environment', (Join-Path $frontend 'stack/gateway/config'))
+                )
+            }
+            $seeded = @($templateScopes[0..1] | ForEach-Object {
+                Test-Path -LiteralPath (Join-Path $_[1] '.env.template')
+                Test-Path -LiteralPath (Join-Path $_[1] '.dev.env.template')
+            })
+            if ($cleanWindows.Count -eq 1 -and $false -notin $seeded -and
+                [SharpClawInstalledProbe]::HasVisibleBootUi($cleanWindows[0].Handle)) {
+                $result.CleanFirstLaunchVerified = $true
+                $result['ActualFrontendRoot'] = $frontend
+                Save-WindowCapture $cleanWindows[0].Handle 'clean-first-launch.png'
+                break
+            }
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $cleanDeadline)
+    if (-not $result.CleanFirstLaunchVerified) { throw 'Clean first launch did not seed templates and expose the boot UI.' }
+    foreach ($scope in $templateScopes[0..1]) {
+        foreach ($name in @('.env.template', '.dev.env.template')) {
+            $result.SeededTemplates += Assert-SeededTemplate ($scope[0] + '/' + $name) $scope[1]
+        }
+    }
+    $null = (Get-Process -Id $cleanClients[0].ProcessId).CloseMainWindow()
+    $stopDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        if (@(Get-TestPackageProcesses).Count -eq 0) { break }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $stopDeadline)
+    foreach ($process in Get-TestPackageProcesses) {
+        try { Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop }
+        catch { if (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue) { throw } }
+    }
+    if (@(Get-TestPackageProcesses).Count -ne 0) { throw 'Clean-first-launch processes did not stop before configured activation.' }
+    # Explicit non-secret configuration, not an implicit production default.
+    # Only AFTER proving clean first launch, configure the two seeded scopes.
+    # Leave Gateway templates absent so its first startup also exercises seeding.
     $configs = @(
         @('Environment/.env.template', (Join-Path $frontend 'config'), 'Gateway__Enabled="true"'),
-        @('backend/Environment/.env.template', (Join-Path $frontend 'stack/backend/config'), 'Provider__Key="ollama"'),
-        @('gateway/Environment/.env.template', (Join-Path $frontend 'stack/gateway/config'), '')
+        @('backend/Environment/.env.template', (Join-Path $frontend 'stack/backend/config'), 'Provider__Key="ollama"')
     )
     foreach ($config in $configs) {
         New-Item -ItemType Directory -Path $config[1] -Force | Out-Null
@@ -231,6 +341,8 @@ try {
             $text = [regex]::Replace($text, "(?m)^$key=.*$", '') + "`n" + $config[2] + "`n"
         }
         [IO.File]::WriteAllText((Join-Path $config[1] '.env.template'), $text, [Text.UTF8Encoding]::new($false))
+        $active = Join-Path $config[1] '.env'
+        if (Test-Path -LiteralPath $active) { Remove-Item -LiteralPath $active -Force }
     }
     $result.ActivatedProcessId = [SharpClawInstalledProbe]::Activate($result.Aumid)
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
@@ -265,9 +377,16 @@ try {
     if (-not ($result.BootUiObserved -and $result.RuntimeObserved -and $result.GatewayObserved)) {
         throw 'Installed activation did not expose boot UI and start the configured Runtime/Gateway within the deadline.'
     }
-    $journalDirectory = Join-Path $profileRoot 'diagnostics/startup'
-    $stages = @(Get-ChildItem -LiteralPath $journalDirectory -Filter '*.jsonl' | ForEach-Object {
-        Get-Content -LiteralPath $_.FullName | ForEach-Object { ($_ | ConvertFrom-Json).Stage }
+    foreach ($name in @('.env.template', '.dev.env.template')) {
+        $result.SeededTemplates += Assert-SeededTemplate ($templateScopes[2][0] + '/' + $name) $templateScopes[2][1]
+    }
+    $stages = @(@($profileRoot, $virtualProfileRoot) | ForEach-Object {
+        $journalDirectory = Join-Path $_ 'diagnostics/startup'
+        if (Test-Path -LiteralPath $journalDirectory) {
+            Get-ChildItem -LiteralPath $journalDirectory -Filter '*.jsonl' | ForEach-Object {
+                Get-Content -LiteralPath $_.FullName | ForEach-Object { ($_ | ConvertFrom-Json).Stage }
+            }
+        }
     })
     if ('BootLoaded' -notin $stages -or 'WindowActivated' -notin $stages -or 'StartupFailed' -in $stages) {
         throw 'Durable startup journal does not corroborate installed window and boot initialization.'
@@ -288,9 +407,14 @@ try {
 } finally {
     $cleanupFailures = [Collections.Generic.List[string]]::new()
     try {
-        $diagnostics = Join-Path $profileRoot 'diagnostics/startup'
         try {
-            if (Test-Path -LiteralPath $diagnostics) { Copy-Item -LiteralPath $diagnostics -Destination $ReportDirectory -Recurse }
+            foreach ($stateRoot in @($profileRoot, $virtualProfileRoot) | Where-Object { $_ }) {
+                $diagnostics = Join-Path $stateRoot 'diagnostics/startup'
+                if (Test-Path -LiteralPath $diagnostics) {
+                    $label = if ($stateRoot -eq $profileRoot) { 'physical-startup' } else { 'virtualized-startup' }
+                    Copy-Item -LiteralPath $diagnostics -Destination (Join-Path $ReportDirectory $label) -Recurse
+                }
+            }
             Get-TestPackageProcesses | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath |
                 ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $ReportDirectory 'processes.json')
         } catch { $cleanupFailures.Add('Evidence capture failed: ' + $_.Exception.Message) }
