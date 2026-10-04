@@ -178,6 +178,27 @@ function Get-TestPackageProcesses {
         throw
     }
 }
+function Wait-TestPackageProcessesStopped {
+    param([ValidateRange(0, 20)][int]$TimeoutSeconds = 20)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        if (@(Get-TestPackageProcesses).Count -eq 0) { return }
+        if ([DateTime]::UtcNow -ge $deadline) { break }
+        Start-Sleep -Milliseconds 200
+    } while ($true)
+    throw 'Test package processes survived the bounded exit wait.'
+}
+function Copy-SharedJournalContents {
+    param([string]$Source, [string]$Destination)
+    # The startup writer allows ReadWrite sharing. A ReadAllBytes reader uses
+    # only Read sharing and therefore conflicts while that writer is open.
+    $journalStream = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $contents = [IO.MemoryStream]::new()
+    try {
+        $journalStream.CopyTo($contents)
+        [IO.File]::WriteAllBytes($Destination, $contents.ToArray())
+    } finally { $contents.Dispose(); $journalStream.Dispose() }
+}
 function Save-WindowCapture {
     param([long]$Handle, [string]$FileName = 'boot-window.png')
     $rectangle = [SharpClawInstalledProbe+Rect]::new()
@@ -346,7 +367,9 @@ try {
         try { Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop }
         catch { if (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue) { throw } }
     }
-    if (@(Get-TestPackageProcesses).Count -ne 0) { throw 'Clean-first-launch processes did not stop before configured activation.' }
+    # Stop-Process requests termination; it does not prove all process handles
+    # and the next CIM snapshot have observed that exit yet.
+    Wait-TestPackageProcessesStopped
     # Explicit non-secret configuration, not an implicit production default.
     # Only AFTER proving clean first launch, configure the two seeded scopes.
     # Leave Gateway templates absent so its first startup also exercises seeding.
@@ -443,8 +466,7 @@ try {
                     foreach ($journal in Get-ChildItem -LiteralPath $diagnostics -Filter '*.jsonl') {
                         # Evidence crosses the same AppX protection boundary as
                         # templates; retain contents, never File.Copy metadata.
-                        $contents = [IO.File]::ReadAllBytes($journal.FullName)
-                        [IO.File]::WriteAllBytes((Join-Path $journalEvidence $journal.Name), $contents)
+                        Copy-SharedJournalContents $journal.FullName (Join-Path $journalEvidence $journal.Name)
                     }
                 }
             }
@@ -455,6 +477,8 @@ try {
             try { Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop }
             catch { $cleanupFailures.Add('Test process cleanup failed: ' + $_.Exception.Message) }
         }
+        try { Wait-TestPackageProcessesStopped }
+        catch { $cleanupFailures.Add('Test process exit verification failed: ' + $_.Exception.Message) }
         # Also recover a successful registration if a later metadata query failed.
         $registered = @(Get-AppxPackage -Name 'com.mkn8rn.SharpClaw')
         foreach ($installed in $registered) {

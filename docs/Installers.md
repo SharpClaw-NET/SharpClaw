@@ -99,7 +99,9 @@ package sources, without copying encryption or read-only attributes. Windows may
 files inside the package's own LocalCache: those targets must retain exact bytes
 and actual write access, and encrypted targets are accepted only in that exact
 LocalCache with `cipher` corroborating Application Protected. Journal evidence
-is also exported by contents, not metadata. The negative
+is also exported by contents, not metadata, with sharing compatible with the
+active journal writer. The gate waits for terminated test processes to disappear
+before configured activation and uninstall. The negative
 `File.Copy` control must reproduce Windows error 6000; content-only seeding must
 succeed. It then configures the keyless test provider and Gateway, whose first
 startup must seed its own untouched templates before the test proceeds; observing

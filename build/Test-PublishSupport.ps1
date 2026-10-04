@@ -412,7 +412,7 @@ try {
         if ($gate -notmatch 'ApplicationProtectedLocalCache' -or
             $gate -notmatch 'GatewayTemplatesObserved' -or
             $gate -notmatch '\[IO.FileAccess\]::Write' -or
-            $gate -notmatch '\[IO.File\]::WriteAllBytes\(\(Join-Path \$journalEvidence' -or
+            $gate -notmatch 'Copy-SharedJournalContents \$journal.FullName' -or
             $gate -match 'Copy-Item -LiteralPath \$diagnostics') {
             throw 'The installed gate must validate actual write access, await Gateway seeding and export only journal contents.'
         }
@@ -448,6 +448,42 @@ try {
         finally { [IO.File]::SetAttributes($destination, [IO.FileAttributes]::Normal) }
         Remove-Item -LiteralPath $destination
         Assert-Rejected { Assert-SeededTemplate 'Environment/environment.template' (Join-Path $fixture 'destination') }
+    }
+    Test-Case 'installed gate awaits process exit and reads journals with active-writer sharing' {
+        $gatePath = Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'
+        $tokens = $null; $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($gatePath, [ref]$tokens, [ref]$errors)
+        if ($errors.Count) { throw ($errors | Out-String) }
+        foreach ($name in @('Wait-TestPackageProcessesStopped', 'Copy-SharedJournalContents')) {
+            $function = $ast.Find({ param($node)
+                $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+            }, $true)
+            if (-not $function) { throw "Missing installed gate helper: $name" }
+            Invoke-Expression $function.Extent.Text
+        }
+        $script:pendingProcessSnapshots = 2
+        function Get-TestPackageProcesses {
+            if ($script:pendingProcessSnapshots-- -gt 0) { [pscustomobject]@{ ProcessId = 123 } }
+        }
+        Wait-TestPackageProcessesStopped -TimeoutSeconds 2
+        if ($script:pendingProcessSnapshots -ne -1) { throw 'Exit verification did not observe the empty process snapshot.' }
+        $script:pendingProcessSnapshots = 1
+        Assert-Rejected { Wait-TestPackageProcessesStopped -TimeoutSeconds 0 }
+        $fixture = Join-Path $root 'shared-startup-journal'
+        New-Item -ItemType Directory -Path $fixture | Out-Null
+        $source = Join-Path $fixture 'startup.jsonl'
+        $destination = Join-Path $fixture 'captured.jsonl'
+        $writer = [IO.File]::Open($source, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+        $bytes = [Text.Encoding]::UTF8.GetBytes('{"Stage":"BootLoaded"}' + "`n")
+        try {
+            $writer.Write($bytes, 0, $bytes.Length)
+            $writer.Flush()
+            Copy-SharedJournalContents $source $destination
+            if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($destination)) -ne [Convert]::ToBase64String($bytes)) {
+                throw 'The active-writer journal snapshot differs from the flushed contents.'
+            }
+        } finally { $writer.Dispose() }
+        if ((Get-FileHash $source).Hash -ne (Get-FileHash $destination).Hash) { throw 'Journal capture changed its source.' }
     }
     Test-Case 'both native ICU package variants retain upstream licensing' {
         $policy = Get-Content (Join-Path $PSScriptRoot 'ThirdPartyNotices.json') -Raw | ConvertFrom-Json -AsHashtable
