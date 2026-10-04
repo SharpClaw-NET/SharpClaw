@@ -157,6 +157,7 @@ $result = [ordered]@{
     TestUserSid = $ExpectedTestUserSid; StartUtc = [DateTime]::UtcNow.ToString('O')
     Aumid = $null; ActivatedProcessId = 0; Window = $null; BootUiObserved = $false
     RuntimeObserved = $false; GatewayObserved = $false; ProcessSnapshotTimeouts = 0
+    GatewayTemplatesObserved = $false
     CleanFirstLaunchVerified = $false; ProtectedTemplateSources = @(); SeededTemplates = @()
     CleanupVerified = $false; Success = $false
 }
@@ -196,14 +197,34 @@ function Assert-SeededTemplate {
     $destination = Join-Path $DestinationDirectory ([IO.Path]::GetFileName($source))
     if (-not (Test-Path -LiteralPath $destination) -or
         (Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $destination).Hash -or
-        ([IO.File]::GetAttributes($destination) -band ([IO.FileAttributes]::Encrypted -bor [IO.FileAttributes]::ReadOnly))) {
-        throw "Product did not seed unprotected, byte-identical template contents: $SourceRelativePath"
+        ([IO.File]::GetAttributes($destination) -band [IO.FileAttributes]::ReadOnly)) {
+        throw "Product did not seed writable, byte-identical template contents: $SourceRelativePath"
+    }
+    $applicationProtected = $false
+    if ([IO.File]::GetAttributes($destination) -band [IO.FileAttributes]::Encrypted) {
+        # Windows may independently protect files newly created inside this
+        # package's LocalCache. That is not inherited source-file metadata.
+        if (-not $virtualProfileRoot -or -not $destination.StartsWith(
+            $virtualProfileRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'An encrypted template outside the exact package LocalCache is unsupported.'
+        }
+        $cipher = @(& cipher.exe /c $destination 2>&1)
+        if ($LASTEXITCODE -ne 0 -or ($cipher -join "`n") -notmatch 'Application Protected') {
+            throw 'Only independently applied package LocalCache protection is supported.'
+        }
+        $applicationProtected = $true
+    }
+    $writable = [IO.File]::Open($destination, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+    $writable.Dispose()
+    if ((Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $destination).Hash) {
+        throw 'Write-access verification changed the seeded template.'
     }
     [pscustomobject]@{
         Source = $SourceRelativePath; Destination = $destination
         Sha256 = (Get-FileHash -LiteralPath $destination).Hash
         Length = (Get-Item -LiteralPath $destination).Length
         Attributes = [IO.File]::GetAttributes($destination).ToString()
+        Writable = $true; ApplicationProtectedLocalCache = $applicationProtected
     }
 }
 try {
@@ -371,11 +392,16 @@ try {
         $result.GatewayObserved = @($processes | Where-Object {
             $_.Name -eq 'SharpClaw.Gateway.exe' -and $_.ParentProcessId -eq $clients[0].ProcessId
         }).Count -eq 1
-        if ($result.BootUiObserved -and $result.RuntimeObserved -and $result.GatewayObserved) { break }
+        $result.GatewayTemplatesObserved =
+            (Test-Path -LiteralPath (Join-Path $templateScopes[2][1] '.env.template')) -and
+            (Test-Path -LiteralPath (Join-Path $templateScopes[2][1] '.dev.env.template'))
+        if ($result.BootUiObserved -and $result.RuntimeObserved -and $result.GatewayObserved -and
+            $result.GatewayTemplatesObserved) { break }
         Start-Sleep -Milliseconds 200
     } while ([DateTime]::UtcNow -lt $deadline)
-    if (-not ($result.BootUiObserved -and $result.RuntimeObserved -and $result.GatewayObserved)) {
-        throw 'Installed activation did not expose boot UI and start the configured Runtime/Gateway within the deadline.'
+    if (-not ($result.BootUiObserved -and $result.RuntimeObserved -and $result.GatewayObserved -and
+        $result.GatewayTemplatesObserved)) {
+        throw 'Installed activation did not expose boot UI, start Runtime/Gateway and seed Gateway templates within the deadline.'
     }
     foreach ($name in @('.env.template', '.dev.env.template')) {
         $result.SeededTemplates += Assert-SeededTemplate ($templateScopes[2][0] + '/' + $name) $templateScopes[2][1]
@@ -412,7 +438,14 @@ try {
                 $diagnostics = Join-Path $stateRoot 'diagnostics/startup'
                 if (Test-Path -LiteralPath $diagnostics) {
                     $label = if ($stateRoot -eq $profileRoot) { 'physical-startup' } else { 'virtualized-startup' }
-                    Copy-Item -LiteralPath $diagnostics -Destination (Join-Path $ReportDirectory $label) -Recurse
+                    $journalEvidence = Join-Path $ReportDirectory $label
+                    New-Item -ItemType Directory -Path $journalEvidence | Out-Null
+                    foreach ($journal in Get-ChildItem -LiteralPath $diagnostics -Filter '*.jsonl') {
+                        # Evidence crosses the same AppX protection boundary as
+                        # templates; retain contents, never File.Copy metadata.
+                        $contents = [IO.File]::ReadAllBytes($journal.FullName)
+                        [IO.File]::WriteAllBytes((Join-Path $journalEvidence $journal.Name), $contents)
+                    }
                 }
             }
             Get-TestPackageProcesses | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath |

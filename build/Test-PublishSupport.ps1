@@ -406,6 +406,49 @@ try {
             throw 'The installed gate must reproduce AppX protection and activate before pre-seeding any configuration.'
         }
     }
+    Test-Case 'installed template evidence verifies writable contents without copying protection' {
+        $gatePath = Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'
+        $gate = [IO.File]::ReadAllText($gatePath)
+        if ($gate -notmatch 'ApplicationProtectedLocalCache' -or
+            $gate -notmatch 'GatewayTemplatesObserved' -or
+            $gate -notmatch '\[IO.FileAccess\]::Write' -or
+            $gate -notmatch '\[IO.File\]::WriteAllBytes\(\(Join-Path \$journalEvidence' -or
+            $gate -match 'Copy-Item -LiteralPath \$diagnostics') {
+            throw 'The installed gate must validate actual write access, await Gateway seeding and export only journal contents.'
+        }
+        $tokens = $null; $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($gatePath, [ref]$tokens, [ref]$errors)
+        if ($errors.Count) { throw ($errors | Out-String) }
+        $function = $ast.Find({ param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq 'Assert-SeededTemplate'
+        }, $true)
+        if (-not $function) { throw 'Missing installed template assertion.' }
+        Invoke-Expression $function.Extent.Text
+        $fixture = Join-Path $root 'installed-template-evidence'
+        New-Item -ItemType Directory -Path (Join-Path $fixture 'package/Environment'),
+            (Join-Path $fixture 'destination') | Out-Null
+        $package = [pscustomobject]@{ InstallLocation = (Join-Path $fixture 'package') }
+        $virtualProfileRoot = $null
+        $source = Join-Path $package.InstallLocation 'Environment/environment.template'
+        $destination = Join-Path $fixture 'destination/environment.template'
+        $bytes = [byte[]]@(239, 187, 191, 120, 61, 34, 195, 169, 34, 13, 10, 0)
+        [IO.File]::WriteAllBytes($source, $bytes)
+        [IO.File]::WriteAllBytes($destination, $bytes)
+        $record = Assert-SeededTemplate 'Environment/environment.template' (Join-Path $fixture 'destination')
+        if (-not $record.Writable -or $record.ApplicationProtectedLocalCache -or
+            (Get-FileHash $source).Hash -ne (Get-FileHash $destination).Hash) {
+            throw 'A writable byte-identical ordinary target must pass without being modified.'
+        }
+        [IO.File]::WriteAllBytes($destination, [byte[]]@(1, 2, 3))
+        Assert-Rejected { Assert-SeededTemplate 'Environment/environment.template' (Join-Path $fixture 'destination') }
+        [IO.File]::WriteAllBytes($destination, $bytes)
+        [IO.File]::SetAttributes($destination, [IO.FileAttributes]::ReadOnly)
+        try { Assert-Rejected { Assert-SeededTemplate 'Environment/environment.template' (Join-Path $fixture 'destination') } }
+        finally { [IO.File]::SetAttributes($destination, [IO.FileAttributes]::Normal) }
+        Remove-Item -LiteralPath $destination
+        Assert-Rejected { Assert-SeededTemplate 'Environment/environment.template' (Join-Path $fixture 'destination') }
+    }
     Test-Case 'both native ICU package variants retain upstream licensing' {
         $policy = Get-Content (Join-Path $PSScriptRoot 'ThirdPartyNotices.json') -Raw | ConvertFrom-Json -AsHashtable
         $windows = $policy.PackageDocuments['Uno.icu-win/77.3.2']

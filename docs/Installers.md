@@ -95,10 +95,15 @@ certificate identities and requires genuinely deployed templates marked
 `Application Protected`, not merely files extracted from an MSIX. Before
 writing any test configuration, it launches the registered AUMID from a clean
 profile and verifies frontend/backend template bytes against their protected
-package sources, without copying encryption or read-only attributes. A negative
+package sources, without copying encryption or read-only attributes. Windows may independently protect newly created
+files inside the package's own LocalCache: those targets must retain exact bytes
+and actual write access, and encrypted targets are accepted only in that exact
+LocalCache with `cipher` corroborating Application Protected. Journal evidence
+is also exported by contents, not metadata. The negative
 `File.Copy` control must reproduce Windows error 6000; content-only seeding must
 succeed. It then configures the keyless test provider and Gateway, whose first
-startup must seed its own untouched templates. The gate requires one visible
+startup must seed its own untouched templates before the test proceeds; observing
+a newly spawned Gateway process alone does not prove seeding. The gate requires one visible
 window, a real UI Automation boot
 element plus screenshot, and the configured Runtime/Gateway processes within a
 deadline. Repeated activation must not leave duplicate windowless processes.
