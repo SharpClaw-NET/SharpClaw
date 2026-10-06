@@ -6,11 +6,15 @@ Check that the local Runtime process is running and that its loopback address ma
 
 If the Runtime does not start, inspect its process output for configuration, protected environment, database, or module errors. A configured remote mode must fail closed when its connection or pairing is invalid.
 
+Missing provider settings alone do not prevent Runtime startup: use the first-run Settings form. An exited bundled Runtime is shown as stopped/exited and is not automatically restarted with unchanged inputs. Correct its configuration before choosing the explicit retry option.
+
 ## A Provider Request Fails
 
 Check that the provider module is enabled and that the selected model belongs to that provider. Check the Runtime provider endpoint and credential.
 
 The Runtime does not replace a disabled or invalid provider with a hidden fallback. Correct the provider configuration and retry the request.
+
+An unconfigured chat request reports provider_setup_required. Save a provider and model in Settings, including any required endpoint/key. A response that ends before its terminal completion is a failed request, even if some text arrived; do not treat a partial stream as a finished response.
 
 ## A Job Does Not Progress
 

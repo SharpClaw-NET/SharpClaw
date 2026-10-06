@@ -26,6 +26,12 @@ internal static class KernelHostEndpoints
                 ? Results.Ok(new { status = "ready" })
                 : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
         app.MapGet("/ping", () => Results.Ok(new { status = "authenticated" }));
+        app.MapGet("/setup/provider", async (HttpContext context, IConfiguration configuration,
+            RuntimeKernelAdapter adapter, CancellationToken cancellationToken) =>
+            Results.Ok(await adapter.RunRequestAsync(
+                CreateExecutionContext(context), "/setup/provider",
+                (_, _) => ValueTask.FromResult(RuntimeProviderSetup.Describe(configuration, adapter)),
+                cancellationToken)));
         app.MapGet("/env/core", ReadEnvironmentAsync);
         app.MapPost("/chat", RunChatAsync);
         app.MapPost("/chat/stream", StreamChatAsync);
@@ -41,14 +47,19 @@ internal static class KernelHostEndpoints
         if (string.IsNullOrWhiteSpace(request.Message))
             return Results.BadRequest(new { error = "Message is required." });
 
-        var result = await runtimeKernel.RunRequestAsync(
-            CreateExecutionContext(context),
-            request,
-            (effectiveRequest, ct) => kernel.RunAsync(
-                new ChatTurnInput(effectiveRequest.Message, effectiveRequest.ConversationId),
-                ct),
-            cancellationToken);
-        return Results.Ok(result);
+        try
+        {
+            var result = await runtimeKernel.RunRequestAsync(
+                CreateExecutionContext(context), request,
+                (effectiveRequest, ct) => kernel.RunAsync(
+                    new ChatTurnInput(effectiveRequest.Message, effectiveRequest.ConversationId), ct),
+                cancellationToken);
+            return Results.Ok(result);
+        }
+        catch (KernelActionFailedException error) when (error.Message == RuntimeProviderSetup.RequiredErrorMessage)
+        {
+            return ProviderSetupRequired();
+        }
     }
 
     private static async Task<IResult> ReadEnvironmentAsync(
@@ -89,7 +100,9 @@ internal static class KernelHostEndpoints
         }
 
         context.Response.ContentType = "text/event-stream";
-        await foreach (var chunk in runtimeKernel.RunRequestStreamAsync(
+        try
+        {
+            await foreach (var chunk in runtimeKernel.RunRequestStreamAsync(
                            CreateExecutionContext(context),
                            request,
                            (effectiveRequest, ct) => kernel.StreamAsync(
@@ -98,12 +111,22 @@ internal static class KernelHostEndpoints
                                    effectiveRequest.ConversationId),
                                ct),
                            cancellationToken))
+            {
+                var payload = JsonSerializer.Serialize(chunk);
+                await context.Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
+                await context.Response.Body.FlushAsync(cancellationToken);
+            }
+        }
+        catch (KernelActionFailedException error) when (!context.Response.HasStarted &&
+            error.Message == RuntimeProviderSetup.RequiredErrorMessage)
         {
-            var payload = JsonSerializer.Serialize(chunk);
-            await context.Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
-            await context.Response.Body.FlushAsync(cancellationToken);
+            await ProviderSetupRequired().ExecuteAsync(context);
         }
     }
+
+    private static IResult ProviderSetupRequired() => Results.Json(
+        new { code = "provider_setup_required", error = RuntimeProviderSetup.RequiredErrorMessage },
+        statusCode: StatusCodes.Status409Conflict);
 
     internal static KernelActionExecutionContext CreateExecutionContext(HttpContext context)
     {

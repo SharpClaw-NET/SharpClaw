@@ -6,6 +6,7 @@
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
       mc:Ignorable="d"
       NavigationCacheMode="Required"
+      AutomationProperties.AutomationId="SharpClawMain"
       Background="Black">
 
   <Grid>
@@ -117,6 +118,7 @@
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
           <TextBox x:Name="MessageInput"
+                   AutomationProperties.AutomationId="ChatMessageInput"
                    Style="{StaticResource TerminalInput}"
                    PlaceholderText="Type a message..."
                    KeyDown="OnMessageKeyDown"
@@ -127,6 +129,7 @@
                    ScrollViewer.VerticalScrollBarVisibility="Auto"
                    HorizontalAlignment="Stretch" />
           <Button x:Name="SendButton"
+                  AutomationProperties.AutomationId="ChatSend"
                   Grid.Column="1"
                   Style="{StaticResource TerminalButton}"
                   Click="OnSendClick"

@@ -923,7 +923,7 @@ public sealed class RuntimeHostCompositionTests
     }
 
     [Test]
-    public async Task MissingConfiguredProviderFailsBeforeReadiness()
+    public async Task MissingConfiguredProviderAllowsGraphStartupForSetup()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
@@ -945,10 +945,13 @@ public sealed class RuntimeHostCompositionTests
             registrationSet.Services);
 
         await using var provider = services.BuildServiceProvider();
-        var exception = FluentActions.Invoking(() =>
-            provider.GetRequiredService<RuntimeKernelAdapter>())
-            .Should().Throw<InvalidOperationException>();
-        exception.Which.Message.Should().Contain("Provider:Key");
+        var adapter = provider.GetRequiredService<RuntimeKernelAdapter>();
+        await adapter.StartAsync("unconfigured-host-setup").ConfigureAwait(false);
+        try
+        {
+            RuntimeProviderSetup.Describe(configuration, adapter).SetupRequired.Should().BeTrue();
+        }
+        finally { await adapter.StopAsync().ConfigureAwait(false); }
         provider.GetRequiredService<RuntimeReadinessState>().IsReady.Should().BeFalse();
     }
 

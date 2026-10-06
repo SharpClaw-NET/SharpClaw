@@ -201,6 +201,7 @@ internal sealed class ProviderKernelTransport : IKernelProviderTransport
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(messages);
+        var model = RuntimeChatConfiguration.ResolveModel(request.Profile);
         var client = _resolveClient(request.Profile.ProviderKey);
         var (systemPrompt, normalizedMessages) = NormalizeMessages(request, messages);
         var providerMessages = normalizedMessages
@@ -209,13 +210,13 @@ internal sealed class ProviderKernelTransport : IKernelProviderTransport
 
         return request.Tools.Count == 0
             ? new ValueTask<ChatCompletionResult>(client.ChatCompletionAsync(
-                request.Profile.ModelName ?? request.Profile.ModelId.ToString(),
+                model,
                 systemPrompt,
                 providerMessages,
                 completionParameters: request.Profile.ProviderParameters,
                 ct: cancellationToken))
             : new ValueTask<ChatCompletionResult>(client.ChatCompletionWithToolsAsync(
-                request.Profile.ModelName ?? request.Profile.ModelId.ToString(),
+                model,
                 systemPrompt,
                 normalizedMessages,
                 request.Tools.Select(tool => new ChatToolDefinition(
@@ -234,9 +235,9 @@ internal sealed class ProviderKernelTransport : IKernelProviderTransport
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(messages);
+        var model = RuntimeChatConfiguration.ResolveModel(request.Profile);
         var client = _resolveClient(request.Profile.ProviderKey);
         var (systemPrompt, normalizedMessages) = NormalizeMessages(request, messages);
-        var model = request.Profile.ModelName ?? request.Profile.ModelId.ToString();
         if (request.Tools.Count > 0)
         {
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(

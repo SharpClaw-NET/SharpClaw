@@ -71,97 +71,109 @@ public sealed partial class BootPage : Page
     // ---------------------------------------------------------------
     private async Task RunConnectionFlowAsync(string? customUrl, CancellationToken ct)
     {
-        await _model!.ApplyCustomUrlAsync(customUrl, ct);
-        _model.IsAwaitingInput = false;
+        _model!.IsAwaitingInput = false;
         var diag = ImmutableArray.CreateBuilder<DiagnosticLine>();
 
-        for (int attempt = 1; attempt <= BootModel.MaxRetries; attempt++)
+        try
         {
-            if (ct.IsCancellationRequested)
-                break;
-
-            diag.Clear();
-            ResetAllVisuals();
-
-            // -- Retry label on subsequent attempts --
-            if (attempt > 1)
+            await _model.ApplyCustomUrlAsync(customUrl, ct);
+            for (int attempt = 1; attempt <= BootModel.MaxRetries; attempt++)
             {
-                Cursor.SetCommand($"Retrying ({attempt}/{BootModel.MaxRetries})...");
-                await Task.Delay(600, ct);
-                Cursor.ClearCommand();
-            }
+                if (ct.IsCancellationRequested)
+                    break;
 
-            // -- Step 1: Backend (silent) --
-            var backendResult = await _model.RunBackendStepAsync(ct);
-            diag.Add(backendResult.Line);
+                diag.Clear();
+                ResetAllVisuals();
 
-            if (!backendResult.Ok)
-            {
-                ShowFailure(diag.ToImmutable());
-                if (attempt < BootModel.MaxRetries)
+                // -- Retry label on subsequent attempts --
+                if (attempt > 1)
+                {
+                    Cursor.SetCommand($"Retrying ({attempt}/{BootModel.MaxRetries})...");
+                    await Task.Delay(600, ct);
+                    Cursor.ClearCommand();
+                }
+
+                // -- Step 1: Backend (silent) --
+                var backendResult = await _model.RunBackendStepAsync(ct);
+                diag.Add(backendResult.Line);
+
+                if (!backendResult.Ok)
+                {
+                    ShowFailure(diag.ToImmutable());
+                    if (_model.ShouldRetry(backendResult, attempt))
+                    {
+                        await RetryPauseAsync(attempt, diag.ToImmutable(), ct);
+                        continue;
+                    }
+                    break;
+                }
+
+                // -- Step 2: Type "sharpclaw echo" → run echo probe --
+                await Cursor.TypeCommandAsync("sharpclaw echo");
+                StartDots(DotsBlock);
+
+                var echoResult = await _model.RunEchoStepAsync(ct);
+                diag.Add(echoResult.Line);
+
+                StopDots();
+                ShowStepResult(EchoResultPanel, EchoIconBlock, EchoTextBlock, echoResult);
+
+                if (!echoResult.Ok)
+                {
+                    if (_model.ShouldRetry(echoResult, attempt))
+                    {
+                        await RetryPauseAsync(attempt, diag.ToImmutable(), ct);
+                        continue;
+                    }
+                    break;
+                }
+
+                // -- Step 3: Type "sharpclaw ping" → run ping probe --
+                Cursor.Freeze();
+                PingCursor.Visibility = Visibility.Visible;
+                await PingCursor.TypeCommandAsync("sharpclaw ping");
+                StartDots(PingDotsBlock);
+
+                var (pingResult, apiKeyLine) = await _model.RunPingStepAsync(ct);
+                if (apiKeyLine is not null) diag.Add(apiKeyLine);
+                diag.Add(pingResult.Line);
+
+                StopDots();
+                ShowStepResult(StatusPanel, StatusIconBlock, StatusTextBlock, pingResult);
+
+                if (pingResult.Ok)
+                {
+                    // Optional: start the public gateway (non-blocking, non-fatal).
+                    var gatewayResult = await _model.RunGatewayStepAsync(ct);
+                    if (gatewayResult is not null)
+                        diag.Add(gatewayResult.Line);
+
+                    await App.Services!.GetRequiredService<ClientNavigationService>()
+                        .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
+                    return;
+                }
+
+                if (_model.ShouldRetry(pingResult, attempt))
                 {
                     await RetryPauseAsync(attempt, diag.ToImmutable(), ct);
                     continue;
                 }
-                break;
-            }
-
-            // -- Step 2: Type "sharpclaw echo" → run echo probe --
-            await Cursor.TypeCommandAsync("sharpclaw echo");
-            StartDots(DotsBlock);
-
-            var echoResult = await _model.RunEchoStepAsync(ct);
-            diag.Add(echoResult.Line);
-
-            StopDots();
-            ShowStepResult(EchoResultPanel, EchoIconBlock, EchoTextBlock, echoResult);
-
-            if (!echoResult.Ok)
-            {
-                if (attempt < BootModel.MaxRetries)
-                {
-                    await RetryPauseAsync(attempt, diag.ToImmutable(), ct);
-                    continue;
-                }
-                break;
-            }
-
-            // -- Step 3: Type "sharpclaw ping" → run ping probe --
-            Cursor.Freeze();
-            PingCursor.Visibility = Visibility.Visible;
-            await PingCursor.TypeCommandAsync("sharpclaw ping");
-            StartDots(PingDotsBlock);
-
-            var (pingResult, apiKeyLine) = await _model.RunPingStepAsync(ct);
-            if (apiKeyLine is not null) diag.Add(apiKeyLine);
-            diag.Add(pingResult.Line);
-
-            StopDots();
-            ShowStepResult(StatusPanel, StatusIconBlock, StatusTextBlock, pingResult);
-
-            if (pingResult.Ok)
-            {
-                // Optional: start the public gateway (non-blocking, non-fatal).
-                var gatewayResult = await _model.RunGatewayStepAsync(ct);
-                if (gatewayResult is not null)
-                    diag.Add(gatewayResult.Line);
-
-                await App.Services!.GetRequiredService<ClientNavigationService>()
-                    .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
-                return;
-            }
-
-            if (attempt < BootModel.MaxRetries)
-            {
-                await RetryPauseAsync(attempt, diag.ToImmutable(), ct);
-                continue;
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            diag.Add(new DiagnosticLine("Connection", "Connection failed or was denied. Check the service configuration and diagnostics.", true));
+        }
+        finally { StopDots(); }
 
         // -- All attempts exhausted or cancelled --
+        StopDots();
+        Cursor.Freeze();
+        PingCursor.Freeze();
         _model.IsAwaitingInput = true;
 
-        var finalDiag = diag.ToImmutable();
+        var finalDiag = _model.RefreshBackendDiagnostic(diag.ToImmutable());
         if (ct.IsCancellationRequested)
         {
             ShowFinalStatus("—", GrayColor, "Connection cancelled.", LightGrayColor);
@@ -235,6 +247,8 @@ public sealed partial class BootPage : Page
     private void StopDots()
     {
         _dotsTimer.Stop();
+        DotsBlock.Text = string.Empty;
+        PingDotsBlock.Text = string.Empty;
         DotsBlock.Visibility = Visibility.Collapsed;
         PingDotsBlock.Visibility = Visibility.Collapsed;
         _activeDots = null;
@@ -379,14 +393,17 @@ public sealed partial class BootPage : Page
         {
             e.Handled = true;
 
+            if (_model is { IsAwaitingInput: true })
+            {
+                ((App)Application.Current).MainWindow?.Close();
+                return;
+            }
+
             if (_retryCts is { IsCancellationRequested: false })
             {
                 _retryCts.Cancel();
                 return;
             }
-
-            if (_model is { IsAwaitingInput: true })
-                ((App)Application.Current).MainWindow?.Close();
 
             return;
         }

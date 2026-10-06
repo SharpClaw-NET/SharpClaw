@@ -4,11 +4,11 @@ This guide describes the default SharpClaw installation.
 
 ## Configure The Runtime
 
-Enable one provider module in the Runtime environment. Set its provider key, endpoint, and credential there.
+On first launch, the bundled Runtime starts without a provider or credentials and the client opens Settings. Choose a provider supplied by an enabled module, enter its model and any required endpoint/key, then save. SharpClaw writes the protected backend configuration and restarts its owned Runtime; it does not silently select a provider. An external Runtime must be configured on its own host.
 
 ## Select A Model
 
-Set a model exposed by the selected provider in the Runtime environment. Open Settings to confirm the Runtime endpoint and readiness.
+Use the exact model identifier exposed by the selected provider. A local keyless provider still needs its real inference server and model. Open Settings to check Runtime readiness or change the provider later; credentials are never displayed there.
 
 ## Send A Message
 

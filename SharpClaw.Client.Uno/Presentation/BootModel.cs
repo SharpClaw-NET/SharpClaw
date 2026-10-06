@@ -18,7 +18,7 @@ public sealed record DiagnosticLine(
     bool IsError);
 
 /// <summary>Result of a single diagnostic step.</summary>
-public sealed record StepResult(bool Ok, DiagnosticLine Line);
+public sealed record StepResult(bool Ok, DiagnosticLine Line, bool CanRetry = true);
 
 public sealed class BootModel
 {
@@ -49,6 +49,10 @@ public sealed class BootModel
 
     internal const int MaxRetries = 3;
     internal static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(3);
+
+    internal bool ShouldRetry(StepResult result, int attempt) =>
+        !result.Ok && result.CanRetry && attempt < MaxRetries &&
+        (_backend.IsExternal || _backend.IsRunning);
 
     public async ValueTask ApplyCustomUrlAsync(
         string? customUrl,
@@ -87,7 +91,9 @@ public sealed class BootModel
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            return new(false, new("Backend", ex.Message, true));
+            // Missing binaries, disabled launch and process-start failures need
+            // user intervention; restarting unchanged inputs cannot correct them.
+            return new(false, new("Backend", ex.Message, true), CanRetry: false);
         }
     }
 
@@ -117,7 +123,7 @@ public sealed class BootModel
                     : "no output captured";
                 var code = _backend.ExitCode;
                 return new(false, new("Echo",
-                    $"Backend process exited (code {code}) — {tail}", true));
+                    $"Backend process exited (code {code}) — {tail}", true), CanRetry: false);
             }
 
             try
@@ -241,6 +247,19 @@ public sealed class BootModel
         }
 
         return "Unable to reach the SharpClaw service.";
+    }
+
+    internal ImmutableArray<DiagnosticLine> RefreshBackendDiagnostic(
+        ImmutableArray<DiagnosticLine> log)
+    {
+        if (_backend.IsExternal || _backend.IsRunning || log.IsDefaultOrEmpty)
+            return log;
+
+        return log.Select(line => line.Label == "Backend" && !line.IsError
+            ? new DiagnosticLine("Backend", _backend.ExitCode is { } code
+                ? $"exited (code {code}) (bundled)"
+                : "stopped (bundled)", true)
+            : line).ToImmutableArray();
     }
 
     /// <summary>

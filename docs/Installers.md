@@ -103,9 +103,19 @@ is also exported by contents, not metadata, with sharing compatible with the
 active journal writer. The gate waits for terminated test processes to disappear
 before configured activation and uninstall. The negative
 `File.Copy` control must reproduce Windows error 6000; content-only seeding must
-succeed. It then configures the keyless test provider and Gateway, whose first
-startup must seed its own untouched templates before the test proceeds; observing
-a newly spawned Gateway process alone does not prove seeding. The gate requires one visible
+succeed. Clean first launch must also reach `/echo`, authenticated `/readyz` and
+`/ping`, report setup required and expose the visible provider setup controls.
+Supply explicit `-TestProviderKey`, `-TestModel` and `-TestProviderEndpoint` for
+an independently prepared real keyless test backend. The gate selects the enabled
+provider through the product UI, saves its protected configuration, verifies a
+different Runtime PID and configured chat UI, then sends one short message.
+A nonempty assistant response with terminal-complete accessibility status is
+required; a partial stream or HTTP success alone does not pass. Retain the real
+backend's model identity and request execution evidence alongside this report;
+the script does not certify that an arbitrary endpoint is genuine inference.
+Only afterward does it enable Gateway, whose first startup must seed its own
+untouched templates before the test proceeds; observing a newly spawned Gateway
+process alone does not prove seeding. The gate requires one visible
 window, a real UI Automation boot
 element plus screenshot, and the configured Runtime/Gateway processes within a
 deadline. Repeated activation must not leave duplicate windowless processes.
@@ -117,12 +127,21 @@ or approval. The startup journal is flushed independently of the window and DI
 under the user's `SharpClaw/diagnostics/startup` directory; it records stages and
 exception types/codes, never exception messages or configuration values.
 
-Runtime readiness requires an explicitly selected provider (`Provider:Key` or
-`Providers:Default`); installers do not silently choose a provider or supply
-credentials. Configure the installed user's environment or writable backend
-configuration before starting Runtime, and select the model and any required
-key before inference. A keyless local provider still needs its actual backend
-and model for chat.
+Runtime can start and expose authenticated setup and health endpoints without
+a chat provider or credentials. The first-run client opens Settings when its
+default chat profile needs configuration. Choose an enabled module's provider,
+its model, and any required endpoint/key; saving uses the existing protected
+backend configuration document and restarts the frontend-owned Runtime as a
+complete new process/graph. Unrelated settings and provider-scoped credentials
+are preserved. The client never writes to or stops an external Runtime.
+Installers do not choose a provider, ship credentials, or supply a model.
+Unconfigured chat requests fail with HTTP 409 `provider_setup_required`, while
+health/setup remain available; a module-owned chat profile can provide its own
+selection. An explicit unknown default provider or invalid module graph still
+fails closed. Exited bundled processes are not automatically relaunched with
+the same inputs: the boot page clears its progress animation and reports the
+actual stopped/exited state, leaving explicit retry or exit to the user. A
+keyless provider still needs its actual backend and model to complete chat.
 
 ## Debian 13 Server
 

@@ -87,15 +87,11 @@ public sealed class RuntimeKernelAdapter :
             ?.ToArray()
             ?? [];
         ValidateConfiguredProviders(configuration, plugins);
-        var defaultProviderKey = configuration["Provider:Key"]
-            ?? configuration["Providers:Default"]!;
-        var defaultProviderClient = providerClientFactory.Create(
-            configuration,
-            plugins,
-            defaultProviderKey);
+        // The graph must serve first-run configuration without a default chat
+        // provider or credentials. Create clients only when a turn selects one;
+        // provider failures must not take down unrelated host capabilities.
         var providerClients = new System.Collections.Concurrent.ConcurrentDictionary<
             string, Lazy<IProviderApiClient>>(StringComparer.OrdinalIgnoreCase);
-        providerClients[defaultProviderKey] = new Lazy<IProviderApiClient>(() => defaultProviderClient);
         var conversationResolver = ResolveConversationResolver(Graph);
         var effectiveConversationStore = ResolveConversationStore(Graph);
         var profileResolver = ResolveProfileResolver(Graph, configuration);
@@ -1375,10 +1371,7 @@ public sealed class RuntimeKernelAdapter :
         var providerKey = configuration["Provider:Key"]
             ?? configuration["Providers:Default"];
         if (string.IsNullOrWhiteSpace(providerKey))
-        {
-            throw new InvalidOperationException(
-                "Provider:Key or Providers:Default must be configured before Runtime readiness.");
-        }
+            return;
 
         if (!plugins.Any(plugin => string.Equals(
                 plugin.ProviderKey,

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using SharpClaw.Presentation;
 using SharpClaw.Services;
+using System.Collections.Immutable;
 
 namespace SharpClaw.Tests.ClientUno;
 
@@ -149,6 +150,57 @@ public sealed class ClientUnoStartupSwitchTests
         result.Should().BeNull();
         launchAttempts.Should().Be(0);
         gateway.IsRunning.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task ExitedBundledBackendIsNotRetriedAndNeverKeepsARunningDiagnostic()
+    {
+        using var scope = TestScope.Create();
+        var launches = 0;
+        using var backend = new BackendProcessManager("http://127.0.0.1:48923",
+            NullLogger<BackendProcessManager>.Instance, null, scope.CreateExecutable("runtime"),
+            () => false, _ => Task.FromResult(false), _ => launches++);
+        using var gateway = new GatewayProcessManager("http://127.0.0.1:48924", backend.ApiUrl,
+            NullLogger<GatewayProcessManager>.Instance) { SkipLaunch = true };
+        using var api = new SharpClawApiClient(backend.ApiUrl, NullLogger<SharpClawApiClient>.Instance,
+            null, new ClientActionDispatcher());
+        var boot = new BootModel(backend, gateway, api, null, new ClientActionDispatcher());
+        var start = await boot.RunBackendStepAsync(CancellationToken.None).ConfigureAwait(false);
+        start.Ok.Should().BeTrue();
+        backend.Stop();
+        var echo = await boot.RunEchoStepAsync(CancellationToken.None).ConfigureAwait(false);
+        echo.Ok.Should().BeFalse();
+        echo.CanRetry.Should().BeFalse();
+        boot.ShouldRetry(echo, 1).Should().BeFalse();
+        boot.ShouldRetry(new StepResult(false, new DiagnosticLine("Ping", "timeout", true)), 1)
+            .Should().BeFalse("a process which dies between echo and ping must not be restarted either");
+        var diagnostics = boot.RefreshBackendDiagnostic(ImmutableArray.Create(start.Line, echo.Line));
+        diagnostics[0].IsError.Should().BeTrue();
+        diagnostics[0].Result.Should().Be("stopped (bundled)");
+        diagnostics.Should().NotContain(line => line.Result.Contains("running", StringComparison.Ordinal));
+        launches.Should().Be(1);
+    }
+
+    [Test]
+    public async Task RetryPolicyOnlyRetriesTransientFailuresWhileTheBackendIsAvailable()
+    {
+        using var scope = TestScope.Create();
+        using var backend = new BackendProcessManager("http://127.0.0.1:48923",
+            NullLogger<BackendProcessManager>.Instance, null, scope.CreateExecutable("runtime"),
+            () => false, _ => Task.FromResult(false), _ => { });
+        using var gateway = new GatewayProcessManager("http://127.0.0.1:48924", backend.ApiUrl,
+            NullLogger<GatewayProcessManager>.Instance) { SkipLaunch = true };
+        using var api = new SharpClawApiClient(backend.ApiUrl, NullLogger<SharpClawApiClient>.Instance,
+            null, new ClientActionDispatcher());
+        var boot = new BootModel(backend, gateway, api, null, new ClientActionDispatcher());
+        await backend.EnsureStartedAsync().ConfigureAwait(false);
+        var transient = new StepResult(false, new DiagnosticLine("Echo", "timeout", true));
+        boot.ShouldRetry(transient, 1).Should().BeTrue();
+        boot.ShouldRetry(transient, 3).Should().BeFalse();
+        boot.ShouldRetry(transient with { CanRetry = false }, 1).Should().BeFalse();
+        boot.ShouldRetry(transient with { Ok = true }, 1).Should().BeFalse();
+        boot.RefreshBackendDiagnostic(ImmutableArray.Create(new DiagnosticLine("Backend", "running (bundled)", false)))
+            [0].IsError.Should().BeFalse();
     }
 
     private sealed class TestScope : IDisposable

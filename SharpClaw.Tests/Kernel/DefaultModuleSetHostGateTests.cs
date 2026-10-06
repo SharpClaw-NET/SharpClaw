@@ -32,13 +32,13 @@ public sealed class DefaultModuleSetHostGateTests
         "sharpclaw_test_permission_restriction",
     ];
 
-    [Test, CancelAfter(300000)]
-    public async Task ProductionHost_ComposesDefaultModulesWithoutArchivedAgentOrchestration()
+    [TestCase(true), TestCase(false), CancelAfter(300000)]
+    public async Task ProductionHost_ComposesDefaultModulesWithoutArchivedAgentOrchestration(bool configured)
     {
         var initialSidecars = FindSidecarProcessIds();
         await using var provider = await FakeOpenAiServer.CreateAsync();
         using var workspace = new TemporaryWorkspace();
-        var configuration = CreateConfiguration(provider.Endpoint);
+        var configuration = CreateConfiguration(provider.Endpoint, configured);
         var contributionRoot = Path.Combine(AppContext.BaseDirectory, "contributions");
 
         Directory.Exists(contributionRoot).Should().BeTrue(
@@ -110,11 +110,37 @@ public sealed class DefaultModuleSetHostGateTests
                     "X-Api-Key",
                     app.Services.GetRequiredService<ApiKeyProvider>().ApiKey);
 
+                foreach (var path in new[] { "/echo", "/healthz", "/readyz", "/ping" })
+                {
+                    using var health = await client.GetAsync(path);
+                    health.StatusCode.Should().Be(HttpStatusCode.OK, path);
+                }
+                var setup = await client.GetFromJsonAsync<SharpClawProviderSetup>("/setup/provider");
+                setup!.SetupRequired.Should().Be(!configured);
+                setup.Providers.Should().Contain(item => item.Key == "custom");
+                using var anonymous = new HttpClient { BaseAddress = client.BaseAddress };
+                using var unauthorized = await anonymous.GetAsync("/setup/provider");
+                unauthorized.StatusCode.Should().Be(HttpStatusCode.Locked,
+                    "the session-key middleware must still protect provider setup");
+
                 using var response = await client.PostAsJsonAsync("/chat", new { message = "default gate" });
                 var body = await response.Content.ReadAsStringAsync();
-                response.StatusCode.Should().Be(HttpStatusCode.OK, body);
-                body.Should().Contain("default package graph response");
-                provider.RequestCount.Should().Be(1);
+
+                if (!configured)
+                {
+                    response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+                    body.Should().Contain("provider_setup_required");
+                    using var blockedStream = await client.PostAsJsonAsync("/chat/stream", new { message = "stream" });
+                    blockedStream.StatusCode.Should().Be(HttpStatusCode.Conflict);
+                    provider.RequestCount.Should().Be(0);
+                    readiness.IsReady.Should().BeTrue();
+                }
+                else
+                {
+                    response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+                    body.Should().Contain("default package graph response");
+                    provider.RequestCount.Should().Be(1);
+                }
             }
             finally
             {
@@ -133,14 +159,14 @@ public sealed class DefaultModuleSetHostGateTests
         await AssertSidecarsStoppedAsync(initialSidecars);
     }
 
-    private static IConfiguration CreateConfiguration(string providerEndpoint) =>
+    private static IConfiguration CreateConfiguration(string providerEndpoint, bool configured) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Provider:Key"] = "custom",
-                ["Provider:Model"] = "default-gate-model",
-                ["Provider:ApiKey"] = "default-gate-key",
-                ["Provider:Endpoint"] = providerEndpoint,
+                ["Provider:Key"] = configured ? "custom" : null,
+                ["Provider:Model"] = configured ? "default-gate-model" : null,
+                ["Provider:ApiKey"] = configured ? "default-gate-key" : null,
+                ["Provider:Endpoint"] = configured ? providerEndpoint : null,
                 ["Auth:DisableApiKeyCheck"] = "false",
             })
             .Build();

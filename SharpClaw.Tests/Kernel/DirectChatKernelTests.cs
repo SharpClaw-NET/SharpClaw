@@ -9,6 +9,32 @@ namespace SharpClaw.Tests.Kernel;
 
 public sealed class DirectChatKernelTests
 {
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase(" ")]
+    public async Task MissingModelDoesNotResolveOrInvokeAProvider(string? name)
+    {
+        var resolutions = 0;
+        var transport = new ProviderKernelTransport(_ =>
+        {
+            resolutions++;
+            throw new AssertionException("No provider should be resolved without an effective model.");
+        });
+        var turn = new ChatTurnContext(Guid.NewGuid(), new ChatTurnInput("hello"),
+            new ConversationSelection(Guid.NewGuid(), true));
+        var request = new ProviderTurnRequest(turn, new ChatProfile("test", Guid.Empty, name),
+            ChatContextContribution.Empty, []);
+        Func<Task> buffered = async () =>
+            await transport.CompleteAsync(request, [], CancellationToken.None).ConfigureAwait(false);
+        await buffered.Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
+        Func<Task> streamed = async () =>
+        {
+            await foreach (var _ in transport.StreamAsync(request, [], CancellationToken.None).ConfigureAwait(false)) { }
+        };
+        await streamed.Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
+        resolutions.Should().Be(0);
+    }
+
     [Test]
     public async Task Conversation_gate_serializes_reclamation_with_reacquisition()
     {

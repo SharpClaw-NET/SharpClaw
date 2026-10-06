@@ -78,6 +78,8 @@ public sealed partial class MainPage
             CancelButton.Visibility = Visibility.Visible;
             AppendMessage("user", message);
             assistant = AppendMessage("assistant", string.Empty);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(assistant.Content, "ChatAssistantResponse");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "streaming");
             ScrollToBottom();
             return ValueTask.CompletedTask;
         });
@@ -106,6 +108,7 @@ public sealed partial class MainPage
                                 assistant.Content.Text =
                                     $"Request failed: {(int)response.StatusCode} {response.ReasonPhrase}";
                                 assistant.Content.Foreground = Brush(0xFF4444);
+                                Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
                                 return ValueTask.CompletedTask;
                             },
                             CancellationToken.None);
@@ -121,6 +124,7 @@ public sealed partial class MainPage
                             {
                                 assistant.Content.Text = TerminalUI.Truncate(fallback, 200);
                                 assistant.Content.Foreground = Brush(0xFF4444);
+                                Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
                                 return ValueTask.CompletedTask;
                             },
                             CancellationToken.None);
@@ -130,6 +134,14 @@ public sealed partial class MainPage
                     await using var stream =
                         await response.Content.ReadAsStreamAsync(streamToken);
                     await ReadSseStreamAsync(stream, streamState, assistant, streamToken);
+                    if (!streamState.DoneReceived && !streamState.ErrorReceived)
+                        throw new InvalidDataException("The response stream ended before completion.");
+                    await CommitStreamStateAsync(_ =>
+                    {
+                        Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content,
+                            streamState.ErrorReceived ? "failed" : "complete");
+                        return ValueTask.CompletedTask;
+                    }, CancellationToken.None);
                 },
                 cts.Token);
         }
@@ -141,6 +153,7 @@ public sealed partial class MainPage
                     assistant.Content.Text = streamState.Text.Length == 0
                         ? "(cancelled)"
                         : streamState.Text;
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "cancelled");
                     return ValueTask.CompletedTask;
                 },
                 CancellationToken.None);
@@ -154,6 +167,7 @@ public sealed partial class MainPage
                         ? $"Request failed: {TerminalUI.Truncate(exception.Message, 200)}"
                         : streamState.Text + $"\nRequest failed: {TerminalUI.Truncate(exception.Message, 200)}";
                     assistant.Content.Foreground = Brush(0xFF4444);
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
                     return ValueTask.CompletedTask;
                 },
                 CancellationToken.None);
@@ -194,8 +208,8 @@ public sealed partial class MainPage
         {
             if (line.Length == 0)
             {
-                if (eventType is not null && eventData is not null &&
-                    await ApplySseEventAsync(state, eventType, eventData, assistant, cancellationToken))
+                if (eventData is not null &&
+                    await ApplySseEventAsync(state, eventType ?? string.Empty, eventData, assistant, cancellationToken))
                     return;
 
                 eventType = null;
@@ -209,8 +223,8 @@ public sealed partial class MainPage
                 eventData = line[6..];
         }
 
-        if (eventType is not null && eventData is not null)
-            await ApplySseEventAsync(state, eventType, eventData, assistant, cancellationToken);
+        if (eventData is not null)
+            await ApplySseEventAsync(state, eventType ?? string.Empty, eventData, assistant, cancellationToken);
 
         await CommitStreamStateAsync(
             _ =>

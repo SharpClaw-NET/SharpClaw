@@ -2,6 +2,8 @@ using Microsoft.UI.Xaml.Media;
 using SharpClaw.Helpers;
 using SharpClaw.Services;
 using Windows.ApplicationModel.DataTransfer;
+using System.Net.Http.Json;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Presentation;
 
@@ -197,6 +199,81 @@ public sealed partial class SettingsPage : Page
         refresh.Click += async (_, _) => await RefreshAsync();
 
         await RefreshAsync();
+        try { await LoadProviderSetupAsync(); }
+        catch
+        {
+            Lbl("Provider setup information is unavailable; retry after checking Runtime status.", 0xFF8800);
+        }
+    }
+
+    private async Task LoadProviderSetupAsync()
+    {
+        Sub("Provider setup");
+        using var response = await Api.GetAsync("/setup/provider");
+        if (!response.IsSuccessStatusCode)
+        {
+            Lbl("Provider setup information is unavailable.", 0xFF8800);
+            return;
+        }
+        var setup = await response.Content.ReadFromJsonAsync<SharpClawProviderSetup>();
+        if (setup is null) return;
+        Lbl(setup.SetupRequired ? "Choose a provider and model to enable chat." : "Provider configured.", 0xCCCCCC);
+        var backend = App.Services!.GetRequiredService<BackendProcessManager>();
+        if (!backend.OwnsCurrentTarget || backend.SkipLaunch)
+        {
+            Lbl("Configure this external Runtime on its host; local settings will not be changed.", 0x808080);
+            return;
+        }
+        var provider = new ComboBox
+        {
+            ItemsSource = setup.Providers,
+            DisplayMemberPath = nameof(SharpClawProviderSetupOption.DisplayName),
+            SelectedItem = setup.Providers.FirstOrDefault(item => item.Key == setup.ProviderKey),
+            PlaceholderText = "Select an enabled provider",
+            MinWidth = 320,
+        };
+        var model = MakeInput("Model identifier");
+        model.Text = setup.Model ?? string.Empty;
+        var endpoint = MakeInput("Optional provider endpoint (HTTP/HTTPS)");
+        var credential = new PasswordBox { PlaceholderText = "API key or bearer token (if required)", MinWidth = 320 };
+        var apply = TerminalButton("Save provider and restart bundled Runtime");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(provider, "ProviderSetupProvider");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(model, "ProviderSetupModel");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(endpoint, "ProviderSetupEndpoint");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(credential, "ProviderSetupCredential");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(apply, "ProviderSetupApply");
+        var status = StatusBlock();
+        ContentPanel.Children.Add(provider);
+        ContentPanel.Children.Add(model);
+        ContentPanel.Children.Add(endpoint);
+        ContentPanel.Children.Add(credential);
+        ContentPanel.Children.Add(apply);
+        ContentPanel.Children.Add(status);
+        apply.Click += async (_, _) =>
+        {
+            if (provider.SelectedItem is not SharpClawProviderSetupOption selected ||
+                string.IsNullOrWhiteSpace(model.Text))
+            {
+                status.Text = "Select a provider and enter its model identifier.";
+                return;
+            }
+            apply.IsEnabled = false;
+            try
+            {
+                await BundledProviderSetup.ApplyAsync(
+                    App.Services!.GetRequiredService<FrontendInstanceService>(), backend,
+                    Gateway, Actions, selected, model.Text, endpoint.Text, credential.Password);
+                credential.Password = string.Empty;
+                await App.Services!.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, "Boot", Qualifiers.ClearBackStack);
+            }
+            catch
+            {
+                status.Text = "Setup failed. Check required credentials/endpoint and try again; no secrets are shown here.";
+                status.Foreground = B(0xFF4444);
+            }
+            finally { apply.IsEnabled = true; }
+        };
     }
 
     internal static async Task ApplyRuntimeTargetAsync(

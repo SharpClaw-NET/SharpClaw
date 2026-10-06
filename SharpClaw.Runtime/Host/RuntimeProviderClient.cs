@@ -14,11 +14,14 @@ public sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFactory
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(plugins);
         if (string.IsNullOrWhiteSpace(providerKey))
-            throw new InvalidOperationException("A chat profile must select a provider key.");
+            throw new InvalidOperationException(RuntimeProviderSetup.RequiredErrorMessage);
         var plugin = plugins.FirstOrDefault(value =>
             string.Equals(value.ProviderKey, providerKey, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException(
-                $"No enabled provider registration registered provider '{providerKey}'.");
+                providerKey == "unconfigured" && string.IsNullOrWhiteSpace(
+                    configuration["Provider:Key"] ?? configuration["Providers:Default"])
+                    ? RuntimeProviderSetup.RequiredErrorMessage
+                    : $"No enabled provider registration registered provider '{providerKey}'.");
         var configuredDefault = configuration["Provider:Key"]
             ?? configuration["Providers:Default"];
         var isDefault = string.Equals(
@@ -31,13 +34,15 @@ public sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFactory
             ?? (isDefault ? configuration["Provider:ApiKey"] : null)
             ?? string.Empty;
         var options = new ProviderClientOptions(endpoint);
+        if (plugin.RequiresEndpoint && string.IsNullOrWhiteSpace(endpoint))
+            throw new InvalidOperationException(RuntimeProviderSetup.RequiredErrorMessage);
         if (!plugin.RequiresApiKey)
             return plugin.CreateClient(options);
 
         if (string.IsNullOrWhiteSpace(credential))
         {
             throw new InvalidOperationException(
-                $"Provider '{plugin.ProviderKey}' requires credentials, but no credentials are configured.");
+                RuntimeProviderSetup.RequiredErrorMessage);
         }
 
         if (plugin is not IProviderCredentialBoundPlugin credentialBound)

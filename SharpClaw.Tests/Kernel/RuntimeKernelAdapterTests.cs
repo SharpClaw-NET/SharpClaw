@@ -37,29 +37,79 @@ public sealed class RuntimeKernelAdapterTests
 
         adapter.Graph.GetService(typeof(IEnumerable<IProviderPlugin>))
             .Should().NotBeNull();
-        providerFactory.Plugins.Should().ContainSingle()
-            .Which.ProviderKey.Should().Be("test");
+        providerFactory.Plugins.Should().BeNull("no provider client is created before a chat turn");
 
         await adapter.StartAsync("test-host");
         var result = await adapter.Kernel.RunAsync(new ChatTurnInput("hello"));
         await adapter.StopAsync();
 
         result.Completion.Content.Should().Be("reply");
+        providerFactory.Plugins.Should().ContainSingle()
+            .Which.ProviderKey.Should().Be("test");
         provider.Messages.Should().ContainSingle(message => message.Content == "hello");
         module.Started.Should().BeTrue();
         module.Stopped.Should().BeTrue();
     }
 
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase(" ")]
+    public async Task UnconfiguredAdapterStartsAndServesNonChatActionsWithoutCreatingAClient(string? key)
+    {
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Provider:Key"] = key }).Build();
+        var factory = new RecordingProviderClientFactory(new RecordingProviderClient());
+        var adapter = RuntimeKernelAdapterTestFactory.Create(configuration, [], workspace.CreateInstancePaths(), factory);
+        await adapter.StartAsync("unconfigured-host").ConfigureAwait(false);
+        try
+        {
+            var result = await adapter.RunRequestAsync(
+                adapter.CreateCliExecutionContext(RequestPrincipal.Anonymous), "setup",
+                static (value, _) => ValueTask.FromResult(value)).ConfigureAwait(false);
+            result.Should().Be("setup");
+            factory.Plugins.Should().BeNull();
+        }
+        finally { await adapter.StopAsync().ConfigureAwait(false); }
+    }
+
     [Test]
-    public async Task Module_profile_routes_each_turn_and_module_prompt_reaches_each_provider_once()
+    public async Task CredentialConfigurationIsNotRequiredToConstructOrStartTheHostGraph()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var provider = new RecordingProviderClient(requiresApiKey: true);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Provider:Key"] = "test" }).Build();
+        var adapter = RuntimeKernelAdapterTestFactory.Create(configuration, [new ProviderModule(provider)],
+            workspace.CreateInstancePaths(), new RuntimeProviderClientFactory());
+        await adapter.StartAsync("missing-credentials-host").ConfigureAwait(false);
+        await adapter.StopAsync().ConfigureAwait(false);
+        provider.Messages.Should().BeEmpty();
+        RuntimeProviderSetup.Describe(configuration, adapter).SetupRequired.Should().BeTrue();
+    }
+
+    [Test]
+    public void ExplicitlyUnknownProviderStillFailsGraphConstruction()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Provider:Key"] = "not-installed" }).Build();
+        Action construct = () => RuntimeKernelAdapterTestFactory.Create(configuration,
+            [new ProviderModule(new RecordingProviderClient())], workspace.CreateInstancePaths(),
+            new RuntimeProviderClientFactory());
+        construct.Should().Throw<InvalidOperationException>().WithMessage("*not available*");
+    }
+
+    [TestCase(true), TestCase(false)]
+    public async Task Module_profile_routes_each_turn_and_module_prompt_reaches_each_provider_once(bool hostDefaultConfigured)
     {
         var primary = new RecordingProviderClient();
         var alternate = new RecordingProviderClient("alternate");
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Provider:Key"] = "test",
-                ["Provider:Model"] = "test-model",
+                ["Provider:Key"] = hostDefaultConfigured ? "test" : null,
+                ["Provider:Model"] = hostDefaultConfigured ? "test-model" : null,
             })
             .Build();
         using var workspace = new TemporaryWorkspace();
@@ -73,6 +123,8 @@ public sealed class RuntimeKernelAdapterTests
                 services.AddSingleton<IChatProfileResolver, SwitchingProfileResolver>();
                 services.AddSingleton<IChatContextContributor, ModulePromptContributor>();
             });
+
+        RuntimeProviderSetup.Describe(configuration, adapter).SetupRequired.Should().BeFalse();
 
         await adapter.Kernel.RunAsync(new ChatTurnInput("primary"));
         await adapter.Kernel.RunAsync(new ChatTurnInput("alternate"));
@@ -491,12 +543,12 @@ public sealed class RuntimeKernelAdapterTests
         }
     }
 
-    private sealed class RecordingProviderClient(string providerKey = "test") : IProviderPlugin, IProviderApiClient
+    private sealed class RecordingProviderClient(string providerKey = "test", bool requiresApiKey = false) : IProviderPlugin, IProviderApiClient
     {
         public string ProviderKey => providerKey;
         public string DisplayName => "Test";
         public bool RequiresEndpoint => false;
-        public bool RequiresApiKey => false;
+        public bool RequiresApiKey => requiresApiKey;
         public IModelCapabilityResolver Capabilities { get; } =
             new EmptyCapabilityResolver();
         public IReadOnlyList<ProviderCostSeed> CostSeeds => [];

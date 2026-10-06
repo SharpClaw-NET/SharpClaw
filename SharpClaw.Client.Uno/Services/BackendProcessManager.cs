@@ -30,6 +30,7 @@ public sealed class BackendProcessManager : IDisposable
     private bool _startedByObserver;
     private readonly string _executablePath;
     private string _apiUrl;
+    private string? _ownedApiUrl;
     private readonly SharpClawBoundedTextTail _processOutput =
         new(SharpClawLogBounds.SidecarTailBytes);
     private readonly object _outputLock = new();
@@ -129,6 +130,12 @@ public sealed class BackendProcessManager : IDisposable
     /// manager and is still running.
     /// </summary>
     public bool IsRunning => _startedByObserver || _process is { HasExited: false };
+
+    internal bool OwnsCurrentTarget => IsRunning && !IsExternal &&
+        Uri.TryCreate(_ownedApiUrl, UriKind.Absolute, out var owned) &&
+        Uri.TryCreate(_apiUrl, UriKind.Absolute, out var current) &&
+        Uri.Compare(owned, current, UriComponents.SchemeAndServer | UriComponents.Path,
+            UriFormat.SafeUnescaped, StringComparison.OrdinalIgnoreCase) == 0;
 
     /// <summary>
     /// Probes the API's <c>/echo</c> endpoint (unauthenticated) to check
@@ -303,6 +310,7 @@ public sealed class BackendProcessManager : IDisposable
 
         // Pass the URL so the API binds to the expected port.
         psi.EnvironmentVariables["ASPNETCORE_URLS"] = _apiUrl;
+        _ownedApiUrl = _apiUrl;
 
         // Redirect the data directory to a writable location.
         // Inside MSIX, the install folder (C:\Program Files\WindowsApps\...) is

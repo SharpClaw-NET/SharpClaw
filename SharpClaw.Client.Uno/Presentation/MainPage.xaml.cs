@@ -3,6 +3,8 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using SharpClaw.Helpers;
 using SharpClaw.Services;
+using System.Net.Http.Json;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Presentation;
 
@@ -47,6 +49,21 @@ public sealed partial class MainPage : Page
 
         UpdateCursor();
         MessageInput.Focus(FocusState.Programmatic);
+        try
+        {
+            using var response = await App.Services.GetRequiredService<SharpClawApiClient>()
+                .GetAsync("/setup/provider");
+            var setup = response.IsSuccessStatusCode
+                ? await response.Content.ReadFromJsonAsync<SharpClawProviderSetup>() : null;
+            if (setup is { SetupRequired: true })
+                await App.Services.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, "Settings");
+        }
+        catch (Exception error) when (error is HttpRequestException or System.Text.Json.JsonException or OperationCanceledException)
+        {
+            // Chat requests report transport failures; setup is not inferred
+            // from a failed metadata request to an external/older Runtime.
+        }
     }
 
     private async void OnUnloaded(object sender, RoutedEventArgs e)

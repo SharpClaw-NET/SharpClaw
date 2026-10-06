@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Presentation;
 
@@ -10,6 +11,7 @@ public sealed record UnoSseEventResult(bool ShouldEnd, bool TextChanged);
 
 public sealed class UnoSseStreamState
 {
+    private static readonly JsonSerializerOptions KernelJson = new() { PropertyNameCaseInsensitive = true };
     private readonly System.Text.StringBuilder _builder = new();
     private bool _needsNewlineBeforeNextDelta;
 
@@ -22,6 +24,7 @@ public sealed class UnoSseStreamState
     {
         return eventType switch
         {
+            "" or "message" => ApplyKernelChunk(dataJson),
             "TextDelta" => ApplyTextDelta(dataJson),
             "ToolCallStart" => AppendStatusLine(dataJson, "job", "started"),
             "ToolCallResult" => AppendStatusLine(dataJson, "result", "done"),
@@ -31,6 +34,25 @@ public sealed class UnoSseStreamState
             "Done" => ApplyDone(dataJson),
             _ => new UnoSseEventResult(false, false),
         };
+    }
+
+    private UnoSseEventResult ApplyKernelChunk(string dataJson)
+    {
+        var chunk = JsonSerializer.Deserialize<ChatStreamChunk>(dataJson, KernelJson)
+            ?? throw new JsonException("A Runtime stream chunk is required.");
+        if (chunk.IsFinished)
+        {
+            if (chunk.Finished!.Content is { } content)
+            {
+                _builder.Clear();
+                _builder.Append(content);
+            }
+            DoneReceived = true;
+            return new UnoSseEventResult(true, true);
+        }
+        if (chunk.Delta is not { } delta) return new UnoSseEventResult(false, false);
+        _builder.Append(delta);
+        return new UnoSseEventResult(false, true);
     }
 
     private UnoSseEventResult ApplyTextDelta(string dataJson)

@@ -19,8 +19,12 @@ public sealed class ExternalPersistenceFixtureModule : ISharpClawModule
         services.AddSingleton<ISharpClawPersistenceProvider, ExternalPersistenceFixtureProvider>();
 }
 
-public sealed class ExternalPersistenceFixtureProvider : ISharpClawPersistenceProvider
+public sealed class ExternalPersistenceFixtureProvider : ISharpClawPersistenceProvider, IDisposable
 {
+    private readonly ServiceProvider _efServices = new ServiceCollection()
+        .AddEntityFrameworkInMemoryDatabase()
+        .BuildServiceProvider();
+
     public string Key => ExternalPersistenceFixtureModule.ProviderKey;
     public IReadOnlyCollection<string> Aliases { get; } = [];
     public bool IsRelational => false;
@@ -28,5 +32,15 @@ public sealed class ExternalPersistenceFixtureProvider : ISharpClawPersistencePr
     public void Configure(
         DbContextOptionsBuilder optionsBuilder,
         SharpClawPersistenceProviderContext context) =>
-        optionsBuilder.UseInMemoryDatabase("external-persistence-package");
+        // Own this reloadable fixture's EF services instead of retaining its
+        // module-local types in EF's process-global service-provider cache.
+        optionsBuilder.UseInMemoryDatabase("external-persistence-package")
+            .UseLoggerFactory(null)
+            .UseInternalServiceProvider(_efServices);
+
+    public void Dispose()
+    {
+        _efServices.Dispose();
+        GC.SuppressFinalize(this);
+    }
 }

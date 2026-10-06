@@ -13,12 +13,19 @@ param(
     [Parameter(Mandatory)][string]$CertificatePath,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedCertificateSha256,
     [Parameter(Mandatory)][string]$ReportDirectory,
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$TestProviderKey,
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$TestModel,
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$TestProviderEndpoint,
     [ValidateRange(10, 600)][int]$StartupTimeoutSeconds = 60
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Windows is required.' }
 if ($PSVersionTable.PSEdition -ne 'Desktop') { throw 'Run this UI Automation gate with stock Windows PowerShell 5.1 (powershell.exe).' }
+$testEndpoint = [Uri]$TestProviderEndpoint
+if (-not $testEndpoint.IsAbsoluteUri -or $testEndpoint.Scheme -notin @('http', 'https') -or $testEndpoint.UserInfo) {
+    throw 'Use an explicit test provider HTTP(S) endpoint without credentials.'
+}
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $account = ($identity.Name -split '\\')[-1]
 if ($identity.User.Value -ne $ExpectedTestUserSid -or
@@ -58,6 +65,67 @@ using System.Windows.Automation;
 public static class SharpClawInstalledProbe {
     static Task<bool> bootUiProbe;
     static long bootUiProbeHandle;
+    static readonly Dictionary<string, Task<bool>> visibleProbes = new Dictionary<string, Task<bool>>();
+    public static bool HasVisibleElement(long handle, string id) {
+        var key = handle.ToString() + ":" + id;
+        Task<bool> probe;
+        if (!visibleProbes.TryGetValue(key, out probe)) {
+            visibleProbes[key] = Task.Run(() => {
+                var element = FindElement(handle, id);
+                return element != null && !element.Current.IsOffscreen;
+            });
+            return false;
+        }
+        if (!probe.IsCompleted) return false;
+        var visible = probe.GetAwaiter().GetResult();
+        if (!visible) visibleProbes.Remove(key);
+        return visible;
+    }
+    static AutomationElement FindElement(long handle, string id) {
+        return AutomationElement.FromHandle(new IntPtr(handle)).FindFirst(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.AutomationIdProperty, id));
+    }
+    static void RunUiAction(Action action) {
+        // A timed-out background writer could otherwise click after cleanup
+        // starts. The executor bounds the whole gate; writes stay synchronous.
+        action();
+    }
+    public static void SetValue(long handle, string id, string value) {
+        RunUiAction(() => {
+            var element = FindElement(handle, id);
+            if (element == null) throw new InvalidOperationException("Missing UI input: " + id);
+            ((ValuePattern)element.GetCurrentPattern(ValuePattern.Pattern)).SetValue(value);
+        });
+    }
+    public static void SelectProvider(long handle, string displayName) {
+        RunUiAction(() => {
+            var combo = FindElement(handle, "ProviderSetupProvider");
+            if (combo == null) throw new InvalidOperationException("Provider selection is missing.");
+            ((ExpandCollapsePattern)combo.GetCurrentPattern(ExpandCollapsePattern.Pattern)).Expand();
+            var item = AutomationElement.FromHandle(new IntPtr(handle)).FindFirst(TreeScope.Descendants,
+                new AndCondition(new PropertyCondition(AutomationElement.NameProperty, displayName),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)));
+            if (item == null) throw new InvalidOperationException("Enabled provider selection is missing.");
+            ((SelectionItemPattern)item.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            ((ExpandCollapsePattern)combo.GetCurrentPattern(ExpandCollapsePattern.Pattern)).Collapse();
+        });
+    }
+    public static void Invoke(long handle, string id) {
+        RunUiAction(() => {
+            var element = FindElement(handle, id);
+            if (element == null) throw new InvalidOperationException("Missing UI command: " + id);
+            ((InvokePattern)element.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
+        });
+    }
+    public static string CompletedResponse(long handle) {
+        var task = Task.Run(() => {
+            var response = FindElement(handle, "ChatAssistantResponse");
+            if (response == null || response.Current.ItemStatus != "complete") return null;
+            return response.Current.Name;
+        });
+        if (!task.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Response observation did not finish.");
+        return task.GetAwaiter().GetResult();
+    }
     // Read fresh native store snapshots. Certificate-provider path checks can
     // retain a negative result across Import-Certificate in Windows PowerShell.
     static bool SameCertificate(X509Certificate2 left, X509Certificate2 right) {
@@ -159,7 +227,43 @@ $result = [ordered]@{
     RuntimeObserved = $false; GatewayObserved = $false; ProcessSnapshotTimeouts = 0
     GatewayTemplatesObserved = $false
     CleanFirstLaunchVerified = $false; ProtectedTemplateSources = @(); SeededTemplates = @()
+    CleanRuntimeReady = $false; CleanSetupObserved = $false; ConfiguredByProductUi = $false
+    RealRequestCompleted = $false; TestProviderKey = $TestProviderKey; TestModel = $TestModel
     CleanupVerified = $false; Success = $false
+}
+function Get-TestRuntimeConnection {
+    $backendRoot = Join-Path $frontend 'stack/backend'
+    $keyFile = Join-Path $backendRoot 'runtime/.api-key'
+    if (-not (Test-Path -LiteralPath $keyFile)) { return $null }
+    foreach ($root in @($profileRoot, $virtualProfileRoot)) {
+        $directory = Join-Path $root 'discovery/instances'
+        if (-not (Test-Path -LiteralPath $directory)) { continue }
+        foreach ($file in Get-ChildItem -LiteralPath $directory -Filter 'backend-*.json') {
+            $entry = [IO.File]::ReadAllText($file.FullName) | ConvertFrom-Json
+            $runtime = @(Get-TestPackageProcesses -AllowTransientTimeout | Where-Object {
+                $_.Name -eq 'SharpClaw.Runtime.Host.exe' -and $_.ProcessId -eq $entry.processId
+            })
+            $base = [Uri]$entry.baseUrl
+            if ($runtime.Count -eq 1 -and $base.IsAbsoluteUri -and $base.IsLoopback -and
+                $base.Scheme -in @('http', 'https')) {
+                # Credentials are used in memory only, never in the exported report.
+                return [pscustomobject]@{ BaseUrl = $base.AbsoluteUri.TrimEnd('/'); ProcessId = $entry.processId
+                    Headers = @{ 'X-Api-Key' = [IO.File]::ReadAllText($keyFile).Trim() } }
+            }
+        }
+    }
+    return $null
+}
+function Get-TestRuntimeSetup {
+    param($Connection)
+    if ($null -eq $Connection) { return $null }
+    try {
+        foreach ($path in @('/echo', '/readyz', '/ping')) {
+            $probe = Invoke-WebRequest -UseBasicParsing -Uri ($Connection.BaseUrl + $path) -Headers $Connection.Headers -TimeoutSec 5
+            if ($probe.StatusCode -ne 200) { return $null }
+        }
+        return Invoke-RestMethod -Uri ($Connection.BaseUrl + '/setup/provider') -Headers $Connection.Headers -TimeoutSec 5
+    } catch { return $null }
 }
 function Get-TestPackageProcesses {
     param([switch]$AllowTransientTimeout)
@@ -341,8 +445,20 @@ try {
                 Test-Path -LiteralPath (Join-Path $_[1] '.env.template')
                 Test-Path -LiteralPath (Join-Path $_[1] '.dev.env.template')
             })
-            if ($cleanWindows.Count -eq 1 -and $false -notin $seeded -and
-                [SharpClawInstalledProbe]::HasVisibleBootUi($cleanWindows[0].Handle)) {
+            if ($cleanWindows.Count -eq 1 -and $false -notin $seeded) {
+                if (-not $result.BootUiObserved -and [SharpClawInstalledProbe]::HasVisibleBootUi($cleanWindows[0].Handle)) {
+                    $result.BootUiObserved = $true
+                    Save-WindowCapture $cleanWindows[0].Handle 'boot-window.png'
+                }
+                $cleanConnection = Get-TestRuntimeConnection
+                $cleanSetup = Get-TestRuntimeSetup $cleanConnection
+                if ($null -eq $cleanSetup -or -not $cleanSetup.setupRequired -or
+                    -not [SharpClawInstalledProbe]::HasVisibleElement($cleanWindows[0].Handle, 'ProviderSetupApply')) {
+                    Start-Sleep -Milliseconds 200
+                    continue
+                }
+                $result.CleanRuntimeReady = $true
+                $result.CleanSetupObserved = $true
                 $result.CleanFirstLaunchVerified = $true
                 $result['ActualFrontendRoot'] = $frontend
                 Save-WindowCapture $cleanWindows[0].Handle 'clean-first-launch.png'
@@ -351,12 +467,54 @@ try {
         }
         Start-Sleep -Milliseconds 200
     } while ([DateTime]::UtcNow -lt $cleanDeadline)
-    if (-not $result.CleanFirstLaunchVerified) { throw 'Clean first launch did not seed templates and expose the boot UI.' }
+    if (-not $result.CleanFirstLaunchVerified) { throw 'Clean first launch did not reach an authenticated ready Runtime and visible provider setup UI.' }
     foreach ($scope in $templateScopes[0..1]) {
         foreach ($name in @('.env.template', '.dev.env.template')) {
             $result.SeededTemplates += Assert-SeededTemplate ($scope[0] + '/' + $name) $scope[1]
         }
     }
+    # Exercise the product's protected configuration writer and full Runtime
+    # replacement through the visible UI. No provider template is pre-seeded.
+    $selection = @($cleanSetup.providers | Where-Object key -eq $TestProviderKey)
+    if ($selection.Count -ne 1 -or $selection[0].requiresApiKey) {
+        throw 'Use an explicitly prepared enabled keyless provider for this gate; it never harvests owner credentials.'
+    }
+    $originalRuntimeProcessId = $cleanConnection.ProcessId
+    [SharpClawInstalledProbe]::SelectProvider($cleanWindows[0].Handle, $selection[0].displayName)
+    [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupModel', $TestModel)
+    [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupEndpoint', $TestProviderEndpoint)
+    [SharpClawInstalledProbe]::Invoke($cleanWindows[0].Handle, 'ProviderSetupApply')
+    $configuredDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+    do {
+        $configuredConnection = Get-TestRuntimeConnection
+        $configuredSetup = Get-TestRuntimeSetup $configuredConnection
+        if ($null -ne $configuredSetup -and -not $configuredSetup.setupRequired -and
+            $configuredSetup.providerKey -eq $TestProviderKey -and $configuredSetup.model -eq $TestModel -and
+            $configuredConnection.ProcessId -ne $originalRuntimeProcessId -and
+            [SharpClawInstalledProbe]::HasVisibleElement($cleanWindows[0].Handle, 'ChatMessageInput')) {
+            $result.ConfiguredByProductUi = $true
+            Save-WindowCapture $cleanWindows[0].Handle 'configured-main.png'
+            break
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $configuredDeadline)
+    if (-not $result.ConfiguredByProductUi) { throw 'Provider setup UI did not restart Runtime and expose configured chat.' }
+    # ONE model request via the actual client streaming path. A partial response,
+    # HTTP success alone or enabled Send button is not terminal completion.
+    [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ChatMessageInput', 'Reply with a short greeting.')
+    [SharpClawInstalledProbe]::Invoke($cleanWindows[0].Handle, 'ChatSend')
+    $requestDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+    do {
+        $reply = [SharpClawInstalledProbe]::CompletedResponse($cleanWindows[0].Handle)
+        if (-not [string]::IsNullOrWhiteSpace($reply)) {
+            $result.RealRequestCompleted = $true
+            $result['CompletedResponse'] = $reply
+            Save-WindowCapture $cleanWindows[0].Handle 'completed-request.png'
+            break
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $requestDeadline)
+    if (-not $result.RealRequestCompleted) { throw 'The actual client request did not receive a nonempty terminal-completed response.' }
     $null = (Get-Process -Id $cleanClients[0].ProcessId).CloseMainWindow()
     $stopDeadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
@@ -370,12 +528,11 @@ try {
     # Stop-Process requests termination; it does not prove all process handles
     # and the next CIM snapshot have observed that exit yet.
     Wait-TestPackageProcessesStopped
-    # Explicit non-secret configuration, not an implicit production default.
-    # Only AFTER proving clean first launch, configure the two seeded scopes.
+    # Only AFTER proving clean setup and a completed request, enable Gateway.
+    # The protected provider document written by the product must remain intact.
     # Leave Gateway templates absent so its first startup also exercises seeding.
     $configs = @(
-        @('Environment/.env.template', (Join-Path $frontend 'config'), 'Gateway__Enabled="true"'),
-        @('backend/Environment/.env.template', (Join-Path $frontend 'stack/backend/config'), 'Provider__Key="ollama"')
+        @('Environment/.env.template', (Join-Path $frontend 'config'), 'Gateway__Enabled="true"')
     )
     foreach ($config in $configs) {
         New-Item -ItemType Directory -Path $config[1] -Force | Out-Null

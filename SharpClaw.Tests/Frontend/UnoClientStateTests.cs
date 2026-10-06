@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using SharpClaw.Presentation;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Tests.Frontend;
 
@@ -83,5 +84,22 @@ public class UnoClientStateTests
         result.ShouldEnd.Should().BeFalse();
         result.TextChanged.Should().BeFalse();
         state.Text.Should().BeEmpty();
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void Canonical_Runtime_data_only_chunks_complete_the_displayed_response(bool camelCase)
+    {
+        var state = new UnoSseStreamState();
+        var options = camelCase ? Json : new JsonSerializerOptions();
+        state.Apply(string.Empty, JsonSerializer.Serialize(ChatStreamChunk.Text("hello "), options));
+        state.Apply(string.Empty, JsonSerializer.Serialize(ChatStreamChunk.Text("world"), options));
+        state.Text.Should().Be("hello world");
+        var end = state.Apply(string.Empty, JsonSerializer.Serialize(
+            ChatStreamChunk.Final(new ChatCompletionResult { Content = "hello world" }), options));
+        end.ShouldEnd.Should().BeTrue();
+        state.DoneReceived.Should().BeTrue();
+        state.ErrorReceived.Should().BeFalse();
+        state.Text.Should().Be("hello world");
     }
 }

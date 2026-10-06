@@ -406,6 +406,22 @@ try {
             throw 'The installed gate must reproduce AppX protection and activate before pre-seeding any configuration.'
         }
     }
+    Test-Case 'installed gate requires reachable setup and a product-UI completed model request' {
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        $firstLaunch = $gate.IndexOf('$result[''CleanFirstLaunchProcessId'']', [StringComparison]::Ordinal)
+        $configuration = $gate.IndexOf('foreach ($config in $configs)', [StringComparison]::Ordinal)
+        $completion = $gate.IndexOf('if (-not $result.RealRequestCompleted)', [StringComparison]::Ordinal)
+        foreach ($required in @('CleanRuntimeReady', 'CleanSetupObserved', 'Get-TestRuntimeSetup',
+            "'/echo', '/readyz', '/ping'", "'/setup/provider'", 'ProviderSetupApply',
+            'ConfiguredByProductUi', 'originalRuntimeProcessId', 'ChatSend',
+            'response.Current.ItemStatus != "complete"', 'RealRequestCompleted', 'completed-request.png')) {
+            if (-not $gate.Contains($required)) { throw "Missing actual first-run/request gate: $required" }
+        }
+        if ($firstLaunch -lt 0 -or $completion -le $firstLaunch -or $configuration -le $completion -or
+            $gate -match 'Provider__Key="ollama"') {
+            throw 'Reachable clean setup and UI terminal completion must precede test template writes.'
+        }
+    }
     Test-Case 'installed template evidence verifies writable contents without copying protection' {
         $gatePath = Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'
         $gate = [IO.File]::ReadAllText($gatePath)
