@@ -488,7 +488,7 @@ try {
         foreach ($required in @('SetForegroundWindow(window)', 'GetForegroundWindow() != window',
             'ClickVisibleElement(combo)', 'providerCount > 256', 'providerIndex >= providerCount',
             'NavigateAcknowledgedProviderSelection(() =>', 'AwaitProviderSelection(read, next, providerCount, timeout)',
-            'TryGetCurrentPattern(SelectionPattern.Pattern, out pattern)', 'GetCurrentSelection()',
+            'TryGetCurrentPattern(SelectionPattern.Pattern, out pattern)', '.Current.GetSelection()',
             'new HashSet<string>(StringComparer.Ordinal)',
             'PressProviderKey(window, 0x1B', 'PressProviderKey(window, 0x09',
             'MapVirtualKey(key, 0)', 'scan == 0 || scan > 0xFF', '0x0008u', 'SendKeyboardInputs(window',
@@ -498,6 +498,31 @@ try {
         }
         if ($selection -match 'SelectionItemPattern|ExpandCollapsePattern|\.Select\(|\.SetValue\(|Invoke-RestMethod|Invoke-WebRequest') {
             throw 'Provider selection must use physical input with public readback, not UIA writer patterns or private configuration.'
+        }
+    }
+    if ($IsWindows) {
+        Test-Case 'complete installed UI probe compiles against stock Windows PowerShell UIAutomation assemblies' {
+            $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+            $source = [regex]::Match($gate, "(?s)(using System;\r?\nusing System.Collections.Generic;.*?)(?=\r?\n'@)")
+            if (-not $source.Success -or -not $source.Value.Contains('public static class SharpClawInstalledProbe')) {
+                throw 'The complete installed probe source was not found.'
+            }
+            $path = Join-Path $root 'full-installed-probe.cs'
+            [IO.File]::WriteAllText($path, $source.Value, [Text.UTF8Encoding]::new($false))
+            $command = @'
+$ErrorActionPreference='Stop'
+if($PSVersionTable.PSEdition -ne 'Desktop'){throw 'Require stock Windows PowerShell.'}
+Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Drawing
+Add-Type -ReferencedAssemblies UIAutomationClient,UIAutomationTypes,WindowsBase,System,System.Core -Path 'PROBE_SOURCE_PATH'
+'COMPLETE_STOCK_WINDOWS_UI_PROBE_COMPILED=true'
+'@
+            $command = $command.Replace('PROBE_SOURCE_PATH', $path.Replace("'", "''"))
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+            $shell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            $answer = @(& $shell -NoProfile -NonInteractive -EncodedCommand $encoded 2>&1)
+            if ($LASTEXITCODE -ne 0 -or ($answer -join "`n") -notmatch 'COMPLETE_STOCK_WINDOWS_UI_PROBE_COMPILED=true') {
+                throw ('Complete embedded installed UI probe compilation failed: ' + ($answer -join "`n"))
+            }
         }
     }
     Test-Case 'acknowledged provider navigation reaches exact index from every initial selection including no selection' {

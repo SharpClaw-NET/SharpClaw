@@ -192,7 +192,7 @@ public static class SharpClawInstalledProbe {
                 object pattern;
                 if (current == null || !current.TryGetCurrentPattern(SelectionPattern.Pattern, out pattern))
                     throw new InvalidOperationException("Missing readable public provider selection.");
-                var selected = ((SelectionPattern)pattern).GetCurrentSelection();
+                var selected = ((SelectionPattern)pattern).Current.GetSelection();
                 if (selected.Length == 0) return -1;
                 if (selected.Length != 1) throw new InvalidOperationException("Ambiguous public provider selection.");
                 var name = selected[0].Current.Name;
