@@ -98,32 +98,37 @@ public static class SharpClawInstalledProbe {
             ((ValuePattern)element.GetCurrentPattern(ValuePattern.Pattern)).SetValue(value);
         });
     }
-    public static void SelectProvider(long handle, string displayName) {
+    public static void SelectProvider(long handle, int providerIndex, int providerCount) {
         RunUiAction(() => {
             // Uno's Win32 UIA ExpandCollapse provider can expose the pattern
             // but reject Expand. Exercise the same visible pointer interaction
             // as a user, not a private setter or a runtime configuration API.
             var window = new IntPtr(handle);
+            if (providerCount < 1 || providerCount > 256 || providerIndex < 0 || providerIndex >= providerCount)
+                throw new InvalidOperationException("Invalid enabled-provider UI index.");
             if (!SetForegroundWindow(window) || GetForegroundWindow() != window)
                 throw new InvalidOperationException("Provider setup window could not receive pointer input.");
             var combo = FindElement(handle, "ProviderSetupProvider");
             if (combo == null) throw new InvalidOperationException("Provider selection is missing.");
             ClickVisibleElement(combo);
-            var deadline = DateTime.UtcNow.AddSeconds(10);
-            AutomationElement item = null;
-            do {
-                item = AutomationElement.FromHandle(window).FindFirst(TreeScope.Descendants,
-                    new AndCondition(new PropertyCondition(AutomationElement.NameProperty, displayName),
-                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem),
-                        new PropertyCondition(AutomationElement.IsOffscreenProperty, false)));
-                if (item != null) break;
-                Thread.Sleep(100);
-            } while (DateTime.UtcNow < deadline);
-            if (item == null) throw new InvalidOperationException("Enabled provider selection is missing.");
-            if (item.Current.ProcessId != combo.Current.ProcessId)
-                throw new InvalidOperationException("Provider item belongs to another process.");
-            ClickVisibleElement(item);
+            // Popup items may be virtualized or absent from the window UIA
+            // subtree. The product binds this ordered setup list directly.
+            // Close the popup, select from Home with ordinary arrow keys, then
+            // leave the combo. Later Runtime assertions verify the actual key.
+            PressProviderKey(window, 0x1B, false); // Escape: close popup, retain combo focus.
+            PressProviderKey(window, 0x24, true);  // Home: first provider.
+            for (var index = 0; index < providerIndex; index++)
+                PressProviderKey(window, 0x28, true); // Down.
+            PressProviderKey(window, 0x09, false); // Tab: leave provider selection.
         });
+    }
+    static void PressProviderKey(IntPtr window, byte key, bool extended) {
+        if (GetForegroundWindow() != window)
+            throw new InvalidOperationException("Provider window lost input focus.");
+        uint flags = extended ? 0x0001u : 0u;
+        keybd_event(key, 0, flags, UIntPtr.Zero);
+        keybd_event(key, 0, flags | 0x0002u, UIntPtr.Zero);
+        Thread.Sleep(75);
     }
     static void ClickVisibleElement(AutomationElement element) {
         if (element.Current.IsOffscreen || !element.Current.IsEnabled)
@@ -192,6 +197,7 @@ public static class SharpClawInstalledProbe {
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extraInfo);
+    [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extraInfo);
     public struct Rect { public int Left, Top, Right, Bottom; }
     public sealed class WindowInfo { public long Handle; public uint ProcessId; public string Title; }
     public static WindowInfo[] VisibleWindows(uint processId) {
@@ -297,6 +303,21 @@ function Get-TestRuntimeSetup {
         }
         return Invoke-RestMethod -Uri ($Connection.BaseUrl + '/setup/provider') -Headers $Connection.Headers -TimeoutSec 5
     } catch { return $null }
+}
+function Get-TestProviderUiIndex {
+    param([object[]]$Options, [string]$ProviderKey)
+    if ($Options.Count -lt 1 -or $Options.Count -gt 256 -or [string]::IsNullOrWhiteSpace($ProviderKey)) {
+        throw 'Invalid enabled-provider UI list.'
+    }
+    $selected = -1
+    for ($index = 0; $index -lt $Options.Count; $index++) {
+        if ([string]::Equals($Options[$index].key, $ProviderKey, [StringComparison]::OrdinalIgnoreCase)) {
+            if ($selected -ge 0) { throw 'Ambiguous enabled-provider UI key.' }
+            $selected = $index
+        }
+    }
+    if ($selected -lt 0) { throw 'Enabled-provider UI key is missing.' }
+    return $selected
 }
 function Get-TestPackageProcesses {
     param([switch]$AllowTransientTimeout)
@@ -513,7 +534,11 @@ try {
         throw 'Use an explicitly prepared enabled keyless provider for this gate; it never harvests owner credentials.'
     }
     $originalRuntimeProcessId = $cleanConnection.ProcessId
-    [SharpClawInstalledProbe]::SelectProvider($cleanWindows[0].Handle, $selection[0].displayName)
+    $providerOptions = @($cleanSetup.providers)
+    $providerIndex = Get-TestProviderUiIndex $providerOptions $TestProviderKey
+    $result['ProviderUiSelectionIndex'] = $providerIndex
+    $result['ProviderUiSelectionDisplayName'] = $selection[0].displayName
+    [SharpClawInstalledProbe]::SelectProvider($cleanWindows[0].Handle, $providerIndex, $providerOptions.Count)
     [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupModel', $TestModel)
     [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupEndpoint', $TestProviderEndpoint)
     [SharpClawInstalledProbe]::Invoke($cleanWindows[0].Handle, 'ProviderSetupApply')
