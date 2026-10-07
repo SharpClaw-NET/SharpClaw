@@ -577,8 +577,8 @@ Add-Type -ReferencedAssemblies UIAutomationClient,UIAutomationTypes,WindowsBase,
   int presses=0;
   try {
    NavigateAcknowledgedProviderSelection(() => 0,key => presses++,2,3,TimeSpan.FromMilliseconds(60));
-  } catch(AggregateException error) {
-   if(error.InnerException is TimeoutException && presses==1)return;
+  } catch(TimeoutException) {
+   if(presses==1)return;
    throw;
   }
   throw new InvalidOperationException("Missing selection acknowledgement was accepted or replayed.");
@@ -587,8 +587,8 @@ Add-Type -ReferencedAssemblies UIAutomationClient,UIAutomationTypes,WindowsBase,
   int presses=0;
   try {
    NavigateAcknowledgedProviderSelection(() => -2,key => presses++,1,3,TimeSpan.FromMilliseconds(60));
-  } catch(AggregateException error) {
-   if(error.InnerException is InvalidOperationException && presses==0)return;
+  } catch(InvalidOperationException) {
+   if(presses==0)return;
    throw;
   }
   throw new InvalidOperationException("Invalid selection allowed a physical input.");
@@ -599,6 +599,32 @@ Add-Type -ReferencedAssemblies UIAutomationClient,UIAutomationTypes,WindowsBase,
         $type::VerifyDelayed()
         $type::VerifyMissing()
         $type::VerifyInvalid()
+    }
+    Test-Case 'provider observation preserves the original readback exception and installed reports retain its cause' {
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        $navigation = [regex]::Match($gate, '(?s)public static void NavigateAcknowledgedProviderSelection\(.*?\n    \}')
+        $observation = [regex]::Match($gate, '(?s)public static int AwaitProviderSelection\(.*?\n    \}')
+        $name = 'ProviderFailureFixture_' + [guid]::NewGuid().ToString('N')
+        $source = 'using System; using System.Threading; using System.Threading.Tasks; public static class ' + $name + ' {' + $navigation.Value + $observation.Value + @'
+ public static void Verify() {
+  var expected=new InvalidOperationException("Public readback failed.");
+  int presses=0;
+  try {
+   NavigateAcknowledgedProviderSelection(() => {throw expected;},key => presses++,1,3,TimeSpan.FromMilliseconds(60));
+  } catch(InvalidOperationException error) {
+   if(object.ReferenceEquals(error,expected) && presses==0)return;
+   throw;
+  }
+  throw new InvalidOperationException("Readback exception was replaced, accepted or allowed physical input.");
+ }
+}
+'@
+        $type = Add-Type -TypeDefinition $source -PassThru
+        $type::Verify()
+        foreach ($required in @("['FailureInnerMessage'] = `$_.Exception.GetBaseException().Message",
+            "['FailureInnerType'] = `$_.Exception.GetBaseException().GetType().FullName")) {
+            if (-not $gate.Contains($required)) { throw 'Installed failure report hides its original exception.' }
+        }
     }
     Test-Case 'provider UI index preserves product list order and rejects missing or duplicate keys' {
         $gatePath = Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'

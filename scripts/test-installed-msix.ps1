@@ -231,7 +231,8 @@ public static class SharpClawInstalledProbe {
             } while (timer.Elapsed < timeout);
             throw new TimeoutException("Public provider selection did not acknowledge the intended item.");
         });
-        if (!observation.Wait(timeout + TimeSpan.FromSeconds(1)))
+        if (!object.ReferenceEquals(Task.WhenAny(observation,
+            Task.Delay(timeout + TimeSpan.FromSeconds(1))).GetAwaiter().GetResult(), observation))
             throw new TimeoutException("Public provider selection observation did not finish within its bound.");
         return observation.GetAwaiter().GetResult();
     }
@@ -828,6 +829,8 @@ try {
     $result['Failure'] = $_.Exception.Message
     $result['FailureType'] = $_.Exception.GetType().FullName
     $result['FailurePosition'] = $_.InvocationInfo.ScriptLineNumber
+    $result['FailureInnerMessage'] = $_.Exception.GetBaseException().Message
+    $result['FailureInnerType'] = $_.Exception.GetBaseException().GetType().FullName
     throw
 } finally {
     $cleanupFailures = [Collections.Generic.List[string]]::new()
