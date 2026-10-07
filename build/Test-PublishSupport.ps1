@@ -462,6 +462,21 @@ try {
         Assert-Rejected { Get-TestProviderUiIndex @() 'same' }
         Assert-Rejected { Get-TestProviderUiIndex (@(1..257 | ForEach-Object { [pscustomobject]@{key="provider-$_"} })) 'provider-1' }
     }
+    Test-Case 'installed text and command entry use visible bounded input with no UIA writer patterns' {
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        foreach ($required in @('CreateTextInputs(value)', 'value.Length > 4096', 'char.IsControl(value[index])',
+            'RequireForegroundWindow(window)', 'ClickVisibleElement(element)',
+            'KeyboardInput(0x11, 0, 0)', 'KeyboardInput(0x41, 0, 0x0002)',
+            'KeyboardInput(0x11, 0, 0x0002)', 'KeyboardInput(0, value[index], 0x0004)',
+            'KeyboardInput(0, value[index], 0x0004 | 0x0002)',
+            'GetForegroundWindow() != window', 'Marshal.SizeOf(typeof(Input))) != (uint)inputs.Length',
+            '[StructLayout(LayoutKind.Explicit)] struct InputUnion', '[FieldOffset(0)] public MouseInputData Mouse')) {
+            if (-not $gate.Contains($required)) { throw "Missing actual bounded input guarantee: $required" }
+        }
+        if ($gate -match 'GetCurrentPattern\((ValuePattern|InvokePattern)\.Pattern\)|Clipboard|SendMessage|PostMessage') {
+            throw 'Test UI writes must use visible foreground input, not unsupported patterns or private messages.'
+        }
+    }
     Test-Case 'installed template evidence verifies writable contents without copying protection' {
         $gatePath = Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'
         $gate = [IO.File]::ReadAllText($gatePath)

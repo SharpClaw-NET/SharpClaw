@@ -93,10 +93,50 @@ public static class SharpClawInstalledProbe {
     }
     public static void SetValue(long handle, string id, string value) {
         RunUiAction(() => {
+            var inputs = CreateTextInputs(value);
+            var window = new IntPtr(handle);
+            RequireForegroundWindow(window);
             var element = FindElement(handle, id);
             if (element == null) throw new InvalidOperationException("Missing UI input: " + id);
-            ((ValuePattern)element.GetCurrentPattern(ValuePattern.Pattern)).SetValue(value);
+            // The shipped Uno peer exposes ValuePattern but rejects SetValue.
+            // Click the real visible input, select its contents and type through
+            // the foreground keyboard stream; never mutate a private UI/model.
+            ClickVisibleElement(element);
+            Thread.Sleep(75);
+            SendKeyboardInputs(window, new[] {
+                KeyboardInput(0x11, 0, 0), KeyboardInput(0x41, 0, 0),
+                KeyboardInput(0x41, 0, 0x0002), KeyboardInput(0x11, 0, 0x0002)
+            }); // Ctrl+A, with both keys released.
+            if (inputs.Length > 0) SendKeyboardInputs(window, inputs);
+            Thread.Sleep(75);
         });
+    }
+    static Input[] CreateTextInputs(string value) {
+        if (value == null || value.Length == 0 || value.Length > 4096)
+            throw new InvalidOperationException("Invalid bounded test UI text.");
+        var inputs = new Input[value.Length * 2];
+        for (var index = 0; index < value.Length; index++) {
+            if (char.IsControl(value[index]))
+                throw new InvalidOperationException("Test UI text cannot contain control keys.");
+            inputs[index * 2] = KeyboardInput(0, value[index], 0x0004); // KEYEVENTF_UNICODE.
+            inputs[index * 2 + 1] = KeyboardInput(0, value[index], 0x0004 | 0x0002);
+        }
+        return inputs;
+    }
+    static Input KeyboardInput(ushort key, ushort scan, uint flags) {
+        return new Input { Type = 1, Data = new InputUnion {
+            Keyboard = new KeyboardInputData { Key = key, Scan = scan, Flags = flags }
+        }};
+    }
+    static void SendKeyboardInputs(IntPtr window, Input[] inputs) {
+        if (GetForegroundWindow() != window)
+            throw new InvalidOperationException("Test window lost keyboard input focus.");
+        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != (uint)inputs.Length)
+            throw new InvalidOperationException("Keyboard input was not completely accepted.");
+    }
+    static void RequireForegroundWindow(IntPtr window) {
+        if (!SetForegroundWindow(window) || GetForegroundWindow() != window)
+            throw new InvalidOperationException("Test window could not receive visible input.");
     }
     public static void SelectProvider(long handle, int providerIndex, int providerCount) {
         RunUiAction(() => {
@@ -146,9 +186,10 @@ public static class SharpClawInstalledProbe {
     }
     public static void Invoke(long handle, string id) {
         RunUiAction(() => {
+            RequireForegroundWindow(new IntPtr(handle));
             var element = FindElement(handle, id);
             if (element == null) throw new InvalidOperationException("Missing UI command: " + id);
-            ((InvokePattern)element.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
+            ClickVisibleElement(element);
         });
     }
     public static string CompletedResponse(long handle) {
@@ -198,6 +239,20 @@ public static class SharpClawInstalledProbe {
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extraInfo);
     [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extraInfo);
+    [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
+    // INPUT includes the largest union member (MOUSEINPUT), even for keyboard
+    // events. Sequential pointer alignment yields 40 bytes on x64 / 28 on x86.
+    [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public InputUnion Data; }
+    [StructLayout(LayoutKind.Explicit)] struct InputUnion {
+        [FieldOffset(0)] public KeyboardInputData Keyboard;
+        [FieldOffset(0)] public MouseInputData Mouse;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct KeyboardInputData {
+        public ushort Key, Scan; public uint Flags, Time; public UIntPtr ExtraInfo;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct MouseInputData {
+        public int X, Y; public uint Data, Flags, Time; public UIntPtr ExtraInfo;
+    }
     public struct Rect { public int Left, Top, Right, Bottom; }
     public sealed class WindowInfo { public long Handle; public uint ProcessId; public string Title; }
     public static WindowInfo[] VisibleWindows(uint processId) {
