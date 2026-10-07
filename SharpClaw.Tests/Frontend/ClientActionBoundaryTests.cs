@@ -459,6 +459,90 @@ public sealed class ClientActionBoundaryTests
     }
 
     [Test]
+    public async Task ProductionObserverAllowsATerminalLongerThanFiveSeconds()
+    {
+        var sink = new ProductionContextSink();
+        var dispatcher = ClientActionDispatcher.CreateProduction(
+            new ClientActionContextSource(), sink);
+        var terminalCalls = 0;
+        Task terminalWork = Task.CompletedTask;
+
+        try
+        {
+            var result = await dispatcher.RunCommandAsync(
+                "slow-terminal",
+                async _ =>
+                {
+                    Interlocked.Increment(ref terminalCalls);
+                    // Model a bounded, non-cancellable part of an external effect,
+                    // such as Process.Start. The observer must not time it out early.
+                    terminalWork = Task.Delay(TimeSpan.FromSeconds(6), CancellationToken.None);
+                    await terminalWork.ConfigureAwait(false);
+                    return "completed";
+                }).ConfigureAwait(false);
+
+            result.Should().Be("completed");
+            terminalCalls.Should().Be(1);
+            sink.Observations.Select(static observation => observation.Action)
+                .Should().Equal(ExpectedActions[..4]);
+        }
+        finally
+        {
+            // Even the pre-correction failure must leave no unobserved test work.
+            await terminalWork.ConfigureAwait(false);
+        }
+    }
+
+    [Test]
+    public void ProductionObserversInheritFiniteActionDeadlines()
+    {
+        var bindings = ClientActionServiceSet.Create()
+            .Where(static service => service.ServiceType == typeof(ActionHookBinding))
+            .Select(static service => (ActionHookBinding)service.ImplementationInstance!)
+            .ToArray();
+
+        bindings.Should().HaveCount(ClientActionCatalog.All.Count);
+        bindings.Should().OnlyContain(static binding => binding.Ordering.Timeout == null);
+        foreach (var action in ClientActionCatalog.All)
+        {
+            KernelActionCatalog.DescriptorFor(action).DefaultTimeout
+                .Should().BeGreaterThan(TimeSpan.Zero).And.BeLessThanOrEqualTo(TimeSpan.FromMinutes(2));
+        }
+    }
+
+    [Test]
+    public async Task ProductionObserverPreservesCallerCancellationWithoutRepeatingTheTerminal()
+    {
+        var sink = new ProductionContextSink();
+        var dispatcher = ClientActionDispatcher.CreateProduction(
+            new ClientActionContextSource(), sink);
+        using var cancellation = new CancellationTokenSource();
+        var terminalStarted = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var terminalCalls = 0;
+        var command = dispatcher.RunCommandAsync(
+            "cancel-terminal",
+            async token =>
+            {
+                Interlocked.Increment(ref terminalCalls);
+                terminalStarted.SetResult(true);
+                await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+                return "unexpected";
+            },
+            cancellation.Token);
+
+        await terminalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await cancellation.CancelAsync().ConfigureAwait(false);
+
+        await FluentActions.Invoking(async () => await command.ConfigureAwait(false))
+            .Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
+        terminalCalls.Should().Be(1);
+        sink.Observations.Select(static observation => observation.Action).Should().Equal(
+            "client.command.receive", "client.command.validate",
+            "client.command.dispatch", "client.command.cancel");
+    }
+
+    [Test]
     public async Task Production_graph_keeps_callers_and_features_isolated()
     {
         var source = new ClientActionContextSource();

@@ -151,6 +151,10 @@ The bundled-client echo probe allows 120 seconds per existing bounded attempt;
 external targets retain their five-second probe budget. A larger startup
 allowance is not a startup-speed or reliability guarantee, and preserved inner
 exceptions distinguish timeout, cancellation and process failure diagnostics.
+Client action observers inherit the finite Core action deadline instead of
+imposing a separate five-second limit on the wrapped terminal. Caller
+cancellation and uncertainty safeguards remain in force; an uncertain process
+start is not automatically retried.
 
 ## Debian 13 Server
 

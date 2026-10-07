@@ -20,7 +20,10 @@ internal static class ClientActionServiceSet
                 HookPriority.Normal,
                 [],
                 [],
-                TimeSpan.FromSeconds(5),
+                // This observer wraps the entire continuation, not just Observe.
+                // Inherit Core's finite action deadline rather than cutting a
+                // legitimate terminal short and making its effects uncertain.
+                null,
                 HookFailurePolicy.FailAction);
             services.AddSingleton(new ActionHookBinding(
                 SourceId,
