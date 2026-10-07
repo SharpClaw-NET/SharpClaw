@@ -60,6 +60,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Automation;
 public static class SharpClawInstalledProbe {
@@ -99,16 +100,44 @@ public static class SharpClawInstalledProbe {
     }
     public static void SelectProvider(long handle, string displayName) {
         RunUiAction(() => {
+            // Uno's Win32 UIA ExpandCollapse provider can expose the pattern
+            // but reject Expand. Exercise the same visible pointer interaction
+            // as a user, not a private setter or a runtime configuration API.
+            var window = new IntPtr(handle);
+            if (!SetForegroundWindow(window) || GetForegroundWindow() != window)
+                throw new InvalidOperationException("Provider setup window could not receive pointer input.");
             var combo = FindElement(handle, "ProviderSetupProvider");
             if (combo == null) throw new InvalidOperationException("Provider selection is missing.");
-            ((ExpandCollapsePattern)combo.GetCurrentPattern(ExpandCollapsePattern.Pattern)).Expand();
-            var item = AutomationElement.FromHandle(new IntPtr(handle)).FindFirst(TreeScope.Descendants,
-                new AndCondition(new PropertyCondition(AutomationElement.NameProperty, displayName),
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)));
+            ClickVisibleElement(combo);
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            AutomationElement item = null;
+            do {
+                item = AutomationElement.FromHandle(window).FindFirst(TreeScope.Descendants,
+                    new AndCondition(new PropertyCondition(AutomationElement.NameProperty, displayName),
+                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem),
+                        new PropertyCondition(AutomationElement.IsOffscreenProperty, false)));
+                if (item != null) break;
+                Thread.Sleep(100);
+            } while (DateTime.UtcNow < deadline);
             if (item == null) throw new InvalidOperationException("Enabled provider selection is missing.");
-            ((SelectionItemPattern)item.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
-            ((ExpandCollapsePattern)combo.GetCurrentPattern(ExpandCollapsePattern.Pattern)).Collapse();
+            if (item.Current.ProcessId != combo.Current.ProcessId)
+                throw new InvalidOperationException("Provider item belongs to another process.");
+            ClickVisibleElement(item);
         });
+    }
+    static void ClickVisibleElement(AutomationElement element) {
+        if (element.Current.IsOffscreen || !element.Current.IsEnabled)
+            throw new InvalidOperationException("Cannot click a hidden or disabled provider control.");
+        System.Windows.Point point;
+        if (!element.TryGetClickablePoint(out point) ||
+            double.IsNaN(point.X) || double.IsNaN(point.Y) ||
+            double.IsInfinity(point.X) || double.IsInfinity(point.Y) ||
+            point.X < int.MinValue || point.X > int.MaxValue ||
+            point.Y < int.MinValue || point.Y > int.MaxValue ||
+            !SetCursorPos((int)point.X, (int)point.Y))
+            throw new InvalidOperationException("Provider control has no usable visible click point.");
+        mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero); // Left button down.
+        mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero); // Left button up.
     }
     public static void Invoke(long handle, string id) {
         RunUiAction(() => {
@@ -159,6 +188,10 @@ public static class SharpClawInstalledProbe {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extraInfo);
     public struct Rect { public int Left, Top, Right, Bottom; }
     public sealed class WindowInfo { public long Handle; public uint ProcessId; public string Title; }
     public static WindowInfo[] VisibleWindows(uint processId) {

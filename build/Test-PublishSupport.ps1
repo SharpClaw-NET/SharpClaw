@@ -422,6 +422,23 @@ try {
             throw 'Reachable clean setup and UI terminal completion must precede test template writes.'
         }
     }
+    Test-Case 'installed provider selector uses bounded visible pointer input rather than unsupported UIA patterns' {
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        $start = $gate.IndexOf('public static void SelectProvider(', [StringComparison]::Ordinal)
+        $end = $gate.IndexOf('public static void Invoke(', $start, [StringComparison]::Ordinal)
+        if ($start -lt 0 -or $end -le $start) { throw 'Missing provider selection helper.' }
+        $selection = $gate.Substring($start, $end - $start)
+        foreach ($required in @('SetForegroundWindow(window)', 'GetForegroundWindow() != window',
+            'ClickVisibleElement(combo)', 'ClickVisibleElement(item)', 'DateTime.UtcNow.AddSeconds(10)',
+            'AutomationElement.IsOffscreenProperty, false', 'item.Current.ProcessId != combo.Current.ProcessId',
+            'element.Current.IsOffscreen || !element.Current.IsEnabled', 'TryGetClickablePoint',
+            'double.IsNaN', 'double.IsInfinity', 'SetCursorPos', 'mouse_event(0x0002', 'mouse_event(0x0004')) {
+            if (-not $selection.Contains($required)) { throw "Missing bounded visible provider input guard: $required" }
+        }
+        if ($selection -match 'GetCurrentPattern|SelectionItemPattern|ExpandCollapsePattern|Invoke-RestMethod|Invoke-WebRequest') {
+            throw 'Provider selection must be an actual visible user interaction, not the failing UIA pattern or private configuration.'
+        }
+    }
     Test-Case 'installed template evidence verifies writable contents without copying protection' {
         $gatePath = Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'
         $gate = [IO.File]::ReadAllText($gatePath)
