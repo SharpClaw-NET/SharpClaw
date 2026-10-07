@@ -143,6 +143,15 @@ the same inputs: the boot page clears its progress animation and reports the
 actual stopped/exited state, leaving explicit retry or exit to the user. A
 keyless provider still needs its actual backend and model to complete chat.
 
+Cold module-sidecar startup has its own bounded bootstrap budget rather than
+an action-execution deadline: `Packages__OutOfProcessSidecarStartupTimeoutSeconds`
+defaults to 120 and accepts integers from 1 to 600. Process exit and caller
+cancellation terminate the readiness wait, and a failed probe does not grant readiness.
+The bundled-client echo probe allows 120 seconds per existing bounded attempt;
+external targets retain their five-second probe budget. A larger startup
+allowance is not a startup-speed or reliability guarantee, and preserved inner
+exceptions distinguish timeout, cancellation and process failure diagnostics.
+
 ## Debian 13 Server
 
 Transfer the verified `Server-linux-x64` directory to Debian, retaining hidden

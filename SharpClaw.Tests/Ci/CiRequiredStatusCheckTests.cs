@@ -109,6 +109,14 @@ public sealed partial class CiRequiredStatusCheckTests
         workflow.Should().NotContain("release/**");
     }
 
+    [Test]
+    public void ProductionModuleDomainRequiresTheSidecarBootstrapRegressionSuite()
+    {
+        var workflow = File.ReadAllText(Path.Combine(ResolveRepoRoot(), ".github", "workflows", "ci.yml"));
+        workflow.Should().Contain(
+            "FullyQualifiedName~SharpClaw.Tests.Kernel.DefaultModuleSetHostGateTests|FullyQualifiedName~SharpClaw.Tests.Kernel.PackagedSidecarReadinessTests");
+    }
+
     private static IReadOnlyList<string> ExtractWorkflowContexts(string workflowPath)
     {
         File.Exists(workflowPath).Should().BeTrue();

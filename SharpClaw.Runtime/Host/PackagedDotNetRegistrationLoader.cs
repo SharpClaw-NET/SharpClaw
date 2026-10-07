@@ -787,6 +787,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             IConfiguration configuration,
             CancellationToken cancellationToken)
         {
+            var startupTimeout = PackagedSidecarReadiness.ResolveTimeout(configuration);
             var configuredPath = configuration["Packages:OutOfProcessSidecarHostPath"];
             var useBundledRuntime = string.IsNullOrWhiteSpace(configuredPath);
             var executablePath = useBundledRuntime
@@ -836,15 +837,19 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             var result = new PackagedSidecarProcess(process, address, token, stdout, stderr);
             try
             {
-                await result.WaitForReadinessAsync(cancellationToken);
+                await result.WaitForReadinessAsync(startupTimeout, cancellationToken);
                 return result;
             }
-            catch
+            catch (Exception exception)
             {
                 await result.DisposeAsync();
+                if (exception is OperationCanceledException && cancellationToken.IsCancellationRequested)
+                    throw;
                 throw new InvalidOperationException(
-                    $"The sidecar process for registration '{manifest.Id}' did not become ready. " +
-                    $"stdout={await SafeOutputAsync(stdout)} stderr={await SafeOutputAsync(stderr)}");
+                    $"The sidecar process for registration '{manifest.Id}' did not become ready " +
+                    $"within its {startupTimeout.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}-second bootstrap budget. " +
+                    $"stdout={await SafeOutputAsync(stdout)} stderr={await SafeOutputAsync(stderr)}",
+                    exception);
             }
         }
 
@@ -867,7 +872,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             }
         }
 
-        private async Task WaitForReadinessAsync(CancellationToken cancellationToken)
+        private async Task WaitForReadinessAsync(TimeSpan startupTimeout, CancellationToken cancellationToken)
         {
             using var http = new HttpClient
             {
@@ -877,31 +882,8 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             http.DefaultRequestHeaders.Add(
                 OutOfProcessSidecarHostProtocol.TokenHeaderName,
                 ControlToken);
-            var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
-            while (DateTimeOffset.UtcNow < deadline)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (_process.HasExited)
-                    throw new InvalidOperationException("The sidecar exited before readiness.");
-                try
-                {
-                    using var response = await http.GetAsync(
-                        OutOfProcessSidecarHostProtocol.ReadinessPath,
-                        cancellationToken);
-                    if (response.StatusCode == HttpStatusCode.OK)
-                        return;
-                }
-                catch (HttpRequestException)
-                {
-                }
-                catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                }
-
-                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
-            }
-
-            throw new TimeoutException("The sidecar readiness boundary timed out.");
+            await PackagedSidecarReadiness.WaitAsync(
+                http, () => _process.HasExited, startupTimeout, cancellationToken).ConfigureAwait(false);
         }
 
         private static async Task<string> SafeOutputAsync(Task<string> output)

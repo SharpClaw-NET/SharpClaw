@@ -49,6 +49,7 @@ public sealed class BootModel
 
     internal const int MaxRetries = 3;
     internal static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(3);
+    internal static readonly TimeSpan BundledStartupProbeBudget = TimeSpan.FromSeconds(120);
 
     internal bool ShouldRetry(StepResult result, int attempt) =>
         !result.Ok && result.CanRetry && attempt < MaxRetries &&
@@ -103,7 +104,7 @@ public sealed class BootModel
     /// </summary>
     public async Task<StepResult> RunEchoStepAsync(CancellationToken ct)
     {
-        var maxWait = _backend.IsExternal ? TimeSpan.FromSeconds(5) : TimeSpan.FromSeconds(20);
+        var maxWait = _backend.IsExternal ? TimeSpan.FromSeconds(5) : BundledStartupProbeBudget;
         var deadline = DateTime.UtcNow + maxWait;
         Exception? lastEx = null;
         int lastStatus = 0;

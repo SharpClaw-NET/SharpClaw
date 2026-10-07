@@ -182,6 +182,13 @@ public sealed class ClientUnoStartupSwitchTests
     }
 
     [Test]
+    public void BundledProbeBudgetAllowsColdSidecarBootstrapWithoutUnlimitedRetries()
+    {
+        BootModel.BundledStartupProbeBudget.Should().Be(TimeSpan.FromSeconds(120));
+        BootModel.MaxRetries.Should().Be(3);
+    }
+
+    [Test]
     public async Task RetryPolicyOnlyRetriesTransientFailuresWhileTheBackendIsAvailable()
     {
         using var scope = TestScope.Create();
