@@ -422,6 +422,63 @@ try {
             throw 'Reachable clean setup and UI terminal completion must precede test template writes.'
         }
     }
+    Test-Case 'Runtime file observations retry only disappearance or Windows sharing races' {
+        $tokens = $null; $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'), [ref]$tokens, [ref]$errors)
+        if ($errors.Count) { throw ($errors | Out-String) }
+        foreach ($name in @('Test-TestRuntimeReadRace', 'Read-TestRuntimeText')) {
+            $function = $ast.Find({ param($node)
+                $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+            }, $true)
+            if (-not $function) { throw "Missing Runtime observation helper: $name" }
+            Invoke-Expression $function.Extent.Text
+        }
+        foreach ($code in @(2, 3, 32, 33)) {
+            if (-not (Test-TestRuntimeReadRace ([IO.IOException]::new('race', (-2147024896 + $code))))) {
+                throw "Expected transient Windows IO code: $code"
+            }
+        }
+        foreach ($code in @(0, 5, 11, 23, 87, 112)) {
+            if (Test-TestRuntimeReadRace ([IO.IOException]::new('not a race', (-2147024896 + $code)))) {
+                throw "An unrelated IO failure was hidden: $code"
+            }
+        }
+        $result = @{ RuntimeFileReadRetries = 0 }
+        $fixture = Join-Path $root 'runtime-observation'
+        New-Item -ItemType Directory -Path $fixture | Out-Null
+        if ($null -ne (Read-TestRuntimeText (Join-Path $fixture 'not-yet-present.json')) -or
+            $result.RuntimeFileReadRetries -ne 1) { throw 'A disappeared file must be a recorded non-observation.' }
+        $source = Join-Path $fixture 'discovery.json'
+        $text = '{"processId":123,"baseUrl":"http://127.0.0.1:42"}'
+        $writer = [IO.File]::Open($source, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write,
+            ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $bytes = [Text.Encoding]::UTF8.GetBytes($text)
+        try {
+            $writer.Write($bytes, 0, $bytes.Length); $writer.Flush()
+            if ((Read-TestRuntimeText $source) -cne $text -or $result.RuntimeFileReadRetries -ne 1) {
+                throw 'Shared observation must preserve exact contents, without manufacturing a retry.'
+            }
+        } finally { $writer.Dispose() }
+        $exclusive = [IO.File]::Open($source, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $exclusive.Dispose()
+        [IO.File]::WriteAllText($source, '{invalid JSON')
+        Assert-Rejected { Read-TestRuntimeText $source | ConvertFrom-Json }
+        Assert-Rejected { Read-TestRuntimeText $fixture }
+        if ($result.RuntimeFileReadRetries -ne 1) { throw 'Invalid contents/access must not become a transient observation.' }
+    }
+    Test-Case 'Runtime connection uses shared retryable observations without weakening identity or authenticated probes' {
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        $start = $gate.IndexOf('function Get-TestRuntimeConnection {', [StringComparison]::Ordinal)
+        $end = $gate.IndexOf('function Get-TestProviderUiIndex {', $start, [StringComparison]::Ordinal)
+        $connection = $gate.Substring($start, $end - $start)
+        foreach ($required in @('Read-TestRuntimeText $file.FullName', 'Read-TestRuntimeText $keyFile',
+            '$entryText | ConvertFrom-Json', '$_.ProcessId -eq $entry.processId', '$base.IsLoopback',
+            "'X-Api-Key' = `$keyText.Trim()", "'/echo', '/readyz', '/ping'", "'/setup/provider'")) {
+            if (-not $connection.Contains($required)) { throw "Missing bounded connection validation: $required" }
+        }
+        if ($connection.Contains('[IO.File]::ReadAllText')) { throw 'Runtime observations still use incompatible default sharing.' }
+    }
     Test-Case 'installed provider selector uses bounded visible keyboard input rather than unsupported UIA patterns' {
         $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
         $start = $gate.IndexOf('public static void SelectProvider(', [StringComparison]::Ordinal)

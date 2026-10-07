@@ -331,11 +331,36 @@ $result = [ordered]@{
     TestUserSid = $ExpectedTestUserSid; StartUtc = [DateTime]::UtcNow.ToString('O')
     Aumid = $null; ActivatedProcessId = 0; Window = $null; BootUiObserved = $false
     RuntimeObserved = $false; GatewayObserved = $false; ProcessSnapshotTimeouts = 0
+    RuntimeFileReadRetries = 0
     GatewayTemplatesObserved = $false
     CleanFirstLaunchVerified = $false; ProtectedTemplateSources = @(); SeededTemplates = @()
     CleanRuntimeReady = $false; CleanSetupObserved = $false; ConfiguredByProductUi = $false
     RealRequestCompleted = $false; TestProviderKey = $TestProviderKey; TestModel = $TestModel
     CleanupVerified = $false; Success = $false
+}
+function Test-TestRuntimeReadRace {
+    param([IO.IOException]$Exception)
+    # Windows file disappearance, sharing and lock violations only. Invalid
+    # contents, access denial and unrelated IO failures must still fail closed.
+    return ($Exception.HResult -band 0xFFFF) -in @(2, 3, 32, 33)
+}
+function Read-TestRuntimeText {
+    param([string]$Path)
+    $stream = $null
+    $reader = $null
+    try {
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+            ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $reader = [IO.StreamReader]::new($stream)
+        return $reader.ReadToEnd()
+    } catch [IO.IOException] {
+        if (-not (Test-TestRuntimeReadRace $_.Exception)) { throw }
+        $result.RuntimeFileReadRetries++
+        return $null
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        elseif ($null -ne $stream) { $stream.Dispose() }
+    }
 }
 function Get-TestRuntimeConnection {
     $backendRoot = Join-Path $frontend 'stack/backend'
@@ -345,7 +370,9 @@ function Get-TestRuntimeConnection {
         $directory = Join-Path $root 'discovery/instances'
         if (-not (Test-Path -LiteralPath $directory)) { continue }
         foreach ($file in Get-ChildItem -LiteralPath $directory -Filter 'backend-*.json') {
-            $entry = [IO.File]::ReadAllText($file.FullName) | ConvertFrom-Json
+            $entryText = Read-TestRuntimeText $file.FullName
+            if ($null -eq $entryText) { continue }
+            $entry = $entryText | ConvertFrom-Json
             $runtime = @(Get-TestPackageProcesses -AllowTransientTimeout | Where-Object {
                 $_.Name -eq 'SharpClaw.Runtime.Host.exe' -and $_.ProcessId -eq $entry.processId
             })
@@ -353,8 +380,10 @@ function Get-TestRuntimeConnection {
             if ($runtime.Count -eq 1 -and $base.IsAbsoluteUri -and $base.IsLoopback -and
                 $base.Scheme -in @('http', 'https')) {
                 # Credentials are used in memory only, never in the exported report.
+                $keyText = Read-TestRuntimeText $keyFile
+                if ([string]::IsNullOrWhiteSpace($keyText)) { return $null }
                 return [pscustomobject]@{ BaseUrl = $base.AbsoluteUri.TrimEnd('/'); ProcessId = $entry.processId
-                    Headers = @{ 'X-Api-Key' = [IO.File]::ReadAllText($keyFile).Trim() } }
+                    Headers = @{ 'X-Api-Key' = $keyText.Trim() } }
             }
         }
     }
