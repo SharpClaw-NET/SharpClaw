@@ -232,6 +232,25 @@ public sealed partial class SettingsPage : Page
             PlaceholderText = "Select an enabled provider",
             MinWidth = 320,
         };
+        // Expose the actual selection even when the platform's item peers
+        // have no accessible name. These are view bindings, not setters for
+        // provider configuration or an alternate selection path.
+        provider.SetBinding(Microsoft.UI.Xaml.Automation.AutomationProperties.NameProperty,
+            new Microsoft.UI.Xaml.Data.Binding
+            {
+                Source = provider,
+                Path = new PropertyPath($"{nameof(ComboBox.SelectedItem)}.{nameof(SharpClawProviderSetupOption.DisplayName)}"),
+                FallbackValue = "AI provider",
+                TargetNullValue = "AI provider",
+            });
+        provider.SetBinding(Microsoft.UI.Xaml.Automation.AutomationProperties.ItemStatusProperty,
+            new Microsoft.UI.Xaml.Data.Binding
+            {
+                Source = provider,
+                Path = new PropertyPath($"{nameof(ComboBox.SelectedItem)}.{nameof(SharpClawProviderSetupOption.Key)}"),
+                FallbackValue = string.Empty,
+                TargetNullValue = string.Empty,
+            });
         var model = MakeInput("Model identifier");
         model.Text = setup.Model ?? string.Empty;
         var endpoint = MakeInput("Optional provider endpoint (HTTP/HTTPS)");

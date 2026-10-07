@@ -168,6 +168,11 @@ before Save or Send; incomplete input fails closed without replaying it.
 Provider selection likewise uses physical keyboard navigation with read-only
 public selection acknowledgement after each step; it never advances or saves
 when the intended item is unconfirmed.
+The provider combo binds its accessible name and ItemStatus to the actual
+selected option's display name and provider key. The installed gate reads that
+public key against the authenticated provider list; it does not infer selection
+from accepted key events or unnamed platform item peers. These view bindings do
+not select a provider or write configuration.
 
 ## Debian 13 Server
 

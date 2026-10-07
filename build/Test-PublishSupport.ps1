@@ -488,8 +488,8 @@ try {
         foreach ($required in @('SetForegroundWindow(window)', 'GetForegroundWindow() != window',
             'ClickVisibleElement(combo)', 'providerCount > 256', 'providerIndex >= providerCount',
             'NavigateAcknowledgedProviderSelection(() =>', 'AwaitProviderSelection(read, next, providerCount, timeout)',
-            'TryGetCurrentPattern(SelectionPattern.Pattern, out pattern)', '.Current.GetSelection()',
-            'new HashSet<string>(StringComparer.Ordinal)',
+            'ReadProviderUiIndex(current.Current.ItemStatus, providerKeys)', 'ReadProviderUiIndex(null, providerKeys)',
+            'new HashSet<string>(StringComparer.OrdinalIgnoreCase)',
             'PressProviderKey(window, 0x1B', 'PressProviderKey(window, 0x09',
             'MapVirtualKey(key, 0)', 'scan == 0 || scan > 0xFF', '0x0008u', 'SendKeyboardInputs(window',
             'element.Current.IsOffscreen || !element.Current.IsEnabled', 'TryGetClickablePoint',
@@ -499,6 +499,34 @@ try {
         if ($selection -match 'SelectionItemPattern|ExpandCollapsePattern|\.Select\(|\.SetValue\(|Invoke-RestMethod|Invoke-WebRequest') {
             throw 'Provider selection must use physical input with public readback, not UIA writer patterns or private configuration.'
         }
+    }
+    Test-Case 'provider accessibility is bound to actual selected option and public-key readback fails closed' {
+        $page = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../SharpClaw.Client.Uno/Presentation/SettingsPage.xaml.cs'))
+        foreach ($required in @('provider.SetBinding(Microsoft.UI.Xaml.Automation.AutomationProperties.NameProperty',
+            'nameof(ComboBox.SelectedItem)}.{nameof(SharpClawProviderSetupOption.DisplayName)',
+            'provider.SetBinding(Microsoft.UI.Xaml.Automation.AutomationProperties.ItemStatusProperty',
+            'nameof(ComboBox.SelectedItem)}.{nameof(SharpClawProviderSetupOption.Key)')) {
+            if (-not $page.Contains($required)) { throw 'Actual selected provider is not publicly observable through its view binding.' }
+        }
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        $method = [regex]::Match($gate, '(?s)public static int ReadProviderUiIndex\(.*?\n    \}')
+        if (-not $method.Success) { throw 'Missing pure public-key readback.' }
+        $name = 'ProviderPublicKeyFixture_' + [guid]::NewGuid().ToString('N')
+        $source = 'using System; using System.Collections.Generic; public static class ' + $name + ' {' + $method.Value + '}'
+        $type = Add-Type -TypeDefinition $source -PassThru
+        $keys = [string[]]@('third-party-z', 'ollama', 'another-module')
+        if ($type::ReadProviderUiIndex($null, $keys) -ne -1 -or
+            $type::ReadProviderUiIndex('', $keys) -ne -1 -or
+            $type::ReadProviderUiIndex('OLLAMA', $keys) -ne 1 -or
+            $type::ReadProviderUiIndex('another-module', $keys) -ne 2) {
+            throw 'Public selected key did not retain module list order or no-selection state.'
+        }
+        Assert-Rejected { $type::ReadProviderUiIndex('unknown', $keys) }
+        Assert-Rejected { $type::ReadProviderUiIndex('  ', $keys) }
+        Assert-Rejected { $type::ReadProviderUiIndex('ollama', [string[]]@('ollama', 'OLLAMA')) }
+        Assert-Rejected { $type::ReadProviderUiIndex($null, [string[]]@('')) }
+        Assert-Rejected { $type::ReadProviderUiIndex($null, [string[]]@()) }
+        Assert-Rejected { $type::ReadProviderUiIndex($null, [string[]]$null) }
     }
     if ($IsWindows) {
         Test-Case 'complete installed UI probe compiles against stock Windows PowerShell UIAutomation assemblies' {

@@ -165,19 +165,16 @@ public static class SharpClawInstalledProbe {
         if (!SetForegroundWindow(window) || GetForegroundWindow() != window)
             throw new InvalidOperationException("Test window could not receive visible input.");
     }
-    public static void SelectProvider(long handle, int providerIndex, string[] providerNames) {
+    public static void SelectProvider(long handle, int providerIndex, string[] providerKeys) {
         RunUiAction(() => {
             // Uno's Win32 UIA ExpandCollapse provider can expose the pattern
             // but reject Expand. Exercise the same visible pointer interaction
             // as a user, not a private setter or a runtime configuration API.
             var window = new IntPtr(handle);
-            var providerCount = providerNames == null ? 0 : providerNames.Length;
+            var providerCount = providerKeys == null ? 0 : providerKeys.Length;
             if (providerCount < 1 || providerCount > 256 || providerIndex < 0 || providerIndex >= providerCount)
                 throw new InvalidOperationException("Invalid enabled-provider UI index.");
-            var names = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var name in providerNames)
-                if (string.IsNullOrWhiteSpace(name) || !names.Add(name))
-                    throw new InvalidOperationException("Missing or ambiguous enabled-provider UI name.");
+            ReadProviderUiIndex(null, providerKeys); // Validate before any physical input.
             if (!SetForegroundWindow(window) || GetForegroundWindow() != window)
                 throw new InvalidOperationException("Provider setup window could not receive pointer input.");
             var combo = FindElement(handle, "ProviderSetupProvider");
@@ -189,19 +186,24 @@ public static class SharpClawInstalledProbe {
             PressProviderKey(window, 0x1B, false); // Escape: close popup, retain combo focus.
             NavigateAcknowledgedProviderSelection(() => {
                 var current = FindElement(handle, "ProviderSetupProvider");
-                object pattern;
-                if (current == null || !current.TryGetCurrentPattern(SelectionPattern.Pattern, out pattern))
+                if (current == null)
                     throw new InvalidOperationException("Missing readable public provider selection.");
-                var selected = ((SelectionPattern)pattern).Current.GetSelection();
-                if (selected.Length == 0) return -1;
-                if (selected.Length != 1) throw new InvalidOperationException("Ambiguous public provider selection.");
-                var name = selected[0].Current.Name;
-                for (var index = 0; index < providerNames.Length; index++)
-                    if (string.Equals(providerNames[index], name, StringComparison.Ordinal)) return index;
-                throw new InvalidOperationException("Selected public provider is outside the enabled list.");
+                return ReadProviderUiIndex(current.Current.ItemStatus, providerKeys);
             }, key => PressProviderKey(window, key, true), providerIndex, providerCount, TimeSpan.FromSeconds(10));
             PressProviderKey(window, 0x09, false); // Tab: leave provider selection.
         });
+    }
+    public static int ReadProviderUiIndex(string selectedKey, string[] providerKeys) {
+        if (providerKeys == null || providerKeys.Length < 1 || providerKeys.Length > 256)
+            throw new ArgumentException("Invalid enabled-provider UI keys.");
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in providerKeys)
+            if (string.IsNullOrWhiteSpace(key) || !keys.Add(key))
+                throw new ArgumentException("Missing or ambiguous enabled-provider UI key.");
+        if (string.IsNullOrEmpty(selectedKey)) return -1;
+        for (var index = 0; index < providerKeys.Length; index++)
+            if (string.Equals(selectedKey, providerKeys[index], StringComparison.OrdinalIgnoreCase)) return index;
+        throw new InvalidOperationException("Selected public provider key is outside the enabled list.");
     }
     public static void NavigateAcknowledgedProviderSelection(Func<int> read, Action<byte> press,
         int providerIndex, int providerCount, TimeSpan timeout) {
@@ -699,8 +701,8 @@ try {
     $providerIndex = Get-TestProviderUiIndex $providerOptions $TestProviderKey
     $result['ProviderUiSelectionIndex'] = $providerIndex
     $result['ProviderUiSelectionDisplayName'] = $selection[0].displayName
-    $providerNames = [string[]]@($providerOptions | ForEach-Object displayName)
-    [SharpClawInstalledProbe]::SelectProvider($cleanWindows[0].Handle, $providerIndex, $providerNames)
+    $providerKeys = [string[]]@($providerOptions | ForEach-Object key)
+    [SharpClawInstalledProbe]::SelectProvider($cleanWindows[0].Handle, $providerIndex, $providerKeys)
     [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupModel', $TestModel)
     [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupEndpoint', $TestProviderEndpoint)
     [SharpClawInstalledProbe]::Invoke($cleanWindows[0].Handle, 'ProviderSetupApply')
