@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -456,6 +457,192 @@ public sealed class ClientActionBoundaryTests
             static (_, _) => ValueTask.FromResult("composed"));
 
         result.Should().Be("composed");
+    }
+
+    [TestCase("command")]
+    [TestCase("navigation")]
+    [TestCase("state")]
+    public async Task ProductionTerminalPreservesCallerUiContext(string operation)
+    {
+        using var ui = new TestUiSynchronizationContext();
+        var source = new ClientActionContextSource();
+        var ambient = new AsyncLocal<string?>();
+        var sink = new ProductionContextSink
+        {
+            BeforeObserve = () => ambient.Value = "authorized-kernel",
+        };
+        var dispatcher = ClientActionDispatcher.CreateProduction(source, sink);
+        var observedThreads = new ConcurrentQueue<int>();
+        var observedContexts = new ConcurrentQueue<SynchronizationContext?>();
+        var observedAmbient = new ConcurrentQueue<string?>();
+        var uiThread = 0;
+        string? callerAmbientAfter = null;
+
+        await ui.RunAsync(async () =>
+        {
+            uiThread = Environment.CurrentManagedThreadId;
+            ambient.Value = "client-ui-request";
+            using var authority = source.Push(new ClientActionRequestContext(
+                new RequestPrincipal("ui-caller"), ExtensionFeatureSet.Empty));
+
+            async ValueTask Terminal(CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                observedThreads.Enqueue(Environment.CurrentManagedThreadId);
+                observedContexts.Enqueue(SynchronizationContext.Current);
+                observedAmbient.Enqueue(ambient.Value);
+                await Task.Yield();
+                observedThreads.Enqueue(Environment.CurrentManagedThreadId);
+                observedContexts.Enqueue(SynchronizationContext.Current);
+                observedAmbient.Enqueue(ambient.Value);
+            }
+
+            switch (operation)
+            {
+                case "command":
+                    await dispatcher.RunCommandAsync("ui-command", Terminal).ConfigureAwait(true);
+                    break;
+                case "navigation":
+                    await dispatcher.NavigateAsync("Main", null, (_, token) => Terminal(token)).ConfigureAwait(true);
+                    break;
+                case "state":
+                    await dispatcher.CommitStateAsync("ui-state", 0, Terminal).ConfigureAwait(true);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(operation));
+            }
+            callerAmbientAfter = ambient.Value;
+        }).WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+
+        observedThreads.Should().Equal(uiThread, uiThread);
+        observedContexts.Should().OnlyContain(context => ReferenceEquals(context, ui));
+        observedAmbient.Should().Equal("authorized-kernel", "authorized-kernel");
+        callerAmbientAfter.Should().Be("client-ui-request");
+        sink.Observations.Should().NotBeEmpty().And.OnlyContain(
+            observation => observation.CallerSubjectId == "ui-caller");
+    }
+
+    [Test]
+    public async Task ClientTerminalContextCancelsQueuedWorkWithoutLateMutation()
+    {
+        var ui = new HeldUiSynchronizationContext();
+        var affinity = new ClientTerminalContext(ui);
+        using var cancellation = new CancellationTokenSource();
+        var calls = 0;
+        var work = affinity.InvokeAsync(_ =>
+        {
+            Interlocked.Increment(ref calls);
+            return ValueTask.FromResult(true);
+        }, cancellation.Token).AsTask();
+
+        ui.PendingCount.Should().Be(1);
+        await cancellation.CancelAsync().ConfigureAwait(false);
+        await FluentActions.Invoking(async () => await work.ConfigureAwait(false))
+            .Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
+        ui.Drain();
+        calls.Should().Be(0);
+    }
+
+    [Test]
+    public async Task ClientTerminalContextDoesNotCompleteCancellationAheadOfStartedEffects()
+    {
+        var ui = new HeldUiSynchronizationContext();
+        var affinity = new ClientTerminalContext(ui);
+        using var cancellation = new CancellationTokenSource();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var work = affinity.InvokeAsync(async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            await release.Task.ConfigureAwait(false);
+            return "effect-completed";
+        }, cancellation.Token).AsTask();
+
+        try
+        {
+            ui.Drain();
+            calls.Should().Be(1);
+            await cancellation.CancelAsync().ConfigureAwait(false);
+            work.IsCompleted.Should().BeFalse();
+        }
+        finally
+        {
+            release.TrySetResult();
+            await work.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+        (await work.ConfigureAwait(false)).Should().Be("effect-completed");
+        calls.Should().Be(1);
+    }
+
+    [Test]
+    public async Task ClientTerminalContextPropagatesFailureWithoutRepeatingEffects()
+    {
+        var ui = new HeldUiSynchronizationContext();
+        var affinity = new ClientTerminalContext(ui);
+        var calls = 0;
+        var failure = new InvalidOperationException("UI mutation failed.");
+        var work = affinity.InvokeAsync<bool>(_ =>
+        {
+            Interlocked.Increment(ref calls);
+            return ValueTask.FromException<bool>(failure);
+        }, CancellationToken.None).AsTask();
+
+        ui.Drain();
+        var thrown = await FluentActions.Invoking(async () => await work.ConfigureAwait(false))
+            .Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
+        thrown.Which.Should().BeSameAs(failure);
+        ui.Drain();
+        calls.Should().Be(1);
+    }
+
+    [Test]
+    public async Task ClientTerminalContextRejectsAnUnavailableUiQueueBeforeMutation()
+    {
+        var affinity = new ClientTerminalContext(new RejectedUiSynchronizationContext());
+        var calls = 0;
+        await FluentActions.Invoking(async () => await affinity.InvokeAsync(_ =>
+        {
+            Interlocked.Increment(ref calls);
+            return ValueTask.FromResult(true);
+        }, CancellationToken.None).ConfigureAwait(false))
+            .Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
+        calls.Should().Be(0);
+    }
+
+    [Test]
+    public async Task ClientTerminalContextLeavesBackgroundTerminalsOnTheirCallingThread()
+    {
+        await Task.Run(async () =>
+        {
+            SynchronizationContext.Current.Should().BeNull();
+            var affinity = ClientTerminalContext.Capture();
+            var expectedThread = Environment.CurrentManagedThreadId;
+            var observedThread = await affinity.InvokeAsync(
+                _ => ValueTask.FromResult(Environment.CurrentManagedThreadId),
+                CancellationToken.None).ConfigureAwait(false);
+            observedThread.Should().Be(expectedThread);
+        }).ConfigureAwait(false);
+    }
+
+    [Test]
+    public async Task ClientTerminalContextRejectsSuppressedExecutionFlowBeforePosting()
+    {
+        var ui = new HeldUiSynchronizationContext();
+        var affinity = new ClientTerminalContext(ui);
+        var calls = 0;
+        Task<bool> work;
+        using (ExecutionContext.SuppressFlow())
+        {
+            work = affinity.InvokeAsync(_ =>
+            {
+                Interlocked.Increment(ref calls);
+                return ValueTask.FromResult(true);
+            }, CancellationToken.None).AsTask();
+        }
+        await FluentActions.Invoking(async () => await work.ConfigureAwait(false))
+            .Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
+        ui.PendingCount.Should().Be(0);
+        calls.Should().Be(0);
     }
 
     [Test]
@@ -1259,11 +1446,94 @@ public sealed class ClientActionBoundaryTests
         string CallerSubjectId,
         IReadOnlyList<string> FeatureNames);
 
+    private sealed class TestUiSynchronizationContext : SynchronizationContext, IDisposable
+    {
+        private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
+        private readonly Thread _thread;
+
+        public TestUiSynchronizationContext()
+        {
+            _thread = new Thread(() =>
+            {
+                SetSynchronizationContext(this);
+                foreach (var work in _queue.GetConsumingEnumerable())
+                    work.Callback(work.State);
+            }) { IsBackground = true, Name = "Client action UI regression" };
+            _thread.Start();
+        }
+
+        public override void Post(SendOrPostCallback callback, object? state) =>
+            _queue.Add((callback, state));
+
+        [SuppressMessage("Design", "CA1031", Justification =
+            "The dedicated UI test pump transfers callback failures to the returned task so they fail the test instead of escaping its async-void callback.")]
+        public Task RunAsync(Func<Task> operation)
+        {
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Post(async _ =>
+            {
+                try
+                {
+                    await operation().ConfigureAwait(true);
+                    completion.TrySetResult();
+                }
+                catch (Exception exception)
+                {
+                    completion.TrySetException(exception);
+                }
+            }, null);
+            return completion.Task;
+        }
+
+        public void Dispose()
+        {
+            _queue.CompleteAdding();
+            if (!_thread.Join(TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The client UI regression thread did not finish.");
+            _queue.Dispose();
+        }
+    }
+
+    private sealed class HeldUiSynchronizationContext : SynchronizationContext
+    {
+        private readonly Queue<(SendOrPostCallback Callback, object? State)> _queue = new();
+
+        public int PendingCount => _queue.Count;
+
+        public override void Post(SendOrPostCallback callback, object? state) =>
+            _queue.Enqueue((callback, state));
+
+        public void Drain()
+        {
+            var previous = Current;
+            SetSynchronizationContext(this);
+            try
+            {
+                while (_queue.TryDequeue(out var work))
+                    work.Callback(work.State);
+            }
+            finally
+            {
+                SetSynchronizationContext(previous);
+            }
+        }
+    }
+
+    private sealed class RejectedUiSynchronizationContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state) =>
+            throw new InvalidOperationException("The UI queue has stopped.");
+    }
+
     private sealed class ProductionContextSink : ClientActionServiceSet.IClientActionContextSink
     {
         public ConcurrentQueue<ClientObservation> Observations { get; } = new();
 
-        public void Observe(ActionContext<KernelActionEnvelope> context) =>
+        public Action? BeforeObserve { get; init; }
+
+        public void Observe(ActionContext<KernelActionEnvelope> context)
+        {
+            BeforeObserve?.Invoke();
             Observations.Enqueue(new ClientObservation(
                 context.ActionKey.Value,
                 context.TraceId,
@@ -1271,6 +1541,7 @@ public sealed class ClientActionBoundaryTests
                 context.Attempt,
                 context.Caller.SubjectId,
                 context.Features.Items.Select(static item => item.ContractName).ToArray()));
+        }
     }
 
     private sealed class TestRepeatEvidenceAuthority : IKernelActionRepeatEvidenceAuthority

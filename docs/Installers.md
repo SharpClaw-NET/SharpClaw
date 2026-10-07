@@ -155,6 +155,16 @@ Client action observers inherit the finite Core action deadline instead of
 imposing a separate five-second limit on the wrapped terminal. Caller
 cancellation and uncertainty safeguards remain in force; an uncertain process
 start is not automatically retried.
+Client terminals retain the caller's synchronization context when one exists,
+so UI state and navigation commits run on the client UI thread even though Core
+schedules generic kernel work independently. The client bridge preserves the
+authorized terminal's execution context, not an earlier caller snapshot.
+Cross-thread transfer with suppressed execution-context flow is rejected.
+Cancellation before a queued terminal starts prevents any later mutation;
+once started, its receipt waits for actual completion and Core retains ownership
+of deadlines and uncertain effects. Background callers remain background callers.
+The installed gate acknowledges physical text input by exact public readback
+before Save or Send; incomplete input fails closed without replaying it.
 
 ## Debian 13 Server
 

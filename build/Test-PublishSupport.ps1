@@ -556,9 +556,58 @@ try {
             '[StructLayout(LayoutKind.Explicit)] struct InputUnion', '[FieldOffset(0)] public MouseInputData Mouse')) {
             if (-not $gate.Contains($required)) { throw "Missing actual bounded input guarantee: $required" }
         }
-        if ($gate -match 'GetCurrentPattern\((ValuePattern|InvokePattern)\.Pattern\)|Clipboard|SendMessage|PostMessage') {
+        if ($gate -match 'GetCurrentPattern\(InvokePattern\.Pattern\)|\)\.SetValue\(|\)\.Invoke\(|Clipboard|SendMessage|PostMessage') {
             throw 'Test UI writes must use visible foreground input, not unsupported patterns or private messages.'
         }
+    }
+    Test-Case 'installed input readback awaits exact complete text and rejects partial or hanging observation' {
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        foreach ($required in @('AwaitExactInputValue(() =>',
+            'TryGetCurrentPattern(ValuePattern.Pattern, out pattern)', '((ValuePattern)pattern).Current.Value',
+            '}, value, TimeSpan.FromSeconds(10))')) {
+            if (-not $gate.Contains($required)) { throw "Missing public readback integration: $required" }
+        }
+        $method = [regex]::Match($gate, '(?s)public static void AwaitExactInputValue\(.*?\n    \}')
+        if (-not $method.Success) { throw 'Missing bounded exact-input observation.' }
+        $name = 'ExactInputObservationFixture_' + [guid]::NewGuid().ToString('N')
+        $source = 'using System; using System.Threading; using System.Threading.Tasks; public static class ' + $name + ' {' + $method.Value + @'
+ public static int VerifyDelayedComplete() {
+  int reads=0;
+  AwaitExactInputValue(() => ++reads == 1 ? "" : reads == 2 ? "Reply with " : "Reply with a short greeting.",
+   "Reply with a short greeting.", TimeSpan.FromSeconds(1));
+  return reads;
+ }
+ public static void VerifyPersistentPartial() {
+  try {
+   AwaitExactInputValue(() => "Reply with ", "Reply with a short greeting.", TimeSpan.FromMilliseconds(60));
+  } catch(AggregateException error) {
+   if(error.InnerException is TimeoutException)return;
+   throw;
+  }
+  throw new InvalidOperationException("Persistent partial input was accepted.");
+ }
+ public static void VerifyHangingReader() {
+  using (var release=new ManualResetEventSlim(false))
+  using (var finished=new ManualResetEventSlim(false)) {
+   bool timedOut=false;
+   try {
+    AwaitExactInputValue(() => {
+     try { release.Wait(); return "complete"; } finally { finished.Set(); }
+    }, "complete", TimeSpan.FromMilliseconds(30));
+   } catch(TimeoutException) { timedOut=true; }
+   finally {
+    release.Set();
+    if(!finished.Wait(TimeSpan.FromSeconds(2)))throw new InvalidOperationException("Fixture reader was not released.");
+   }
+   if(!timedOut)throw new InvalidOperationException("Hanging public reader was accepted.");
+  }
+ }
+}
+'@
+        $type = Add-Type -TypeDefinition $source -PassThru
+        if ($type::VerifyDelayedComplete() -ne 3) { throw 'A partial value was mistaken for complete input.' }
+        $type::VerifyPersistentPartial()
+        $type::VerifyHangingReader()
     }
     Test-Case 'installed template evidence verifies writable contents without copying protection' {
         $gatePath = Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'

@@ -361,6 +361,7 @@ public sealed class ClientActionDispatcher
         Func<TPayload, CancellationToken, ValueTask<TResult>> terminal,
         CancellationToken cancellationToken)
     {
+        var terminalContext = ClientTerminalContext.Capture();
         var descriptor = _graph.GetStandardAction(actionKey);
         var result = await _dispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
             context,
@@ -372,12 +373,13 @@ public sealed class ClientActionDispatcher
                     throw new KernelActionExecutionException(
                         $"Client action '{actionKey.Value}' returned an invalid payload type.");
 
-                return (object?)await terminal(effectivePayload, actionToken)
+                return (object?)await terminalContext.InvokeAsync(
+                    token => terminal(effectivePayload, token), actionToken).ConfigureAwait(false)
                     ?? throw new KernelActionExecutionException(
                         $"Client action '{actionKey.Value}' returned a null result.");
             },
             _graph.ActionSnapshot,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(true);
 
         if (result is not TResult typedResult)
             throw new KernelActionExecutionException(

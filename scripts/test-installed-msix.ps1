@@ -108,8 +108,35 @@ public static class SharpClawInstalledProbe {
                 KeyboardInput(0x41, 0, 0x0002), KeyboardInput(0x11, 0, 0x0002)
             }); // Ctrl+A, with both keys released.
             if (inputs.Length > 0) SendKeyboardInputs(window, inputs);
-            Thread.Sleep(75);
+            // SendInput accepting the events does not mean the control has
+            // processed every character. Verify the public value before the
+            // caller may invoke Save/Send; never replay a partial text write.
+            AwaitExactInputValue(() => {
+                var current = FindElement(handle, id);
+                object pattern;
+                if (current == null || !current.TryGetCurrentPattern(ValuePattern.Pattern, out pattern))
+                    throw new InvalidOperationException("Missing readable public UI input: " + id);
+                return ((ValuePattern)pattern).Current.Value;
+            }, value, TimeSpan.FromSeconds(10));
         });
+    }
+    public static void AwaitExactInputValue(Func<string> read, string expected, TimeSpan timeout) {
+        if (read == null || expected == null || expected.Length == 0 ||
+            timeout <= TimeSpan.Zero || timeout > TimeSpan.FromSeconds(10))
+            throw new ArgumentException("Invalid bounded public input observation.");
+        // A slow UIA peer is allowed to finish reading after this bound; this
+        // background task is read-only and cannot click/type after cleanup.
+        var observation = Task.Run(() => {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            do {
+                if (string.Equals(read(), expected, StringComparison.Ordinal)) return;
+                Thread.Sleep(25);
+            } while (timer.Elapsed < timeout);
+            throw new TimeoutException("Public UI input did not match the complete expected value.");
+        });
+        if (!observation.Wait(timeout + TimeSpan.FromSeconds(1)))
+            throw new TimeoutException("Public UI input observation did not finish within its bound.");
+        observation.GetAwaiter().GetResult();
     }
     static Input[] CreateTextInputs(string value) {
         if (value == null || value.Length == 0 || value.Length > 4096)
