@@ -165,6 +165,9 @@ once started, its receipt waits for actual completion and Core retains ownership
 of deadlines and uncertain effects. Background callers remain background callers.
 The installed gate acknowledges physical text input by exact public readback
 before Save or Send; incomplete input fails closed without replaying it.
+Provider selection likewise uses physical keyboard navigation with read-only
+public selection acknowledgement after each step; it never advances or saves
+when the intended item is unconfirmed.
 
 ## Debian 13 Server
 

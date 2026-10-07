@@ -165,38 +165,75 @@ public static class SharpClawInstalledProbe {
         if (!SetForegroundWindow(window) || GetForegroundWindow() != window)
             throw new InvalidOperationException("Test window could not receive visible input.");
     }
-    public static void SelectProvider(long handle, int providerIndex, int providerCount) {
+    public static void SelectProvider(long handle, int providerIndex, string[] providerNames) {
         RunUiAction(() => {
             // Uno's Win32 UIA ExpandCollapse provider can expose the pattern
             // but reject Expand. Exercise the same visible pointer interaction
             // as a user, not a private setter or a runtime configuration API.
             var window = new IntPtr(handle);
+            var providerCount = providerNames == null ? 0 : providerNames.Length;
             if (providerCount < 1 || providerCount > 256 || providerIndex < 0 || providerIndex >= providerCount)
                 throw new InvalidOperationException("Invalid enabled-provider UI index.");
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var name in providerNames)
+                if (string.IsNullOrWhiteSpace(name) || !names.Add(name))
+                    throw new InvalidOperationException("Missing or ambiguous enabled-provider UI name.");
             if (!SetForegroundWindow(window) || GetForegroundWindow() != window)
                 throw new InvalidOperationException("Provider setup window could not receive pointer input.");
             var combo = FindElement(handle, "ProviderSetupProvider");
             if (combo == null) throw new InvalidOperationException("Provider selection is missing.");
             ClickVisibleElement(combo);
-            // Popup items may be virtualized or absent from the window UIA
-            // subtree. Establish a selection using Down, saturate Up to the
-            // first item, then move to the actual ordered setup-list index.
-            // Do not assume Home was processed when selection started at -1.
-            // Later Runtime assertions independently verify the actual key.
+            // Popup items may be virtualized. Read the public selection while
+            // navigating the closed combo with physical keys, one acknowledged
+            // step at a time. Accepted SendInput events are not processed input.
             PressProviderKey(window, 0x1B, false); // Escape: close popup, retain combo focus.
-            foreach (var key in ProviderNavigationKeys(providerIndex, providerCount))
-                PressProviderKey(window, key, true);
+            NavigateAcknowledgedProviderSelection(() => {
+                var current = FindElement(handle, "ProviderSetupProvider");
+                object pattern;
+                if (current == null || !current.TryGetCurrentPattern(SelectionPattern.Pattern, out pattern))
+                    throw new InvalidOperationException("Missing readable public provider selection.");
+                var selected = ((SelectionPattern)pattern).GetCurrentSelection();
+                if (selected.Length == 0) return -1;
+                if (selected.Length != 1) throw new InvalidOperationException("Ambiguous public provider selection.");
+                var name = selected[0].Current.Name;
+                for (var index = 0; index < providerNames.Length; index++)
+                    if (string.Equals(providerNames[index], name, StringComparison.Ordinal)) return index;
+                throw new InvalidOperationException("Selected public provider is outside the enabled list.");
+            }, key => PressProviderKey(window, key, true), providerIndex, providerCount, TimeSpan.FromSeconds(10));
             PressProviderKey(window, 0x09, false); // Tab: leave provider selection.
         });
     }
-    public static byte[] ProviderNavigationKeys(int providerIndex, int providerCount) {
-        if (providerCount < 1 || providerCount > 256 || providerIndex < 0 || providerIndex >= providerCount)
-            throw new InvalidOperationException("Invalid enabled-provider UI index.");
-        var keys = new byte[1 + providerCount + providerIndex];
-        keys[0] = 0x28; // Down establishes selection even from -1.
-        for (var index = 1; index <= providerCount; index++) keys[index] = 0x26; // Up saturates at zero.
-        for (var index = 1 + providerCount; index < keys.Length; index++) keys[index] = 0x28;
-        return keys;
+    public static void NavigateAcknowledgedProviderSelection(Func<int> read, Action<byte> press,
+        int providerIndex, int providerCount, TimeSpan timeout) {
+        if (read == null || press == null || providerCount < 1 || providerCount > 256 ||
+            providerIndex < 0 || providerIndex >= providerCount || timeout <= TimeSpan.Zero || timeout > TimeSpan.FromSeconds(10))
+            throw new ArgumentException("Invalid bounded provider selection.");
+        var index = AwaitProviderSelection(read, null, providerCount, timeout);
+        if (index == -1) {
+            press(0x28); // Down establishes the first item from no selection.
+            index = AwaitProviderSelection(read, 0, providerCount, timeout);
+        }
+        while (index != providerIndex) {
+            var next = index + (index < providerIndex ? 1 : -1);
+            press(index < providerIndex ? (byte)0x28 : (byte)0x26);
+            index = AwaitProviderSelection(read, next, providerCount, timeout);
+        }
+    }
+    public static int AwaitProviderSelection(Func<int> read, int? expected, int providerCount, TimeSpan timeout) {
+        var observation = Task.Run(() => {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            do {
+                var value = read();
+                if (value < -1 || value >= providerCount)
+                    throw new InvalidOperationException("Invalid public provider selection index.");
+                if (!expected.HasValue || value == expected.Value) return value;
+                Thread.Sleep(25);
+            } while (timer.Elapsed < timeout);
+            throw new TimeoutException("Public provider selection did not acknowledge the intended item.");
+        });
+        if (!observation.Wait(timeout + TimeSpan.FromSeconds(1)))
+            throw new TimeoutException("Public provider selection observation did not finish within its bound.");
+        return observation.GetAwaiter().GetResult();
     }
     static void PressProviderKey(IntPtr window, byte key, bool extended) {
         if (GetForegroundWindow() != window)
@@ -661,7 +698,8 @@ try {
     $providerIndex = Get-TestProviderUiIndex $providerOptions $TestProviderKey
     $result['ProviderUiSelectionIndex'] = $providerIndex
     $result['ProviderUiSelectionDisplayName'] = $selection[0].displayName
-    [SharpClawInstalledProbe]::SelectProvider($cleanWindows[0].Handle, $providerIndex, $providerOptions.Count)
+    $providerNames = [string[]]@($providerOptions | ForEach-Object displayName)
+    [SharpClawInstalledProbe]::SelectProvider($cleanWindows[0].Handle, $providerIndex, $providerNames)
     [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupModel', $TestModel)
     [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupEndpoint', $TestProviderEndpoint)
     [SharpClawInstalledProbe]::Invoke($cleanWindows[0].Handle, 'ProviderSetupApply')
