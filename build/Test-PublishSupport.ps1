@@ -430,14 +430,40 @@ try {
         $selection = $gate.Substring($start, $end - $start)
         foreach ($required in @('SetForegroundWindow(window)', 'GetForegroundWindow() != window',
             'ClickVisibleElement(combo)', 'providerCount > 256', 'providerIndex >= providerCount',
-            'index < providerIndex', 'PressProviderKey(window, 0x1B', 'PressProviderKey(window, 0x24',
-            'PressProviderKey(window, 0x28', 'PressProviderKey(window, 0x09', 'keybd_event',
+            'ProviderNavigationKeys(providerIndex, providerCount)', 'keys[0] = 0x28', 'keys[index] = 0x26',
+            'PressProviderKey(window, 0x1B', 'PressProviderKey(window, 0x09',
+            'MapVirtualKey(key, 0)', 'scan == 0 || scan > 0xFF', '0x0008u', 'SendKeyboardInputs(window',
             'element.Current.IsOffscreen || !element.Current.IsEnabled', 'TryGetClickablePoint',
             'double.IsNaN', 'double.IsInfinity', 'SetCursorPos', 'mouse_event(0x0002', 'mouse_event(0x0004')) {
             if (-not $selection.Contains($required)) { throw "Missing bounded visible provider input guard: $required" }
         }
         if ($selection -match 'GetCurrentPattern|SelectionItemPattern|ExpandCollapsePattern|Invoke-RestMethod|Invoke-WebRequest') {
             throw 'Provider selection must be an actual visible user interaction, not the failing UIA pattern or private configuration.'
+        }
+    }
+    Test-Case 'provider key sequence reaches exact index from every initial selection including no selection' {
+        $gate = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'))
+        $method = [regex]::Match($gate, '(?s)public static byte\[\] ProviderNavigationKeys\(.*?\n    \}')
+        if (-not $method.Success) { throw 'Missing pure provider key sequence.' }
+        $name = 'ProviderNavigationFixture_' + [guid]::NewGuid().ToString('N')
+        $type = Add-Type -TypeDefinition ('using System; public static class ' + $name + ' {' + $method.Value + '}') -PassThru
+        foreach ($count in @(1, 2, 20, 256)) {
+            foreach ($target in @(@(0, [int][Math]::Floor($count / 2), ($count - 1)) | Select-Object -Unique)) {
+                $keys = $type::ProviderNavigationKeys($target, $count)
+                if ($keys.Count -ne 1 + $count + $target -or $keys[0] -ne 0x28) { throw 'Incorrect bounded navigation sequence.' }
+                for ($initial = -1; $initial -lt $count; $initial++) {
+                    $position = $initial
+                    foreach ($key in $keys) {
+                        if ($key -eq 0x28) { $position = [Math]::Min($position + 1, $count - 1) }
+                        elseif ($key -eq 0x26) { $position = [Math]::Max($position - 1, 0) }
+                        else { throw 'Unexpected navigation key.' }
+                    }
+                    if ($position -ne $target) { throw "Incorrect final provider index from $initial / $count to $target." }
+                }
+            }
+        }
+        foreach ($bad in @(@(-1,20), @(20,20), @(0,0), @(0,257))) {
+            Assert-Rejected { $type::ProviderNavigationKeys($bad[0], $bad[1]) }
         }
     }
     Test-Case 'provider UI index preserves product list order and rejects missing or duplicate keys' {

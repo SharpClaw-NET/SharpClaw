@@ -152,23 +152,35 @@ public static class SharpClawInstalledProbe {
             if (combo == null) throw new InvalidOperationException("Provider selection is missing.");
             ClickVisibleElement(combo);
             // Popup items may be virtualized or absent from the window UIA
-            // subtree. The product binds this ordered setup list directly.
-            // Close the popup, select from Home with ordinary arrow keys, then
-            // leave the combo. Later Runtime assertions verify the actual key.
+            // subtree. Establish a selection using Down, saturate Up to the
+            // first item, then move to the actual ordered setup-list index.
+            // Do not assume Home was processed when selection started at -1.
+            // Later Runtime assertions independently verify the actual key.
             PressProviderKey(window, 0x1B, false); // Escape: close popup, retain combo focus.
-            PressProviderKey(window, 0x24, true);  // Home: first provider.
-            for (var index = 0; index < providerIndex; index++)
-                PressProviderKey(window, 0x28, true); // Down.
+            foreach (var key in ProviderNavigationKeys(providerIndex, providerCount))
+                PressProviderKey(window, key, true);
             PressProviderKey(window, 0x09, false); // Tab: leave provider selection.
         });
+    }
+    public static byte[] ProviderNavigationKeys(int providerIndex, int providerCount) {
+        if (providerCount < 1 || providerCount > 256 || providerIndex < 0 || providerIndex >= providerCount)
+            throw new InvalidOperationException("Invalid enabled-provider UI index.");
+        var keys = new byte[1 + providerCount + providerIndex];
+        keys[0] = 0x28; // Down establishes selection even from -1.
+        for (var index = 1; index <= providerCount; index++) keys[index] = 0x26; // Up saturates at zero.
+        for (var index = 1 + providerCount; index < keys.Length; index++) keys[index] = 0x28;
+        return keys;
     }
     static void PressProviderKey(IntPtr window, byte key, bool extended) {
         if (GetForegroundWindow() != window)
             throw new InvalidOperationException("Provider window lost input focus.");
-        uint flags = extended ? 0x0001u : 0u;
-        keybd_event(key, 0, flags, UIntPtr.Zero);
-        keybd_event(key, 0, flags | 0x0002u, UIntPtr.Zero);
-        Thread.Sleep(75);
+        var scan = MapVirtualKey(key, 0);
+        if (scan == 0 || scan > 0xFF) throw new InvalidOperationException("Navigation key has no supported scan code.");
+        uint flags = 0x0008u | (extended ? 0x0001u : 0u); // KEYEVENTF_SCANCODE.
+        SendKeyboardInputs(window, new[] {
+            KeyboardInput(0, (ushort)scan, flags), KeyboardInput(0, (ushort)scan, flags | 0x0002u)
+        });
+        Thread.Sleep(125);
     }
     static void ClickVisibleElement(AutomationElement element) {
         if (element.Current.IsOffscreen || !element.Current.IsEnabled)
@@ -238,7 +250,7 @@ public static class SharpClawInstalledProbe {
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extraInfo);
-    [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extraInfo);
+    [DllImport("user32.dll")] static extern uint MapVirtualKey(uint key, uint mapType);
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     // INPUT includes the largest union member (MOUSEINPUT), even for keyboard
     // events. Sequential pointer alignment yields 40 bytes on x64 / 28 on x86.
