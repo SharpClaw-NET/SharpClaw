@@ -520,6 +520,40 @@ function Copy-SharedJournalContents {
         [IO.File]::WriteAllBytes($Destination, $contents.ToArray())
     } finally { $contents.Dispose(); $journalStream.Dispose() }
 }
+function Wait-TestSingleClientActivation {
+    param(
+        [Parameter(Mandatory)][uint32]$ExpectedProcessId,
+        [Parameter(Mandatory)][long]$ExpectedWindowHandle,
+        [Parameter(Mandatory)][scriptblock]$Observe,
+        [ValidateRange(0, 30)][double]$TimeoutSeconds = 30,
+        [ValidateRange(0, 2)][double]$StableSeconds = 2
+    )
+    if ($ExpectedProcessId -eq 0 -or $ExpectedWindowHandle -eq 0) { throw 'Invalid original client/window identity.' }
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $stableAt = $null
+    $observations = [Collections.Generic.List[object]]::new()
+    do {
+        $snapshot = & $Observe
+        $clientIds = @($snapshot.ClientProcessIds)
+        $windows = @($snapshot.VisibleWindows)
+        $observations.Add([pscustomobject]@{ ElapsedSeconds = $timer.Elapsed.TotalSeconds; ClientProcessIds = $clientIds; VisibleWindows = $windows })
+        if ($ExpectedProcessId -notin $clientIds) { throw 'Repeated activation lost the original client process.' }
+        if ($windows.Count -gt 1 -or ($windows.Count -eq 1 -and
+            ($windows[0].ProcessId -ne $ExpectedProcessId -or $windows[0].Handle -ne $ExpectedWindowHandle))) {
+            throw 'Repeated activation exposed a second or replacement application window.'
+        }
+        if ($timer.Elapsed.TotalSeconds -ge $TimeoutSeconds) { break }
+        if ($clientIds.Count -eq 1 -and $windows.Count -eq 1) {
+            if ($null -eq $stableAt) { $stableAt = $timer.Elapsed.TotalSeconds }
+            if ($timer.Elapsed.TotalSeconds - $stableAt -ge $StableSeconds) {
+                return [pscustomobject]@{ OriginalProcessId = $ExpectedProcessId; OriginalWindowHandle = $ExpectedWindowHandle;
+                    StableSeconds = $StableSeconds; ObservationLimitSeconds = $TimeoutSeconds; Observations = $observations.ToArray() }
+            }
+        } else { $stableAt = $null }
+        Start-Sleep -Milliseconds 200
+    } while ($true)
+    throw 'Repeated activation did not settle to the original single visible client within the bounded observation.'
+}
 function Save-WindowCapture {
     param([long]$Handle, [string]$FileName = 'boot-window.png')
     $rectangle = [SharpClawInstalledProbe+Rect]::new()
@@ -824,12 +858,13 @@ try {
         throw 'Durable startup journal does not corroborate installed window and boot initialization.'
     }
     # A second AUMID activation must not leave an extra invisible client behind.
-    $null = [SharpClawInstalledProbe]::Activate($result.Aumid)
-    Start-Sleep -Seconds 2
-    $clients = @(Get-TestPackageProcesses | Where-Object Name -eq 'SharpClaw.Client.Uno.exe')
-    if ($clients.Count -ne 1 -or @([SharpClawInstalledProbe]::VisibleWindows([uint32]$clients[0].ProcessId)).Count -ne 1) {
-        throw 'Repeated activation produced duplicate or windowless client processes.'
-    }
+    $result['RepeatedActivationProcessId'] = [SharpClawInstalledProbe]::Activate($result.Aumid)
+    $result['RepeatedActivationObservation'] = Wait-TestSingleClientActivation -ExpectedProcessId $result.Window.ProcessId `
+        -ExpectedWindowHandle $result.Window.Handle -Observe {
+            $activationClients = @(Get-TestPackageProcesses | Where-Object Name -eq 'SharpClaw.Client.Uno.exe')
+            $activationWindows = @($activationClients | ForEach-Object { [SharpClawInstalledProbe]::VisibleWindows([uint32]$_.ProcessId) })
+            [pscustomobject]@{ ClientProcessIds = @($activationClients | ForEach-Object ProcessId); VisibleWindows = $activationWindows }
+        }
     $result.Success = $true
 } catch {
     $result['Failure'] = $_.Exception.Message

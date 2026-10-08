@@ -860,6 +860,41 @@ Add-Type -ReferencedAssemblies UIAutomationClient,UIAutomationTypes,WindowsBase,
         } finally { $writer.Dispose() }
         if ((Get-FileHash $source).Hash -ne (Get-FileHash $destination).Hash) { throw 'Journal capture changed its source.' }
     }
+    Test-Case 'repeated installed activation observes bounded original-client stability and rejects real duplicates or replacement' {
+        $tokens = $null; $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'), [ref]$tokens, [ref]$errors)
+        if ($errors.Count) { throw ($errors | Out-String) }
+        $function = $ast.Find({ param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Wait-TestSingleClientActivation'
+        }, $true)
+        if (-not $function) { throw 'Missing bounded repeated-activation observer.' }
+        Invoke-Expression $function.Extent.Text
+        $window = [pscustomobject]@{ ProcessId = 101; Handle = 501 }
+        $script:activationReads = 0
+        $observed = Wait-TestSingleClientActivation -ExpectedProcessId 101 -ExpectedWindowHandle 501 -StableSeconds 0.2 -TimeoutSeconds 2 -Observe {
+            $script:activationReads++
+            $ids = if ($script:activationReads -lt 3) { @(101, 202) } else { @(101) }
+            [pscustomobject]@{ ClientProcessIds = $ids; VisibleWindows = @($window) }
+        }
+        if ($observed.OriginalProcessId -ne 101 -or $observed.Observations.Count -lt 4 -or
+            $observed.Observations[0].ClientProcessIds.Count -ne 2 -or
+            $observed.Observations[-1].ClientProcessIds.Count -ne 1) { throw 'Transient secondary start or stability evidence was lost.' }
+        Assert-Rejected { Wait-TestSingleClientActivation -ExpectedProcessId 101 -ExpectedWindowHandle 501 -TimeoutSeconds 0 -Observe {
+            [pscustomobject]@{ ClientProcessIds = @(101, 202); VisibleWindows = @($window) }
+        } }
+        Assert-Rejected { Wait-TestSingleClientActivation -ExpectedProcessId 101 -ExpectedWindowHandle 501 -Observe {
+            [pscustomobject]@{ ClientProcessIds = @(101, 202); VisibleWindows = @($window, [pscustomobject]@{ProcessId=202;Handle=502}) }
+        } }
+        Assert-Rejected { Wait-TestSingleClientActivation -ExpectedProcessId 101 -ExpectedWindowHandle 501 -Observe {
+            [pscustomobject]@{ ClientProcessIds = @(202); VisibleWindows = @([pscustomobject]@{ProcessId=202;Handle=502}) }
+        } }
+        Assert-Rejected { Wait-TestSingleClientActivation -ExpectedProcessId 101 -ExpectedWindowHandle 501 -TimeoutSeconds 0 -Observe {
+            [pscustomobject]@{ ClientProcessIds = @(101); VisibleWindows = @() }
+        } }
+        Assert-Rejected { Wait-TestSingleClientActivation -ExpectedProcessId 101 -ExpectedWindowHandle 501 -Observe {
+            [pscustomobject]@{ ClientProcessIds = @(101); VisibleWindows = @([pscustomobject]@{ProcessId=101;Handle=999}) }
+        } }
+    }
     Test-Case 'both native ICU package variants retain upstream licensing' {
         $policy = Get-Content (Join-Path $PSScriptRoot 'ThirdPartyNotices.json') -Raw | ConvertFrom-Json -AsHashtable
         $windows = $policy.PackageDocuments['Uno.icu-win/77.3.2']
