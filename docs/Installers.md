@@ -153,6 +153,19 @@ execution uses its existing finite budget, and the handler terminal runs at most
 once; a module-supplied result that skips a required terminal is rejected. Neither
 the kernel's action budgets nor installer-test observation limits are extended.
 
+Runtime startup also separates short preparation from initialization in that same
+graph. The published `runtime.start.prepare` action retains its repeat-safe
+30-second preparation gate; only after its terminal authorizes preparation does
+the Runtime-owned typed `runtime.start.initialize` action invoke the selected
+persistence provider's initialization and connectivity check. Initialization is
+an effect with a finite two-minute budget, no repeat or replacement capability,
+and an at-most-once terminal. Modules can inspect, wrap, observe or cancel that
+action under explicit grants; cancellation or failure cannot grant readiness.
+This separates database creation/migration work from a pure preparation action,
+without changing Core, selecting providers by name, moving work outside the
+kernel or increasing installed-test observation limits. It does not promise
+cold-start speed or automatic recovery of an uncertain initialization.
+
 Cold module-sidecar startup has its own bounded bootstrap budget rather than
 an action-execution deadline: `Packages__OutOfProcessSidecarStartupTimeoutSeconds`
 defaults to 120 and accepts integers from 1 to 600. Process exit and caller

@@ -96,11 +96,12 @@ public static class LocalRuntimeHost
             await kernel.RunRuntimeLifecycleActionAsync(
                 RuntimeLifecycleActionCatalog.StartPrepare,
                 null,
-                cancellationToken => new ValueTask(
-                    databaseReadiness.ValidateAsync(cancellationToken)));
+                ct => new ValueTask(databaseReadiness.ValidateAsync(ct)),
+                cancellationToken);
             await registrationSet.ConnectCapabilitiesAsync(app.Services, cancellationToken);
             await kernel.StartAsync(
-                typeof(LocalRuntimeHost).Assembly.GetName().Version?.ToString() ?? "0.5.0.0");
+                typeof(LocalRuntimeHost).Assembly.GetName().Version?.ToString() ?? "0.5.0.0",
+                cancellationToken: cancellationToken);
             runtimeStarted = true;
 
             if (RuntimeCliCommandLine.IsRequested(args))
@@ -125,13 +126,13 @@ public static class LocalRuntimeHost
             await kernel.RunRuntimeLifecycleActionAsync(
                 RuntimeLifecycleActionCatalog.StartBind,
                 runtimeBaseUrl,
-                async cancellationToken =>
+                async ct =>
                 {
                     appStartAttempted = true;
-                    await app.StartAsync(cancellationToken);
+                    await app.StartAsync(ct);
                     readiness.MarkReady();
                     instancePaths.PublishDiscoveryEntry(runtimeBaseUrl);
-                });
+                }, cancellationToken);
 
             await app.WaitForShutdownAsync();
         }

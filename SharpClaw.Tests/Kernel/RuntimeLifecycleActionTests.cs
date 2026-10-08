@@ -87,6 +87,148 @@ public sealed class RuntimeLifecycleActionTests
         probe.Actions.Should().ContainSingle().Which.Should().Be("runtime.start.prepare");
     }
 
+    [TestCase(false), TestCase(true)]
+    [Parallelizable]
+    [CancelAfter(90_000)]
+    public async Task StartupInitializationOutlivesShortPreparationWithoutRepeating(bool withModule)
+    {
+        var probe = new LifecycleProbe();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = withModule
+            ? CreateAdapter(workspace, probe)
+            : RuntimeKernelAdapterTestFactory.Create(new ConfigurationBuilder().Build(), [],
+                workspace.CreateInstancePaths(), new LifecycleProviderClientFactory(new LifecycleProviderClient()));
+        var calls = 0;
+        var completed = false;
+
+        await adapter.RunRuntimeLifecycleActionAsync(
+            Action("runtime.start.prepare"),
+            null,
+            async cancellationToken =>
+            {
+                Interlocked.Increment(ref calls);
+                await Task.Delay(TimeSpan.FromSeconds(32), cancellationToken).ConfigureAwait(false);
+                completed = true;
+            }).ConfigureAwait(false);
+
+        calls.Should().Be(1);
+        completed.Should().BeTrue();
+        if (withModule)
+        {
+            probe.Actions.Should().ContainSingle().Which.Should().Be("runtime.start.prepare");
+            probe.InitializationContexts.Should().ContainSingle().Which.Action.Should().Be("runtime.start.prepare");
+        }
+        adapter.Graph.GetStandardAction(Action("runtime.start.prepare"))
+            .DefaultTimeout.Should().Be(TimeSpan.FromSeconds(30));
+        RuntimeStartupActionDefinitions.Initialize.DefaultTimeout.Should().Be(TimeSpan.FromMinutes(2));
+        RuntimeStartupActionDefinitions.Initialize.RepeatPolicy.Kind.Should().Be(ActionRepeatKind.None);
+    }
+
+    [TestCase("cancel"), TestCase("fail"), TestCase("replace-input"), TestCase("replace-result"), TestCase("repeat")]
+    public async Task InitializationModuleCannotSkipOrRepeatRequiredTerminal(string operation)
+    {
+        var probe = new LifecycleProbe { InitializationOperation = operation };
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(workspace, probe);
+        var calls = 0;
+        Func<Task> prepare = async () => await adapter.RunRuntimeLifecycleActionAsync(
+            Action("runtime.start.prepare"), null, _ =>
+            {
+                Interlocked.Increment(ref calls);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        if (operation == "cancel")
+            await prepare.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
+        else
+            await prepare.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
+        calls.Should().Be(0);
+        probe.InitializationContexts.Should().ContainSingle();
+    }
+
+    [TestCase("skip"), TestCase("swallow-failure")]
+    public async Task InitializationCannotReportSuccessWithoutCompletedTerminal(string operation)
+    {
+        var probe = new LifecycleProbe { InitializationOperation = operation };
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(workspace, probe);
+        var calls = 0;
+        Func<Task> prepare = async () => await adapter.RunRuntimeLifecycleActionAsync(
+            Action("runtime.start.prepare"), null, _ =>
+            {
+                Interlocked.Increment(ref calls);
+                throw new InvalidOperationException("Initialization failed before readiness.");
+            }).ConfigureAwait(false);
+
+        await prepare.Should().ThrowAsync<KernelActionFailedException>()
+            .WithMessage("*this control did not issue*").ConfigureAwait(false);
+        calls.Should().Be(operation == "skip" ? 0 : 1);
+    }
+
+    [Test]
+    public async Task ReplacedPreparationSuccessDoesNotAuthorizeInitialization()
+    {
+        var probe = new LifecycleProbe { SkipPreparation = true };
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(workspace, probe);
+        var calls = 0;
+        Func<Task> prepare = async () => await adapter.RunRuntimeLifecycleActionAsync(
+            Action("runtime.start.prepare"), null, _ =>
+            {
+                Interlocked.Increment(ref calls);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+        await prepare.Should().ThrowAsync<KernelActionExecutionException>().ConfigureAwait(false);
+        calls.Should().Be(0);
+        probe.InitializationContexts.Should().BeEmpty();
+    }
+
+    [TestCase(false), TestCase(true)]
+    public async Task CallerCancellationPreventsInitializationSuccess(bool duringTerminal)
+    {
+        var probe = new LifecycleProbe();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(workspace, probe);
+        using var cancellation = new CancellationTokenSource();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        if (!duringTerminal)
+            await cancellation.CancelAsync().ConfigureAwait(false);
+        var preparation = adapter.RunRuntimeLifecycleActionAsync(
+            Action("runtime.start.prepare"), null, async ct =>
+            {
+                Interlocked.Increment(ref calls);
+                entered.SetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct).ConfigureAwait(false);
+            }, cancellation.Token).AsTask();
+        if (duringTerminal)
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await cancellation.CancelAsync().ConfigureAwait(false);
+        }
+        Func<Task> observe = () => preparation;
+        await observe.Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
+        calls.Should().Be(duringTerminal ? 1 : 0);
+    }
+
+    [Test]
+    public async Task StartupPreparationAndInitializationShareHostIdentityButNotDeadline()
+    {
+        var probe = new LifecycleProbe();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(workspace, probe);
+        await adapter.RunRuntimeLifecycleActionAsync(Action("runtime.start.prepare"), null,
+            _ => ValueTask.CompletedTask).ConfigureAwait(false);
+        var preparation = probe.PreparationContexts.Should().ContainSingle().Which;
+        var initialization = probe.InitializationContexts.Should().ContainSingle().Which;
+        initialization.TraceId.Should().Be(preparation.TraceId);
+        initialization.IdempotencyKey.Should().Be(preparation.IdempotencyKey);
+        initialization.Caller.Should().Be(preparation.Caller);
+        initialization.Features.Should().Be(preparation.Features);
+        initialization.InvocationId.Should().NotBe(preparation.InvocationId);
+        (initialization.Deadline - preparation.Deadline).Should().BeGreaterThan(TimeSpan.FromSeconds(85));
+    }
+
     [Test]
     public Task StopPrepareCancellation_still_runs_host_cleanup() =>
         AssertCleanupAfterStopInterceptionAsync(
@@ -254,6 +396,8 @@ public sealed class RuntimeLifecycleActionTests
             name => name,
             name => KernelActionCatalog.DescriptorFor(Action(name)).Capabilities,
             StringComparer.Ordinal);
+        grants.Add(RuntimeStartupActionDefinitions.Initialize.Key.Value,
+            RuntimeStartupActionDefinitions.Initialize.Capabilities);
         return RuntimeKernelAdapterTestFactory.Create(
             configuration,
             [new LifecycleRegistration(provider, probe)],
@@ -315,6 +459,14 @@ public sealed class RuntimeLifecycleActionTests
     {
         public ConcurrentQueue<string> Actions { get; } = new();
 
+        public ConcurrentQueue<ActionContext<KernelActionEnvelope>> PreparationContexts { get; } = new();
+
+        public ConcurrentQueue<ActionContext<string>> InitializationContexts { get; } = new();
+
+        public string InitializationOperation { get; init; } = "proceed";
+
+        public bool SkipPreparation { get; init; }
+
         public ConcurrentQueue<string> Terminals { get; } = new();
 
         public ConcurrentQueue<string> ShutdownEvents { get; } = new();
@@ -351,6 +503,12 @@ public sealed class RuntimeLifecycleActionTests
             CancellationToken cancellationToken)
         {
             probe.Record(context.ActionKey.Value);
+            if (context.ActionKey.Value == "runtime.start.prepare")
+            {
+                probe.PreparationContexts.Enqueue(context);
+                if (probe.SkipPreparation)
+                    return ValueTask.FromResult(control.ReplaceResult(true, "Test skipped required preparation."));
+            }
             if (probe.ShouldCancel(context.ActionKey.Value))
             {
                 return ValueTask.FromResult(control.Cancel(
@@ -369,6 +527,30 @@ public sealed class RuntimeLifecycleActionTests
         }
     }
 
+    private sealed class StartupInitializationInterceptor(LifecycleProbe probe) : IActionInterceptor<string, bool>
+    {
+        public async ValueTask<IActionOutcome<bool>> InvokeAsync(ActionContext<string> context,
+            IActionControl<string, bool> control, CancellationToken cancellationToken)
+        {
+            probe.InitializationContexts.Enqueue(context);
+            switch (probe.InitializationOperation)
+            {
+                case "cancel": return control.Cancel("TEST_CANCEL", "Initialization cancelled.");
+                case "fail": return control.Fail(new ExecutionError("TEST_FAILURE", "Initialization denied."));
+                case "replace-input": return await control.ProceedWithInputAsync(
+                    new ActionReplacement<string>("wrong-preparation", "Test invalid replacement."), cancellationToken).ConfigureAwait(false);
+                case "replace-result": return control.ReplaceResult(true, "Test skipped required terminal.");
+                case "repeat": return await control.RepeatAsync(
+                    new ActionRepeatRequest<string>(context.Action, "Test invalid repeat."), cancellationToken).ConfigureAwait(false);
+                case "skip": return KernelActionOutcome<bool>.Completed(true);
+                case "swallow-failure":
+                    await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
+                    return KernelActionOutcome<bool>.Completed(true);
+                default: return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
     private sealed class LifecycleRegistration(
         IProviderPlugin provider,
         LifecycleProbe probe) : ISharpClawModule
@@ -381,6 +563,10 @@ public sealed class RuntimeLifecycleActionTests
             module.AddSingleton<IProviderPlugin>(provider);
             module.AddSingleton(probe);
             module.AddSingleton<LifecycleInterceptor>();
+            module.AddSingleton(new StartupInitializationInterceptor(probe));
+            module.OnAction(RuntimeStartupActionDefinitions.Initialize)
+                .Use<StartupInitializationInterceptor>(new HookOrdering(
+                    "startup-initialization", HookPriority.Normal, [], [], TimeSpan.FromMinutes(2), HookFailurePolicy.FailAction));
             foreach (var actionName in LifecycleActionNames)
             {
                 module.OnAction(Action(actionName))

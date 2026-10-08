@@ -405,8 +405,11 @@ public sealed class RuntimeKernelAdapterTests
             new RecordingProviderClientFactory(provider));
 
         SharpClawActionCatalog.Jobs.Should().HaveCount(138);
-        adapter.Graph.ActionSnapshot.ActionGrants.Should()
-            .HaveCount(KernelActionCatalog.Descriptors.Count);
+        adapter.Graph.ActionSnapshot.ActionGrants.Select(grant => grant.ActionKey).Should()
+            .BeEquivalentTo(KernelActionCatalog.Descriptors.Select(descriptor => descriptor.Key)
+                .Append(RuntimeStartupActionDefinitions.Initialize.Key));
+        adapter.Graph.GetActionDescriptor<string, bool>(RuntimeStartupActionDefinitions.Initialize.Key)
+            .Should().Be(RuntimeStartupActionDefinitions.Initialize);
         SharpClawActionCatalog.Jobs.Should().OnlyContain(key => adapter.Graph.ContainsAction(key));
 
         var terminalCalls = 0;

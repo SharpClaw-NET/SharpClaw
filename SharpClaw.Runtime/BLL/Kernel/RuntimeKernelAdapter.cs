@@ -57,9 +57,10 @@ public sealed class RuntimeKernelAdapter :
         var graphBuilder = new KernelGraphBuilder();
         jobsBindings.AddTo(graphBuilder);
         RuntimeEventBindings.AddTo(graphBuilder);
+        graphBuilder.Add(RuntimeStartupActionDefinitions.Initialize, RuntimeStartupActionDefinitions.SourceId);
         Graph = graphBuilder.Compile(
             hostServices,
-            AddRuntimeEventGrant(
+            AddRuntimeOwnedGrants(
                 MergeExternalBehaviorAuthority(
                     graphCompileOptions,
                     hostServices.GetServices<IExternalBehaviorAuthority>()),
@@ -510,12 +511,69 @@ public sealed class RuntimeKernelAdapter :
                 nameof(actionKey));
         }
 
+        if (actionKey == RuntimeLifecycleActionCatalog.StartPrepare)
+        {
+            return PrepareRuntimeStartAsync(payload, terminal, cancellationToken);
+        }
+
         return RunRuntimeLifecycleActionCoreAsync(
             actionKey,
             payload,
             CreateHostExecutionContext(),
             terminal,
             cancellationToken);
+    }
+
+    private async ValueTask PrepareRuntimeStartAsync(
+        object? payload,
+        Func<CancellationToken, ValueTask> terminal,
+        CancellationToken cancellationToken)
+    {
+        var executionContext = CreateHostExecutionContext();
+        var preparationInvoked = false;
+        await RunRuntimeLifecycleActionCoreAsync(
+            RuntimeLifecycleActionCatalog.StartPrepare,
+            payload,
+            executionContext,
+            ct =>
+            {
+                ct.ThrowIfCancellationRequested();
+                preparationInvoked = true;
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken).ConfigureAwait(false);
+        if (!preparationInvoked)
+        {
+            throw new KernelActionExecutionException(
+                "Runtime startup preparation did not authorize initialization.");
+        }
+
+        var terminalInvoked = 0;
+        var initialized = await _actionDispatcher.RunRequiredWithContextAsync(
+            executionContext,
+            RuntimeStartupActionDefinitions.Initialize,
+            RuntimeLifecycleActionCatalog.StartPrepare.Value,
+            async (context, ct) =>
+            {
+                if (!string.Equals(context.Action, RuntimeLifecycleActionCatalog.StartPrepare.Value,
+                        StringComparison.Ordinal) || Interlocked.Exchange(ref terminalInvoked, 1) != 0)
+                {
+                    throw new KernelActionExecutionException(
+                        "Runtime initialization requires the original preparation and one terminal execution.");
+                }
+
+                ct.ThrowIfCancellationRequested();
+                await terminal(ct).ConfigureAwait(false);
+                Volatile.Write(ref terminalInvoked, 2);
+                return true;
+            },
+            Graph.ActionSnapshot,
+            cancellationToken).ConfigureAwait(false);
+        if (!initialized || Volatile.Read(ref terminalInvoked) != 2)
+        {
+            throw new KernelActionExecutionException(
+                "Runtime initialization did not complete its required terminal.");
+        }
     }
 
     internal async ValueTask<TResult> RunRequestAsync<TRequest, TResult>(
@@ -1093,7 +1151,7 @@ public sealed class RuntimeKernelAdapter :
             Guid.NewGuid(),
             Guid.NewGuid());
 
-    private static KernelGraphCompileOptions AddRuntimeEventGrant(
+    private static KernelGraphCompileOptions AddRuntimeOwnedGrants(
         KernelGraphCompileOptions? options,
         KernelJobsBindings jobsBindings)
     {
@@ -1110,6 +1168,12 @@ public sealed class RuntimeKernelAdapter :
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(
                 StringComparer.Ordinal);
         actionRegistrationGrants[KernelJobsBindings.SourceId] = jobsBindings.Grants;
+        actionRegistrationGrants[RuntimeStartupActionDefinitions.SourceId] =
+            new Dictionary<string, ActionInterceptionCapabilities>(StringComparer.Ordinal)
+            {
+                [RuntimeStartupActionDefinitions.Initialize.Key.Value] =
+                    RuntimeStartupActionDefinitions.Initialize.Capabilities,
+            };
 
         var eventRegistrationGrants = options?.EventRegistrationCapabilityGrants is { } existing
             ? existing.ToDictionary(
