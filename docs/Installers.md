@@ -64,6 +64,12 @@ code-signing certificate. The builder validates the package and signature,
 exports only the public certificate, and writes an installer manifest recording
 both hashes and whether the signing chain is trusted on that machine. It never
 exports a private key, imports a certificate, or installs an application.
+The builder uses a [Windows SDK file mapping](https://learn.microsoft.com/en-us/windows/msix/package/create-app-package-with-makeappx-tool)
+to pack the verified stage directly, avoiding a second recursive payload copy.
+Only the installation marker, manifest and logos are generated separately;
+destination collisions, unsafe paths and links are rejected, and every mapped
+payload file is checked against its expected length and SHA-256 after signing.
+SDK package validation and exact signer verification remain mandatory.
 
 ```powershell
 ./scripts/package-msix.ps1 -StageRoot C:/artifacts/publish-01/SharpClaw-Application-win-x64 `

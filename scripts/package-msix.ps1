@@ -41,7 +41,6 @@ New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 if (Get-ChildItem -LiteralPath $OutputDir -Force) { throw 'Installer output must be empty.' }
 $work = Join-Path $OutputDir '.msix-stage'
 New-Item -ItemType Directory -Path $work | Out-Null
-Get-ChildItem -LiteralPath $stage -Force | Copy-Item -Destination $work -Recurse
 [pscustomobject]@{ Identity = 'com.mkn8rn.SharpClaw'; SourceCommit = $manifest.SourceCommit } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $work 'sharpclaw-installation.json') -Encoding utf8
 [xml]$appx = Get-Content -LiteralPath (Join-Path $repoRoot 'packaging/windows/AppxManifest.xml') -Raw
@@ -62,8 +61,14 @@ try {
         } finally { $graphics.Dispose(); $bitmap.Dispose() }
     }
 } finally { $icon.Dispose() }
+$publishedFiles = @($manifest.Files) + @([pscustomobject]@{
+    Path = 'publish-manifest.json'; Length = (Get-Item -LiteralPath (Join-Path $stage 'publish-manifest.json')).Length
+    Sha256 = $PublishManifestSha256
+})
+$mapping = New-MsixFileMapping -StageRoot $stage -PublishedFiles $publishedFiles -GeneratedRoot $work `
+    -MappingPath (Join-Path $OutputDir 'msix-files.txt')
 $packagePath = Join-Path $OutputDir "SharpClaw-$($manifest.InstallerVersion)-win-x64.msix"
-& $MakeAppxPath pack /d $work /p $packagePath
+& $MakeAppxPath pack /f $mapping.MappingPath /p $packagePath
 if ($LASTEXITCODE -ne 0) { throw 'MakeAppx packaging or validation failed.' }
 & $SignToolPath sign /fd SHA256 /sha1 $CertificateThumbprint $packagePath
 if ($LASTEXITCODE -ne 0) { throw 'MSIX signing failed.' }
@@ -71,16 +76,9 @@ if ($LASTEXITCODE -ne 0) { throw 'MSIX signing failed.' }
 # Check all package payload bytes and its CMS signature without modifying trust.
 # Device trust is a separate, explicitly reported prerequisite for installation.
 Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+Assert-MsixMappedPayload -PackagePath $packagePath -Files $mapping.Files
 $zip = [IO.Compression.ZipFile]::OpenRead($packagePath)
 try {
-    foreach ($file in Get-PayloadInventory $work) {
-        $entry = $zip.GetEntry($file.Path)
-        if ($null -eq $entry -or $entry.Length -ne $file.Length) { throw "Missing MSIX payload '$($file.Path)'." }
-        $stream = $entry.Open()
-        try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)) }
-        finally { $stream.Dispose() }
-        if ($hash -ne $file.Sha256) { throw "Changed MSIX payload '$($file.Path)'." }
-    }
     $signature = $zip.GetEntry('AppxSignature.p7x')
     $stream = $signature.Open()
     $memory = [IO.MemoryStream]::new()

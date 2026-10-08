@@ -111,6 +111,103 @@ function Get-PayloadInventory {
     })
 }
 
+function New-MsixFileMapping {
+    param([string]$StageRoot, [object[]]$PublishedFiles, [string]$GeneratedRoot,
+          [string]$MappingPath)
+    $stage = [IO.Path]::GetFullPath($StageRoot)
+    $generated = [IO.Path]::GetFullPath($GeneratedRoot)
+    foreach ($directory in @($stage, $generated)) {
+        if (-not (Test-Path -LiteralPath $directory -PathType Container) -or
+            ((Get-Item -LiteralPath $directory -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'MSIX mapping requires regular, existing payload roots.'
+        }
+        foreach ($entry in Get-ChildItem -LiteralPath $directory -Recurse -Force) {
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'MSIX mapping does not permit file or directory links.'
+            }
+        }
+    }
+    $separator = [IO.Path]::DirectorySeparatorChar
+    if ($stage -eq $generated -or
+        $stage.StartsWith($generated.TrimEnd($separator) + $separator, [StringComparison]::OrdinalIgnoreCase) -or
+        $generated.StartsWith($stage.TrimEnd($separator) + $separator, [StringComparison]::OrdinalIgnoreCase) -or
+        (Test-Path -LiteralPath $MappingPath)) {
+        throw 'Mapping roots must not overlap and a previous mapping must not be overwritten.'
+    }
+    $records = [Collections.Generic.List[object]]::new()
+    $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($scope in @(
+        [pscustomobject]@{ Root = $stage; Files = @($PublishedFiles) },
+        [pscustomobject]@{ Root = $generated; Files = @(Get-PayloadInventory $generated) }
+    )) {
+        foreach ($file in $scope.Files) {
+            $relative = $file.Path.Replace('\', '/')
+            $source = Resolve-PayloadPath $scope.Root $relative
+            if ($relative -match '["\x00-\x1f]' -or $source -match '["\x00-\x1f]' -or
+                ($scope.Root -eq $stage -and $relative -eq 'AppxManifest.xml') -or
+                $relative -in @('[Content_Types].xml', 'AppxBlockMap.xml', 'AppxSignature.p7x',
+                    'AppxMetadata/CodeIntegrity.cat') -or
+                -not $paths.Add($relative) -or -not (Test-Path -LiteralPath $source -PathType Leaf) -or
+                $file.Length -lt 0 -or $file.Sha256 -notmatch '^[a-fA-F0-9]{64}$' -or
+                (Get-Item -LiteralPath $source -Force).Length -ne $file.Length) {
+                throw 'Unsafe, duplicate or inconsistent MSIX mapping entry.'
+            }
+            $records.Add([pscustomobject]@{
+                Path = $relative; SourcePath = $source; Length = $file.Length; Sha256 = $file.Sha256
+            })
+        }
+    }
+    if ($records.Count -eq 0 -or -not $paths.Contains('AppxManifest.xml')) {
+        throw 'MSIX mapping must contain payload and one generated AppxManifest.xml.'
+    }
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add('[Files]')
+    foreach ($file in $records | Sort-Object Path) {
+        $lines.Add(('"{0}" "{1}"' -f $file.SourcePath, $file.Path.Replace('/', '\')))
+    }
+    $stream = [IO.File]::Open($MappingPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $writer = [IO.StreamWriter]::new($stream, [Text.UTF8Encoding]::new($false))
+    try { foreach ($line in $lines) { $writer.WriteLine($line) } }
+    finally { $writer.Dispose() }
+    return [pscustomobject]@{ MappingPath = [IO.Path]::GetFullPath($MappingPath); Files = $records.ToArray() }
+}
+
+function Assert-MsixMappedPayload {
+    param([string]$PackagePath, [object[]]$Files)
+    if (@($Files).Count -eq 0 -or 'AppxManifest.xml' -cnotin @($Files.Path)) {
+        throw 'MSIX payload verification requires its complete generated-manifest mapping.'
+    }
+    $zip = [IO.Compression.ZipFile]::OpenRead($PackagePath)
+    try {
+        $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($entry in $zip.Entries) {
+            if (-not $entry.Name -or $entry.FullName -match '(^/|:|\\|[\x00-\x1f])' -or
+                (($entry.ExternalAttributes -shr 16) -band 0xf000) -eq 0xa000 -or
+                @($entry.FullName.Split('/') | Where-Object { $_ -in @('', '.', '..') }).Count -ne 0 -or
+                -not $seen.Add($entry.FullName)) {
+                throw 'Unsafe or duplicate MSIX entry.'
+            }
+        }
+        $expected = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($file in $Files) {
+            if ($file.Length -lt 0 -or $file.Sha256 -notmatch '^[a-fA-F0-9]{64}$' -or
+                -not $expected.Add($file.Path)) { throw 'Invalid or duplicate mapped payload record.' }
+            $entry = $zip.GetEntry($file.Path)
+            if ($null -eq $entry -or $entry.Length -ne $file.Length) { throw "Missing MSIX payload '$($file.Path)'." }
+            $stream = $entry.Open()
+            try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)) }
+            finally { $stream.Dispose() }
+            if ($hash -ne $file.Sha256) { throw "Changed MSIX payload '$($file.Path)'." }
+        }
+        foreach ($entry in $zip.Entries) {
+            if (-not $expected.Contains($entry.FullName) -and $entry.FullName -notin @(
+                '[Content_Types].xml', 'AppxBlockMap.xml', 'AppxSignature.p7x', 'AppxMetadata/CodeIntegrity.cat')) {
+                throw "Unmapped MSIX payload '$($entry.FullName)'."
+            }
+        }
+    } finally { $zip.Dispose() }
+}
+
 function Assert-PublishedStage {
     param([string]$Root, [string]$ManifestSha256)
     $rootPath = [IO.Path]::GetFullPath($Root)

@@ -126,6 +126,134 @@ try {
     $stagePath = Join-Path $stage 'publish-manifest.json'
     Save-Json $stageManifest $stagePath
     Test-Case 'valid stage' { $null = Assert-PublishedStage $stage (Get-FileHash $stagePath).Hash }
+    $mappingStage = Join-Path $root 'mapping source with spaces'
+    $mappingGenerated = Join-Path $root 'mapping generated'
+    New-Item -ItemType Directory -Path $mappingStage, $mappingGenerated | Out-Null
+    [IO.File]::WriteAllText((Join-Path $mappingStage '.env.template'), 'retained template')
+    [IO.File]::WriteAllText((Join-Path $mappingStage 'unicode-ž.dll'), 'unit-only mapped binary')
+    [IO.File]::WriteAllText((Join-Path $mappingGenerated 'AppxManifest.xml'), '<Package/>')
+    $mappingFiles = @(Get-PayloadInventory $mappingStage)
+    $mappingPath = Join-Path $root 'msix-files.txt'
+    $mapping = New-MsixFileMapping $mappingStage $mappingFiles $mappingGenerated $mappingPath
+    Test-Case 'MSIX mapping keeps exact source paths, spaces, Unicode and dotfiles without copying' {
+        $lines = [IO.File]::ReadAllLines($mappingPath)
+        if ($lines[0] -cne '[Files]' -or $lines.Count -ne 4 -or $mapping.Files.Count -ne 3 -or
+            @(Get-ChildItem -LiteralPath $mappingGenerated -File -Recurse -Force).Count -ne 1) {
+            throw 'Mapping must combine source payload and only generated package metadata.'
+        }
+        foreach ($file in $mapping.Files) {
+            $expected = '"{0}" "{1}"' -f $file.SourcePath, $file.Path.Replace('/', '\')
+            if ($expected -cnotin $lines) { throw 'Mapping lost an exact source or destination.' }
+            Assert-FileDigest $file.SourcePath $file.Sha256 $file.Length
+        }
+    }
+    Test-Case 'MSIX mapping refuses overwriting an existing map' {
+        $bytes = [IO.File]::ReadAllBytes($mappingPath)
+        Assert-Rejected { New-MsixFileMapping $mappingStage $mappingFiles $mappingGenerated $mappingPath }
+        if ([Convert]::ToHexString([IO.File]::ReadAllBytes($mappingPath)) -cne [Convert]::ToHexString($bytes)) {
+            throw 'Existing mapping was changed.'
+        }
+    }
+    Test-Case 'MSIX mapping rejects colliding destinations and SDK-reserved parts' {
+        $record = $mappingFiles[0]
+        $collision = [pscustomobject]@{ Path = $record.Path.ToUpperInvariant(); Length = $record.Length; Sha256 = $record.Sha256 }
+        Assert-Rejected { New-MsixFileMapping $mappingStage @($mappingFiles + $collision) $mappingGenerated (Join-Path $root 'collision-map.txt') }
+        foreach ($name in @('AppxManifest.xml', 'AppxBlockMap.xml', '[Content_Types].xml', 'AppxSignature.p7x')) {
+            $path = Join-Path $mappingStage $name
+            [IO.File]::WriteAllText($path, 'must not shadow generated package metadata')
+            try {
+                Assert-Rejected { New-MsixFileMapping $mappingStage @(Get-PayloadInventory $mappingStage) $mappingGenerated (Join-Path $root 'reserved-map.txt') }
+            } finally { Remove-Item -LiteralPath $path -Force }
+        }
+    }
+    Test-Case 'MSIX mapping rejects unsafe destinations, missing files and inconsistent records' {
+        foreach ($name in @('../escape.dll', '/absolute', 'bad"name.dll', "bad`nname.dll", 'missing.dll')) {
+            $record = [pscustomobject]@{ Path = $name; Length = 1; Sha256 = '0' * 64 }
+            Assert-Rejected { New-MsixFileMapping $mappingStage @($record) $mappingGenerated (Join-Path $root 'unsafe-map.txt') }
+        }
+        $file = $mappingFiles[0]
+        foreach ($record in @(
+            [pscustomobject]@{ Path = $file.Path; Length = $file.Length + 1; Sha256 = $file.Sha256 },
+            [pscustomobject]@{ Path = $file.Path; Length = $file.Length; Sha256 = 'not a digest' }
+        )) {
+            Assert-Rejected { New-MsixFileMapping $mappingStage @($record) $mappingGenerated (Join-Path $root 'invalid-map.txt') }
+        }
+    }
+    Test-Case 'MSIX mapping rejects nested roots, missing generated manifest and links' {
+        Assert-Rejected { New-MsixFileMapping $mappingStage $mappingFiles $mappingStage (Join-Path $root 'same-map.txt') }
+        $nested = Join-Path $mappingStage 'nested'
+        New-Item -ItemType Directory -Path $nested | Out-Null
+        try { Assert-Rejected { New-MsixFileMapping $mappingStage $mappingFiles $nested (Join-Path $root 'nested-map.txt') } }
+        finally { Remove-Item -LiteralPath $nested -Force }
+        $manifest = Join-Path $mappingGenerated 'AppxManifest.xml'
+        Move-Item -LiteralPath $manifest -Destination (Join-Path $root 'saved-appx.xml')
+        try { Assert-Rejected { New-MsixFileMapping $mappingStage $mappingFiles $mappingGenerated (Join-Path $root 'no-manifest-map.txt') } }
+        finally { Move-Item -LiteralPath (Join-Path $root 'saved-appx.xml') -Destination $manifest }
+        $link = Join-Path $mappingGenerated 'linked'
+        $type = if ($IsWindows) { 'Junction' } else { 'SymbolicLink' }
+        $null = New-Item -ItemType $type -Path $link -Target $mappingStage
+        try { Assert-Rejected { New-MsixFileMapping $mappingStage $mappingFiles $mappingGenerated (Join-Path $root 'linked-map.txt') } }
+        finally { Remove-Item -LiteralPath $link -Force }
+    }
+    $mappedEntries = @{}
+    foreach ($file in $mapping.Files) { $mappedEntries[$file.Path] = [IO.File]::ReadAllText($file.SourcePath) }
+    foreach ($part in @('[Content_Types].xml', 'AppxBlockMap.xml', 'AppxSignature.p7x', 'AppxMetadata/CodeIntegrity.cat')) {
+        $mappedEntries[$part] = 'unit-only SDK part, not a signed package'
+    }
+    New-NoticePackage $root 'mapped-valid' $mappedEntries
+    Test-Case 'MSIX mapped-payload guard verifies all files and permits only SDK parts' {
+        Assert-MsixMappedPayload (Join-Path $root 'mapped-valid.nupkg') $mapping.Files
+    }
+    foreach ($case in @('changed', 'extra', 'missing', 'unsafe')) {
+        Test-Case "MSIX mapped-payload guard rejects $case payload" {
+            $entries = $mappedEntries.Clone()
+            switch ($case) {
+                'changed' { $entries['unicode-ž.dll'] = 'UNIT-only mapped binary' }
+                'extra' { $entries['extra/unicode-ž.dll'] = $entries['unicode-ž.dll'] }
+                'missing' { $entries.Remove('unicode-ž.dll') }
+                'unsafe' { $entries['../escape.dll'] = 'outside payload' }
+            }
+            New-NoticePackage $root "mapped-$case" $entries
+            Assert-Rejected { Assert-MsixMappedPayload (Join-Path $root "mapped-$case.nupkg") $mapping.Files }
+        }
+    }
+    Test-Case 'MSIX mapped-payload guard rejects case-colliding archive entries' {
+        New-NoticePackage $root 'mapped-collision' $mappedEntries
+        $path = Join-Path $root 'mapped-collision.nupkg'
+        $zip = [IO.Compression.ZipFile]::Open($path, [IO.Compression.ZipArchiveMode]::Update)
+        try { $null = $zip.CreateEntry('UNICODE-Ž.DLL') }
+        finally { $zip.Dispose() }
+        Assert-Rejected { Assert-MsixMappedPayload $path $mapping.Files }
+    }
+    Test-Case 'MSIX mapped-payload guard rejects symlink entries' {
+        $path = Join-Path $root 'mapped-link.zip'
+        $zip = [IO.Compression.ZipFile]::Open($path, [IO.Compression.ZipArchiveMode]::Create)
+        try { $zip.CreateEntry('linked.dll').ExternalAttributes = (-1577123840) }
+        finally { $zip.Dispose() }
+        Assert-Rejected { Assert-MsixMappedPayload $path $mapping.Files }
+    }
+    Test-Case 'MSIX mapped-payload guard refuses incomplete or contradictory expected records' {
+        $path = Join-Path $root 'mapped-valid.nupkg'
+        Assert-Rejected { Assert-MsixMappedPayload $path @() }
+        Assert-Rejected { Assert-MsixMappedPayload $path @($mapping.Files | Where-Object Path -ne 'AppxManifest.xml') }
+        Assert-Rejected { Assert-MsixMappedPayload $path @($mapping.Files + $mapping.Files[0]) }
+        $records = @($mapping.Files | ForEach-Object {
+            [pscustomobject]@{ Path = $_.Path; Length = $_.Length; Sha256 = 'invalid digest' }
+        })
+        Assert-Rejected { Assert-MsixMappedPayload $path $records }
+    }
+    Test-Case 'MSIX builder maps the verified stage and retains SDK validation and signer verification' {
+        $builder = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/package-msix.ps1'))
+        foreach ($required in @('Assert-PublishedStage $stage $PublishManifestSha256',
+            'Assert-InstallerSource $repoRoot $manifest.SourceCommit',
+            'New-MsixFileMapping -StageRoot $stage',
+            '& $MakeAppxPath pack /f $mapping.MappingPath /p $packagePath',
+            'Assert-MsixMappedPayload -PackagePath $packagePath -Files $mapping.Files',
+            '$cms.CheckSignature($true)', '$cms.SignerInfos[0].Certificate.Thumbprint -ne $CertificateThumbprint')) {
+            if (-not $builder.Contains($required)) { throw "Missing mapped packaging guard: $required" }
+        }
+        if ($builder -match 'Copy-Item -Destination \$work -Recurse|/nv') { throw 'Payload copy or skipped SDK validation returned.' }
+    }
     Test-Case 'resolved package licence and binary are attributed' {
         $inventory = Get-Content (Join-Path $stage 'legal/redistribution-inventory.json') -Raw | ConvertFrom-Json
         if (@($inventory.Packages).Count -ne 1 -or
