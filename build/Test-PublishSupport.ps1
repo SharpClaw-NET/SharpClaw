@@ -740,6 +740,47 @@ Add-Type -ReferencedAssemblies UIAutomationClient,UIAutomationTypes,WindowsBase,
         $type::VerifyPersistentPartial()
         $type::VerifyHangingReader()
     }
+    Test-Case 'single installed Gateway configuration retains complete paths and writes only its scoped fixture' {
+        $gatePath = Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'
+        $tokens = $null; $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($gatePath, [ref]$tokens, [ref]$errors)
+        if ($errors.Count) { throw ($errors | Out-String) }
+        $assignment = $ast.Find({ param($node)
+            $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+            $node.Left.VariablePath.UserPath -eq 'configs'
+        }, $true)
+        $loop = $ast.Find({ param($node)
+            $node -is [Management.Automation.Language.ForEachStatementAst] -and
+            $node.Variable.VariablePath.UserPath -eq 'config'
+        }, $true)
+        if (-not $assignment -or -not $loop) { throw 'Missing actual installed Gateway configuration code.' }
+        $fixture = Join-Path $root 'single-gateway-configuration'
+        $package = [pscustomobject]@{ InstallLocation = (Join-Path $fixture 'package') }
+        $frontend = Join-Path $fixture 'frontend'
+        $destination = Join-Path $frontend 'config'
+        New-Item -ItemType Directory -Path (Join-Path $package.InstallLocation 'Environment'), $destination -Force | Out-Null
+        $source = Join-Path $package.InstallLocation 'Environment/.env.template'
+        $original = "RetainedSetting=preserved`nGateway__Enabled=`"false`"`n"
+        [IO.File]::WriteAllText($source, $original, [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText((Join-Path $destination '.env'), 'obsolete fixture-only active configuration')
+        . ([scriptblock]::Create($assignment.Extent.Text))
+        if ($configs.Count -ne 1 -or $configs[0] -is [string] -or
+            $configs[0].TemplatePath -cne 'Environment/.env.template' -or
+            $configs[0].DestinationRoot -cne $destination -or
+            $configs[0].Override -cne 'Gateway__Enabled="true"') {
+            throw 'A single configuration must remain one complete record, never scalar strings/characters.'
+        }
+        . ([scriptblock]::Create($loop.Extent.Text))
+        $written = [IO.File]::ReadAllText((Join-Path $destination '.env.template'))
+        if ($written -notmatch '(?m)^RetainedSetting=preserved$' -or
+            $written -notmatch '(?m)^Gateway__Enabled="true"$' -or
+            $written -match 'Gateway__Enabled="false"' -or
+            (Test-Path (Join-Path $destination '.env')) -or
+            [IO.File]::ReadAllText($source) -cne $original) {
+            throw 'Actual Gateway configuration did not preserve source/scoped output and replace only the intended setting.'
+        }
+    }
     Test-Case 'installed template evidence verifies writable contents without copying protection' {
         $gatePath = Join-Path $PSScriptRoot '../scripts/test-installed-msix.ps1'
         $gate = [IO.File]::ReadAllText($gatePath)

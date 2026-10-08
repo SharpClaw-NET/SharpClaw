@@ -754,17 +754,21 @@ try {
     # The protected provider document written by the product must remain intact.
     # Leave Gateway templates absent so its first startup also exercises seeding.
     $configs = @(
-        @('Environment/.env.template', (Join-Path $frontend 'config'), 'Gateway__Enabled="true"')
+        [pscustomobject]@{
+            TemplatePath = 'Environment/.env.template'
+            DestinationRoot = (Join-Path $frontend 'config')
+            Override = 'Gateway__Enabled="true"'
+        }
     )
     foreach ($config in $configs) {
-        New-Item -ItemType Directory -Path $config[1] -Force | Out-Null
-        $text = [IO.File]::ReadAllText((Join-Path $package.InstallLocation $config[0]))
-        if ($config[2]) {
-            $key = ($config[2] -split '=')[0]
-            $text = [regex]::Replace($text, "(?m)^$key=.*$", '') + "`n" + $config[2] + "`n"
+        New-Item -ItemType Directory -Path $config.DestinationRoot -Force | Out-Null
+        $text = [IO.File]::ReadAllText((Join-Path $package.InstallLocation $config.TemplatePath))
+        if ($config.Override) {
+            $key = ($config.Override -split '=')[0]
+            $text = [regex]::Replace($text, "(?m)^$key=.*$", '') + "`n" + $config.Override + "`n"
         }
-        [IO.File]::WriteAllText((Join-Path $config[1] '.env.template'), $text, [Text.UTF8Encoding]::new($false))
-        $active = Join-Path $config[1] '.env'
+        [IO.File]::WriteAllText((Join-Path $config.DestinationRoot '.env.template'), $text, [Text.UTF8Encoding]::new($false))
+        $active = Join-Path $config.DestinationRoot '.env'
         if (Test-Path -LiteralPath $active) { Remove-Item -LiteralPath $active -Force }
     }
     $result.ActivatedProcessId = [SharpClawInstalledProbe]::Activate($result.Aumid)
