@@ -143,6 +143,16 @@ the same inputs: the boot page clears its progress animation and reports the
 actual stopped/exited state, leaving explicit retry or exit to the user. A
 keyless provider still needs its actual backend and model to complete chat.
 
+Runtime request ingress and execution use separate actions in the same compiled
+graph: `runtime.request.receive` handles the short, repeat-safe input stage;
+`runtime.request.handler.invoke` contains the actual buffered or streamed handler.
+Both stages preserve the request's caller, features, trace and idempotency identity,
+and modules can intercept, rewrite or cancel them under their existing grants.
+Ingress does not hold its 30-second budget over a complete model response. Handler
+execution uses its existing finite budget, and the handler terminal runs at most
+once; a module-supplied result that skips a required terminal is rejected. Neither
+the kernel's action budgets nor installer-test observation limits are extended.
+
 Cold module-sidecar startup has its own bounded bootstrap budget rather than
 an action-execution deadline: `Packages__OutOfProcessSidecarStartupTimeoutSeconds`
 defaults to 120 and accepts integers from 1 to 600. Process exit and caller

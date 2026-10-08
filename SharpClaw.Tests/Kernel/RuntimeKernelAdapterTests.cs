@@ -181,6 +181,211 @@ public sealed class RuntimeKernelAdapterTests
         result.Should().Be("request-payload".Length);
     }
 
+    [TestCase(false), TestCase(true)]
+    [Parallelizable]
+    [CancelAfter(90_000)]
+    public async Task RequestHandlerOutlivesIngressDeadlineWithoutChangingKernelBudgets(bool streaming)
+    {
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new ConfigurationBuilder().Build();
+        var adapter = RuntimeKernelAdapterTestFactory.Create(configuration, [], workspace.CreateInstancePaths(),
+            new RecordingProviderClientFactory(new RecordingProviderClient()));
+        adapter.Graph.GetStandardAction(new SharpClawActionKey("runtime.request.receive"))
+            .DefaultTimeout.Should().Be(TimeSpan.FromSeconds(30));
+        adapter.Graph.GetStandardAction(new SharpClawActionKey("runtime.request.handler.invoke"))
+            .DefaultTimeout.Should().Be(TimeSpan.FromMinutes(2));
+        var context = new KernelActionExecutionContext(RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty, Guid.NewGuid(), Guid.NewGuid());
+        var calls = 0;
+        var completed = false;
+
+        async ValueTask<string> Buffered(string value, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref calls);
+            await Task.Delay(TimeSpan.FromSeconds(32), cancellationToken).ConfigureAwait(false);
+            completed = true;
+            return value;
+        }
+
+        async IAsyncEnumerable<string> Stream(string value,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref calls);
+            yield return "before";
+            await Task.Delay(TimeSpan.FromSeconds(32), cancellationToken).ConfigureAwait(false);
+            completed = true;
+            yield return value;
+        }
+
+        if (streaming)
+        {
+            var chunks = new List<string>();
+            await foreach (var chunk in adapter.RunRequestStreamAsync(context, "after", Stream,
+                TestContext.CurrentContext.CancellationToken).ConfigureAwait(false))
+            {
+                if (chunks.Count == 0)
+                    completed.Should().BeFalse("the first chunk must not wait for handler completion");
+                chunks.Add(chunk);
+            }
+            chunks.Should().Equal("before", "after");
+        }
+        else
+        {
+            (await adapter.RunRequestAsync(context, "after", Buffered,
+                TestContext.CurrentContext.CancellationToken).ConfigureAwait(false))
+                .Should().Be("after");
+        }
+
+        completed.Should().BeTrue();
+        calls.Should().Be(1);
+    }
+
+    [TestCase(false, "inspect"), TestCase(true, "inspect")]
+    [TestCase(false, "replace"), TestCase(true, "replace")]
+    [TestCase(false, "cancel-receive"), TestCase(true, "cancel-receive")]
+    [TestCase(false, "cancel-handler"), TestCase(true, "cancel-handler")]
+    [TestCase(false, "replace-handler-result"), TestCase(true, "replace-handler-result")]
+    public async Task RequestStagesPreserveModuleControlsAndCallerAuthority(bool streaming, string mode)
+    {
+        ArgumentNullException.ThrowIfNull(mode);
+        using var workspace = new TemporaryWorkspace();
+        var probe = new RequestStageProbe(mode);
+        var module = new RequestStageRegistration(probe);
+        var adapter = RuntimeKernelAdapterTestFactory.Create(new ConfigurationBuilder().Build(), [module],
+            workspace.CreateInstancePaths(), new RecordingProviderClientFactory(new RecordingProviderClient()),
+            RequestStageApprovals(module.Identity.Id));
+        var features = new ExtensionFeatureSet([
+            new ExtensionFeature("test.request", 1, "request-stage-probe", 128,
+                JsonSerializer.SerializeToElement("request-feature"))]);
+        var context = new KernelActionExecutionContext(new RequestPrincipal("request-caller", "Request caller",
+            new HashSet<string>(StringComparer.Ordinal) { "operator" }, true),
+            features, Guid.NewGuid(), Guid.NewGuid());
+        var calls = 0;
+        var chunks = new List<string>();
+        var expected = mode == "replace" ? "rewritten-request" : "request";
+        async IAsyncEnumerable<string> Stream(string value,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref calls);
+            await Task.Yield();
+            yield return value;
+        }
+        async Task Consume()
+        {
+            if (streaming)
+            {
+                await foreach (var item in adapter.RunRequestStreamAsync(context, "request", Stream).ConfigureAwait(false))
+                    chunks.Add(item);
+            }
+            else
+            {
+                var result = await adapter.RunRequestAsync(context, "request", (value, cancellationToken) =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    Interlocked.Increment(ref calls);
+                    return ValueTask.FromResult(value);
+                }).ConfigureAwait(false);
+                chunks.Add(result);
+            }
+        }
+        Func<Task> consume = Consume;
+        if (mode.StartsWith("cancel-", StringComparison.Ordinal))
+        {
+            await consume.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
+            calls.Should().Be(0);
+            chunks.Should().BeEmpty();
+        }
+        else if (mode == "replace-handler-result")
+        {
+            await consume.Should().ThrowAsync<KernelActionExecutionException>()
+                .WithMessage("*without running its terminal*").ConfigureAwait(false);
+            calls.Should().Be(0);
+            chunks.Should().BeEmpty();
+        }
+        else
+        {
+            await consume().ConfigureAwait(false);
+            calls.Should().Be(1);
+            chunks.Should().Equal(expected);
+        }
+
+        probe.Contexts.Select(item => item.ActionKey.Value).Should().Equal(mode == "cancel-receive"
+            ? ["runtime.request.receive"] : ["runtime.request.receive", "runtime.request.handler.invoke"]);
+        foreach (var observation in probe.Contexts)
+        {
+            observation.Caller.SubjectId.Should().Be(context.Caller.SubjectId);
+            observation.Caller.IsAuthenticated.Should().BeTrue();
+            observation.Caller.Roles.Should().ContainSingle().Which.Should().Be("operator");
+            observation.TraceId.Should().Be(context.TraceId);
+            observation.IdempotencyKey.Should().Be(context.IdempotencyKey);
+            observation.Features.Items.Should().ContainSingle().Which.Value.GetString().Should().Be("request-feature");
+        }
+    }
+
+    [TestCase(false), TestCase(true)]
+    public async Task RequestCancellationBeforeIngressDoesNotInvokeHandler(bool streaming)
+    {
+        using var workspace = new TemporaryWorkspace();
+        var adapter = RuntimeKernelAdapterTestFactory.Create(new ConfigurationBuilder().Build(), [],
+            workspace.CreateInstancePaths(), new RecordingProviderClientFactory(new RecordingProviderClient()));
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync().ConfigureAwait(false);
+        var context = new KernelActionExecutionContext(RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty, Guid.NewGuid(), Guid.NewGuid());
+        var calls = 0;
+        async IAsyncEnumerable<string> Stream(string value,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref calls);
+            await Task.Yield();
+            yield return value;
+        }
+        Func<Task> run = async () =>
+        {
+            if (streaming)
+            {
+                await foreach (var unused in adapter.RunRequestStreamAsync(context, "request", Stream,
+                    cancellation.Token).ConfigureAwait(false))
+                    Assert.Fail("A canceled ingress must not emit a chunk: " + unused);
+            }
+            else
+            {
+                await adapter.RunRequestAsync(context, "request", (value, _) =>
+                {
+                    Interlocked.Increment(ref calls);
+                    return ValueTask.FromResult(value);
+                }, cancellation.Token).ConfigureAwait(false);
+            }
+        };
+
+        await run.Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
+        calls.Should().Be(0);
+    }
+
+    private static KernelGraphCompileOptions RequestStageApprovals(string moduleId)
+    {
+        var grants = new Dictionary<string, ActionInterceptionCapabilities>(StringComparer.Ordinal);
+        var approvals = new List<KernelSensitiveActionApproval>();
+        foreach (var name in new[] { "runtime.request.receive", "runtime.request.handler.invoke" })
+        {
+            var key = new SharpClawActionKey(name);
+            var descriptor = KernelActionCatalog.DescriptorFor(key).ToDescriptor();
+            var types = KernelSchemaIdentity.ActionTypes(descriptor, typeof(KernelActionEnvelope), typeof(object));
+            grants.Add(name, descriptor.Capabilities);
+            approvals.Add(new KernelSensitiveActionApproval(moduleId, key, descriptor.Version,
+                types.ActionType.AssemblyQualifiedName!, types.ResultType.AssemblyQualifiedName!,
+                KernelSchemaIdentity.Action(descriptor)));
+        }
+        return new KernelGraphCompileOptions
+        {
+            ActionRegistrationCapabilityGrants = new Dictionary<string,
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>> { [moduleId] = grants },
+            SensitiveActionApprovals = approvals,
+        };
+    }
+
     [Test]
     public async Task Adapter_compiles_and_runs_the_complete_published_jobs_catalog()
     {
@@ -487,6 +692,40 @@ public sealed class RuntimeKernelAdapterTests
         {
             Stopped = true;
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RequestStageRegistration(RequestStageProbe probe) : ISharpClawModule
+    {
+        public ModuleIdentity Identity { get; } = new("request-stage-probe", "Request stage probe", "requests");
+
+        public void ConfigureServices(IServiceCollection module)
+        {
+            module.AddSingleton(probe);
+            foreach (var name in new[] { "runtime.request.receive", "runtime.request.handler.invoke" })
+                module.OnAction(new SharpClawActionKey(name)).Use<RequestStageProbe>(
+                    new HookOrdering("request-stage-probe", Timeout: TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    private sealed class RequestStageProbe(string mode) : IActionInterceptor<KernelActionEnvelope, object>
+    {
+        public List<ActionContext<KernelActionEnvelope>> Contexts { get; } = [];
+
+        public ValueTask<IActionOutcome<object>> InvokeAsync(ActionContext<KernelActionEnvelope> context,
+            IActionControl<KernelActionEnvelope, object> control, CancellationToken cancellationToken)
+        {
+            Contexts.Add(context);
+            var ingress = context.ActionKey.Value == "runtime.request.receive";
+            if ((mode == "cancel-receive" && ingress) || (mode == "cancel-handler" && !ingress))
+                return ValueTask.FromResult(control.Cancel("REQUEST_TEST_CANCELLED", "Request stage test cancellation."));
+            if (mode == "replace-handler-result" && !ingress)
+                return ValueTask.FromResult(control.ReplaceResult("must-not-accept", "Request stage test replacement."));
+            if (mode == "replace" && ingress)
+                return control.ProceedWithInputAsync(new ActionReplacement<KernelActionEnvelope>(
+                    context.Action with { Payload = "rewritten-request" }, "Request stage test input replacement."),
+                    cancellationToken);
+            return control.ProceedAsync(cancellationToken);
         }
     }
 

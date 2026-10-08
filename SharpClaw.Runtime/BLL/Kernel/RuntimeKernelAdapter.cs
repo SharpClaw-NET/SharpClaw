@@ -526,15 +526,17 @@ public sealed class RuntimeKernelAdapter :
     {
         ArgumentNullException.ThrowIfNull(executionContext);
         ArgumentNullException.ThrowIfNull(terminal);
+        var receivedRequest = await ReceiveRequestAsync(executionContext, request, cancellationToken)
+            .ConfigureAwait(false);
         var descriptor = Graph.GetStandardAction(
-            new SharpClawActionKey("runtime.request.receive"));
+            new SharpClawActionKey("runtime.request.handler.invoke"));
         var terminalState = 0;
         var terminalResult = new TaskCompletionSource<TResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
             executionContext,
             descriptor,
-            new KernelActionEnvelope(descriptor.Key, request),
+            new KernelActionEnvelope(descriptor.Key, receivedRequest),
             async (envelope, ct) =>
             {
                 if (envelope.Action.Payload is not TRequest effectiveRequest)
@@ -581,6 +583,47 @@ public sealed class RuntimeKernelAdapter :
         }
 
         return typedResult;
+    }
+
+    private async ValueTask<TRequest> ReceiveRequestAsync<TRequest>(
+        KernelActionExecutionContext executionContext,
+        TRequest request,
+        CancellationToken cancellationToken)
+    {
+        // Ingress is a short, repeat-safe stage. It must not own the lifetime
+        // of a provider request or response stream; the handler action does.
+        var descriptor = Graph.GetStandardAction(new SharpClawActionKey("runtime.request.receive"));
+        var received = false;
+        var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+            executionContext,
+            descriptor,
+            new KernelActionEnvelope(descriptor.Key, request),
+            (envelope, _) =>
+            {
+                if (envelope.Action.Payload is not TRequest effectiveRequest)
+                {
+                    throw new KernelActionExecutionException(
+                        $"Runtime request ingress returned payload type '{envelope.Action.Payload?.GetType().FullName ?? "<null>"}'.");
+                }
+
+                received = true;
+                return ValueTask.FromResult<object>(effectiveRequest);
+            },
+            Graph.ActionSnapshot,
+            cancellationToken).ConfigureAwait(false);
+
+        if (!received)
+        {
+            throw new KernelActionExecutionException(
+                "Runtime request ingress completed without running its terminal.");
+        }
+        if (result is not TRequest receivedRequest)
+        {
+            throw new KernelActionExecutionException(
+                $"Runtime request ingress returned result type '{result?.GetType().FullName ?? "<null>"}'.");
+        }
+
+        return receivedRequest;
     }
 
     async ValueTask IRuntimePersistenceActionBoundary.RunPersistenceActionAsync(
@@ -683,6 +726,9 @@ public sealed class RuntimeKernelAdapter :
         ArgumentNullException.ThrowIfNull(executionContext);
         ArgumentNullException.ThrowIfNull(terminal);
 
+        var receivedRequest = await ReceiveRequestAsync(executionContext, request, cancellationToken)
+            .ConfigureAwait(false);
+
         using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
         var channel = Channel.CreateBounded<TResult>(new BoundedChannelOptions(32)
@@ -693,7 +739,7 @@ public sealed class RuntimeKernelAdapter :
         });
         var dispatchTask = DispatchRequestStreamAsync(
             executionContext,
-            request,
+            receivedRequest,
             terminal,
             channel.Writer,
             linkedCancellation.Token);
@@ -727,13 +773,14 @@ public sealed class RuntimeKernelAdapter :
     {
         Exception? failure = null;
         var terminalCompleted = false;
+        var terminalState = 0;
         try
         {
             await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
                 executionContext,
-                Graph.GetStandardAction(new SharpClawActionKey("runtime.request.receive")),
+                Graph.GetStandardAction(new SharpClawActionKey("runtime.request.handler.invoke")),
                 new KernelActionEnvelope(
-                    new SharpClawActionKey("runtime.request.receive"),
+                    new SharpClawActionKey("runtime.request.handler.invoke"),
                     request),
                 async (envelope, ct) =>
                 {
@@ -741,6 +788,12 @@ public sealed class RuntimeKernelAdapter :
                     {
                         throw new KernelActionExecutionException(
                             $"Runtime request action returned payload type '{envelope.Action.Payload?.GetType().FullName ?? "<null>"}'.");
+                    }
+
+                    if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
+                    {
+                        throw new KernelActionExecutionException(
+                            "Runtime request stream terminal cannot execute more than once.");
                     }
 
                     await foreach (var item in terminal(effectiveRequest, ct).WithCancellation(ct))
