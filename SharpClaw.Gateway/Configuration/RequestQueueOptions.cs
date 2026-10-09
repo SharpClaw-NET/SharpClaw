@@ -5,7 +5,7 @@ namespace SharpClaw.Gateway.Configuration;
 /// requests before forwarding them to the core API.
 /// Loaded from the <c>Gateway:RequestQueue</c> configuration section.
 /// </summary>
-public sealed class RequestQueueOptions
+internal sealed class RequestQueueOptions
 {
     public const string SectionName = "Gateway:RequestQueue";
 

@@ -12,8 +12,10 @@ using SharpClaw.Tests.Kernel;
 
 namespace SharpClaw.Tests.Persistence;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class CanonicalJobsStoreTests
+internal sealed class CanonicalJobsStoreTests
 {
     [Test]
     public async Task CanonicalJobsStore_PersistsThroughAtomicGatewayAndReopens()
@@ -25,23 +27,29 @@ public sealed class CanonicalJobsStoreTests
 
         try
         {
-            await using (var db = CreateDbContext(dataDirectory))
             {
-                await db.Database.EnsureDeletedAsync();
-                await db.Database.EnsureCreatedAsync();
-                var store = new KernelJobsStore(CreateGateway(db));
+                var db = CreateDbContext(dataDirectory);
+                await using (db.ConfigureAwait(false))
+                {
+                    await db.Database.EnsureDeletedAsync().ConfigureAwait(false);
+                    await db.Database.EnsureCreatedAsync().ConfigureAwait(false);
+                    var store = new KernelJobsStore(CreateGateway(db));
 
-                await store.SaveJobAsync(job);
+                    await store.SaveJobAsync(job).ConfigureAwait(false);
+                }
             }
 
-            await using (var db = CreateDbContext(dataDirectory))
             {
-                var store = new KernelJobsStore(CreateGateway(db));
-                var recovered = await store.GetJobAsync(job.Id);
+                var db = CreateDbContext(dataDirectory);
+                await using (db.ConfigureAwait(false))
+                {
+                    var store = new KernelJobsStore(CreateGateway(db));
+                    var recovered = await store.GetJobAsync(job.Id).ConfigureAwait(false);
 
-                recovered.Should().NotBeNull();
-                recovered!.Value.Should().BeEquivalentTo(job);
-                recovered.Revision.Should().BeGreaterThan(0);
+                    recovered.Should().NotBeNull();
+                    recovered!.Value.Should().BeEquivalentTo(job);
+                    recovered.Revision.Should().BeGreaterThan(0);
+                }
             }
         }
         finally
@@ -140,7 +148,7 @@ public sealed class CanonicalJobsStoreTests
             Func<CancellationToken, ValueTask<int>> terminal,
             CancellationToken cancellationToken = default)
         {
-            _ = await terminal(cancellationToken);
+            _ = await terminal(cancellationToken).ConfigureAwait(false);
         }
     }
 

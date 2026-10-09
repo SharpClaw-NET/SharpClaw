@@ -4,12 +4,12 @@ using Microsoft.Extensions.Logging;
 
 namespace SharpClaw.Runtime.Host;
 
-public interface IStorageTelemetry
+internal interface IStorageTelemetry
 {
     void Record(ScopedStorageTelemetryEvent telemetryEvent);
 }
 
-public sealed record ScopedStorageTelemetryEvent(
+internal sealed record ScopedStorageTelemetryEvent(
     string SourceId,
     string StorageName,
     string Operation,
@@ -19,7 +19,7 @@ public sealed record ScopedStorageTelemetryEvent(
     long OutputBytes,
     int RecordCount);
 
-public sealed class ScopedStorageTelemetry(
+internal sealed class ScopedStorageTelemetry(
     ILogger<ScopedStorageTelemetry> logger) : IStorageTelemetry
 {
     private static readonly Meter Meter = new("SharpClaw.Registrations.Storage", "1.0.0");

@@ -9,7 +9,7 @@ namespace SharpClaw.Gateway.Configuration;
 /// SharpClaw supplies only the Gateway directory and its existing shared
 /// installation-key location; the package owns all file behavior.
 /// </summary>
-public static class GatewayEnvironment
+internal static class GatewayEnvironment
 {
     public static IConfigurationBuilder AddGatewayEnvironment(
         this IConfigurationBuilder builder,

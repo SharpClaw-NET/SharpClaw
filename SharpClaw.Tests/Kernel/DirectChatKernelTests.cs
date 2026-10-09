@@ -7,7 +7,9 @@ using SharpClaw.Runtime.BLL.Kernel;
 
 namespace SharpClaw.Tests.Kernel;
 
-public sealed class DirectChatKernelTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
+internal sealed class DirectChatKernelTests
 {
     [TestCase(null)]
     [TestCase("")]
@@ -48,7 +50,7 @@ public sealed class DirectChatKernelTests
             continueRelease.Task.GetAwaiter().GetResult();
         });
         var conversationId = Guid.NewGuid();
-        var first = await gate.EnterAsync(conversationId, CancellationToken.None);
+        var first = await gate.EnterAsync(conversationId, CancellationToken.None).ConfigureAwait(false);
 
         var releaseThread = new Thread(() => first.DisposeAsync().GetAwaiter().GetResult())
         {
@@ -57,14 +59,15 @@ public sealed class DirectChatKernelTests
         releaseThread.Start();
         try
         {
-            await releaseEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await releaseEntered.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             var second = Task.Run(async () =>
-                await gate.EnterAsync(conversationId, CancellationToken.None));
+                await gate.EnterAsync(conversationId, CancellationToken.None).ConfigureAwait(false));
             second.IsCompleted.Should().BeFalse();
 
             continueRelease.SetResult();
             releaseThread.Join(TimeSpan.FromSeconds(5)).Should().BeTrue();
-            await using var secondLease = await second;
+            var secondLease = await second.ConfigureAwait(false);
+            await using var secondLeaseAsyncDisposal = secondLease.ConfigureAwait(false);
             gate.ActiveEntryCount.Should().Be(1);
         }
         finally
@@ -89,7 +92,7 @@ public sealed class DirectChatKernelTests
             new FixedChatProfileResolver(new ChatProfile("test", Guid.NewGuid(), "test-model")),
             new InMemoryConversationStore());
 
-        var result = await kernel.RunAsync(new ChatTurnInput("hello"));
+        var result = await kernel.RunAsync(new ChatTurnInput("hello")).ConfigureAwait(false);
 
         result.ConversationId.Should().Be(conversationId);
         result.Completion.Content.Should().Be("reply");
@@ -117,8 +120,8 @@ public sealed class DirectChatKernelTests
             ToolAwareMessage.User("hello"),
         ];
 
-        await transport.CompleteAsync(request, messages, CancellationToken.None);
-        await foreach (var _ in transport.StreamAsync(request, messages, CancellationToken.None))
+        await transport.CompleteAsync(request, messages, CancellationToken.None).ConfigureAwait(false);
+        await foreach (var _ in transport.StreamAsync(request, messages, CancellationToken.None).ConfigureAwait(false))
         {
         }
 
@@ -148,13 +151,13 @@ public sealed class DirectChatKernelTests
 
         var result = await kernel.RunAsync(new ChatTurnInput(
             "hello",
-            explicitConversation));
+            explicitConversation)).ConfigureAwait(false);
 
         result.ConversationId.Should().Be(explicitConversation);
         var history = await store.LoadHistoryAsync(
             explicitConversation,
             TestOperationContext(),
-            CancellationToken.None);
+            CancellationToken.None).ConfigureAwait(false);
         history.Should().HaveCount(2);
         history[0].Role.Should().Be("user");
         history[1].Role.Should().Be("assistant");
@@ -177,7 +180,7 @@ public sealed class DirectChatKernelTests
             store);
         var chunks = new List<ChatStreamChunk>();
 
-        await foreach (var chunk in kernel.StreamAsync(new ChatTurnInput("stream hello")))
+        await foreach (var chunk in kernel.StreamAsync(new ChatTurnInput("stream hello")).ConfigureAwait(false))
             chunks.Add(chunk);
 
         chunks.Should().HaveCount(2);
@@ -189,7 +192,7 @@ public sealed class DirectChatKernelTests
         var history = await store.LoadHistoryAsync(
             conversationId,
             TestOperationContext(),
-            CancellationToken.None);
+            CancellationToken.None).ConfigureAwait(false);
         history.Select(message => $"{message.Role}:{message.Content}")
             .Should()
             .Equal("user:stream hello", "assistant:reply");
@@ -215,14 +218,14 @@ public sealed class DirectChatKernelTests
             kernel.StreamAsync(new ChatTurnInput("cancel stream"), cancellation.Token),
             cancellation.Token);
 
-        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         cancellation.Cancel();
 
-        Assert.ThrowsAsync<OperationCanceledException>(async () => await consume);
+        Assert.ThrowsAsync<OperationCanceledException>(async () => await consume.ConfigureAwait(false));
         (await store.LoadHistoryAsync(
             conversationId,
             TestOperationContext(),
-            CancellationToken.None)).Should().BeEmpty();
+            CancellationToken.None).ConfigureAwait(false)).Should().BeEmpty();
     }
 
     [Test]
@@ -242,14 +245,14 @@ public sealed class DirectChatKernelTests
             new InMemoryConversationStore());
 
         var first = kernel.RunAsync(new ChatTurnInput("first")).AsTask();
-        await provider.FirstCallStarted.Task;
+        await provider.FirstCallStarted.Task.ConfigureAwait(false);
 
         var second = kernel.RunAsync(new ChatTurnInput("second")).AsTask();
-        await resolver.SecondResolutionStarted.Task;
+        await resolver.SecondResolutionStarted.Task.ConfigureAwait(false);
         provider.SecondCallStarted.Should().BeFalse();
 
         provider.ReleaseFirstCall();
-        await Task.WhenAll(first, second);
+        await Task.WhenAll(first, second).ConfigureAwait(false);
 
         provider.Requests.Should().HaveCount(2);
         provider.Requests[1].Select(message => $"{message.Role}:{message.Content}")
@@ -374,7 +377,7 @@ public sealed class DirectChatKernelTests
             if (callNumber == 1)
             {
                 FirstCallStarted.TrySetResult();
-                await _releaseFirstCall.Task.WaitAsync(ct);
+                await _releaseFirstCall.Task.WaitAsync(ct).ConfigureAwait(false);
             }
 
             return new ChatCompletionResult
@@ -409,7 +412,7 @@ public sealed class DirectChatKernelTests
             var cancellationObserved = new TaskCompletionSource();
             using var registration = ct.Register(
                 () => cancellationObserved.TrySetCanceled(ct));
-            await cancellationObserved.Task;
+            await cancellationObserved.Task.ConfigureAwait(false);
             return new ChatCompletionResult
             {
                 Content = "unreachable",

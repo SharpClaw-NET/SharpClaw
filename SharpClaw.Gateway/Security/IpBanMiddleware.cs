@@ -5,7 +5,7 @@ namespace SharpClaw.Gateway.Security;
 /// <summary>
 /// Rejects requests from banned IPs with <c>403 Forbidden</c>.
 /// </summary>
-public sealed class IpBanMiddleware(RequestDelegate next, IpBanService banService)
+internal sealed class IpBanMiddleware(RequestDelegate next, IpBanService banService)
 {
     public async Task InvokeAsync(HttpContext context)
     {
@@ -14,10 +14,10 @@ public sealed class IpBanMiddleware(RequestDelegate next, IpBanService banServic
         if (banService.IsBanned(ip))
         {
             await GatewayErrors.WriteAsync(context, StatusCodes.Status403Forbidden,
-                "Forbidden.", GatewayErrors.IpBanned);
+                "Forbidden.", GatewayErrors.IpBanned).ConfigureAwait(false);
             return;
         }
 
-        await next(context);
+        await next(context).ConfigureAwait(false);
     }
 }

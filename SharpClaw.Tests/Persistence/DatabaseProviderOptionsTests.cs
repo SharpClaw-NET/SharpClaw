@@ -17,8 +17,10 @@ using SharpClaw.Runtime.INF.Persistence.Registrations;
 
 namespace SharpClaw.Tests.Persistence;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class DatabaseProviderOptionsTests
+internal sealed class DatabaseProviderOptionsTests
 {
     [Test]
     public void FromConfiguration_PreservesAnArbitraryModuleProviderKey()

@@ -9,7 +9,7 @@ namespace SharpClaw.Services;
 /// HTTP client that communicates with the selected SharpClaw internal API
 /// and resolves its per-session API key from backend discovery metadata.
 /// </summary>
-public sealed class SharpClawApiClient : IDisposable
+public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
 {
     private readonly HttpClient _http;
     private readonly object _targetLock = new();
@@ -96,16 +96,16 @@ public sealed class SharpClawApiClient : IDisposable
                 }
                 return ValueTask.CompletedTask;
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(true);
     }
 
     public async Task<HttpResponseMessage> GetAsync(
         string path, CancellationToken ct = default)
-        => await SendClientCommandAsync("GET", path, null, responseHeadersRead: false, ct);
+        => await SendClientCommandAsync("GET", path, null, responseHeadersRead: false, ct).ConfigureAwait(true);
 
     public async Task<HttpResponseMessage> PostAsync(
         string path, HttpContent? content, CancellationToken ct = default)
-        => await SendClientCommandAsync("POST", path, content, responseHeadersRead: false, ct);
+        => await SendClientCommandAsync("POST", path, content, responseHeadersRead: false, ct).ConfigureAwait(true);
 
     public Task ConsumeStreamAsync(
         string method,
@@ -138,8 +138,8 @@ public sealed class SharpClawApiClient : IDisposable
                 using var response = await _http.SendAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
-                    actionToken);
-                await consume(response, actionToken);
+                    actionToken).ConfigureAwait(true);
+                await consume(response, actionToken).ConfigureAwait(true);
                 return true;
             },
             cancellationToken).AsTask();
@@ -147,11 +147,11 @@ public sealed class SharpClawApiClient : IDisposable
 
     public async Task<HttpResponseMessage> PutAsync(
         string path, HttpContent? content, CancellationToken ct = default)
-        => await SendClientCommandAsync("PUT", path, content, responseHeadersRead: false, ct);
+        => await SendClientCommandAsync("PUT", path, content, responseHeadersRead: false, ct).ConfigureAwait(true);
 
     public async Task<HttpResponseMessage> DeleteAsync(
         string path, CancellationToken ct = default)
-        => await SendClientCommandAsync("DELETE", path, null, responseHeadersRead: false, ct);
+        => await SendClientCommandAsync("DELETE", path, null, responseHeadersRead: false, ct).ConfigureAwait(true);
 
     /// <summary>
     /// GET + deserialize a JSON list, swallowing errors and returning <c>null</c> on failure.
@@ -160,11 +160,11 @@ public sealed class SharpClawApiClient : IDisposable
     {
         try
         {
-            using var resp = await GetAsync(path, ct);
+            using var resp = await GetAsync(path, ct).ConfigureAwait(true);
             if (resp.IsSuccessStatusCode)
             {
-                using var s = await resp.Content.ReadAsStreamAsync(ct);
-                return await JsonSerializer.DeserializeAsync<List<T>>(s, json, ct);
+                using var s = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(true);
+                return await JsonSerializer.DeserializeAsync<List<T>>(s, json, ct).ConfigureAwait(true);
             }
         }
         catch { /* swallow */ }
@@ -190,9 +190,9 @@ public sealed class SharpClawApiClient : IDisposable
                     targetBaseUri,
                     invocation.EffectiveRequestTarget);
                 AttachApiKey(request, targetBaseUri);
-                return await _http.SendAsync(request, actionToken);
+                return await _http.SendAsync(request, actionToken).ConfigureAwait(true);
             },
-            ct);
+            ct).ConfigureAwait(true);
     }
 
     private Task<HttpResponseMessage> SendClientCommandAsync(
@@ -224,7 +224,7 @@ public sealed class SharpClawApiClient : IDisposable
                     responseHeadersRead
                         ? HttpCompletionOption.ResponseHeadersRead
                         : HttpCompletionOption.ResponseContentRead,
-                    actionToken);
+                    actionToken).ConfigureAwait(true);
             },
             cancellationToken).AsTask();
     }
@@ -243,7 +243,7 @@ public sealed class SharpClawApiClient : IDisposable
         {
             try
             {
-                var response = await GetAsync("/ping", cts.Token);
+                var response = await GetAsync("/ping", cts.Token).ConfigureAwait(true);
                 if (response.IsSuccessStatusCode)
                     return;
 
@@ -251,13 +251,13 @@ public sealed class SharpClawApiClient : IDisposable
                 // and written a new key to disk.  Clear the cache so the
                 // next attempt re-reads the file.
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                    await InvalidateApiKeyAsync(cts.Token);
+                    await InvalidateApiKeyAsync(cts.Token).ConfigureAwait(true);
             }
             catch (HttpRequestException) { }
-            catch (InvalidOperationException) { await InvalidateApiKeyAsync(cts.Token); }
+            catch (InvalidOperationException) { await InvalidateApiKeyAsync(cts.Token).ConfigureAwait(true); }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested) { }
 
-            await Task.Delay(250, cts.Token);
+            await Task.Delay(250, cts.Token).ConfigureAwait(true);
         }
 
         throw new TimeoutException(
@@ -339,7 +339,7 @@ public sealed class SharpClawApiClient : IDisposable
                 }
                 return ValueTask.CompletedTask;
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(true);
     }
 
     public void Dispose() =>
@@ -357,7 +357,7 @@ public sealed class SharpClawApiClient : IDisposable
                 if (_ownsHttp)
                     _http.Dispose();
                 return ValueTask.CompletedTask;
-            });
+            }).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -384,7 +384,7 @@ public sealed class SharpClawApiClient : IDisposable
             HttpResponseMessage response;
             try
             {
-                response = await base.SendAsync(request, cancellationToken);
+                response = await base.SendAsync(request, cancellationToken).ConfigureAwait(true);
             }
             catch (Exception ex)
             {

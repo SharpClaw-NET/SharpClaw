@@ -80,7 +80,7 @@ internal static class ClientActionServiceSet
             CancellationToken cancellationToken)
         {
             _contextSink?.Observe(context);
-            return await control.ProceedAsync(cancellationToken);
+            return await control.ProceedAsync(cancellationToken).ConfigureAwait(true);
         }
     }
 }

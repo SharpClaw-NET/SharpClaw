@@ -1,6 +1,6 @@
 namespace SharpClaw.Runtime.Host;
 
-public static class RuntimeLauncher
+internal static class RuntimeLauncher
 {
     internal const string SidecarModeArgument = "--sharpclaw-sidecar-host";
 
@@ -11,9 +11,10 @@ public static class RuntimeLauncher
         ArgumentNullException.ThrowIfNull(args);
         if (args.Count == 1 && string.Equals(args[0], SidecarModeArgument, StringComparison.Ordinal))
         {
-            await using var sidecar = await SharpClaw.SidecarHost.OutOfProcess.OutOfProcessModuleServer
-                .CreateAsync([], cancellationToken);
-            await sidecar.RunAsync(cancellationToken);
+            var sidecar = await SharpClaw.SidecarHost.OutOfProcess.OutOfProcessModuleServer
+                .CreateAsync([], cancellationToken).ConfigureAwait(false);
+            await using var sidecarAsyncDisposal = sidecar.ConfigureAwait(false);
+            await sidecar.RunAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
 

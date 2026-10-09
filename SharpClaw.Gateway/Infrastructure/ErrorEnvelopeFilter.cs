@@ -7,7 +7,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 /// Global exception filter that wraps unhandled controller exceptions
 /// in the standard gateway error envelope.
 /// </summary>
-public sealed class ErrorEnvelopeFilter(
+internal sealed class ErrorEnvelopeFilter(
     ILogger<ErrorEnvelopeFilter> logger) : IExceptionFilter
 {
     public void OnException(ExceptionContext context)

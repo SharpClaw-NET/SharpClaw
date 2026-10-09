@@ -3,8 +3,10 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Gateway;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public class GatewayInstanceLifecycleTests
+internal class GatewayInstanceLifecycleTests
 {
     [Test]
     public void DiscoveryLease_WhenPublishedForGateway_WritesGatewayDiscoveryEntry()

@@ -178,12 +178,12 @@ public sealed class GatewayProcessManager : IDisposable
     public async Task<bool> IsGatewayReachableAsync(CancellationToken ct = default)
     {
         if (_gatewayReachabilityProbe is not null)
-            return await _gatewayReachabilityProbe(ct);
+            return await _gatewayReachabilityProbe(ct).ConfigureAwait(true);
 
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            var response = await http.GetAsync($"{ClientUrl}/healthz", ct);
+            var response = await http.GetAsync($"{ClientUrl}/healthz", ct).ConfigureAwait(true);
             return response.IsSuccessStatusCode;
         }
         catch
@@ -213,7 +213,7 @@ public sealed class GatewayProcessManager : IDisposable
             return;
         }
 
-        if (await IsGatewayReachableAsync(ct))
+        if (await IsGatewayReachableAsync(ct).ConfigureAwait(true))
         {
             IsExternal = true;
             return;

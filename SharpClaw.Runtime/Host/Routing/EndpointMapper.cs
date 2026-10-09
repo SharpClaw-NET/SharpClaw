@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 
 namespace SharpClaw.Runtime.Host.Routing;
 
-public static class EndpointMapper
+internal static class EndpointMapper
 {
     /// <summary>
     /// Scans all static handler classes decorated with <see cref="RouteGroupAttribute"/>
@@ -92,11 +92,11 @@ public static class EndpointMapper
 
                     _ = attr.HttpMethod switch
                     {
-                        "GET"    => group.MapGet(attr.Pattern, requestDelegate),
-                        "POST"   => group.MapPost(attr.Pattern, requestDelegate),
-                        "PUT"    => group.MapPut(attr.Pattern, requestDelegate),
+                        "GET" => group.MapGet(attr.Pattern, requestDelegate),
+                        "POST" => group.MapPost(attr.Pattern, requestDelegate),
+                        "PUT" => group.MapPut(attr.Pattern, requestDelegate),
                         "DELETE" => group.MapDelete(attr.Pattern, requestDelegate),
-                        "PATCH"  => group.MapPatch(attr.Pattern, requestDelegate),
+                        "PATCH" => group.MapPatch(attr.Pattern, requestDelegate),
                         _ => throw new NotSupportedException(
                             $"HTTP method '{attr.HttpMethod}' is not supported.")
                     };

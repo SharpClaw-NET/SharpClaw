@@ -2,8 +2,10 @@ using LlamaSharp.ToolCallEnvelopes;
 
 namespace SharpClaw.Tests.Providers.LlamaSharp;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public class LlamaSharpRegexToGrammarTests
+internal class LlamaSharpRegexToGrammarTests
 {
     [Test]
     public void TryConvert_Literals_Succeeds()
@@ -63,8 +65,10 @@ public class LlamaSharpRegexToGrammarTests
     }
 }
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public class LlamaSharpStringFormatGrammarsTests
+internal class LlamaSharpStringFormatGrammarsTests
 {
     [TestCase("uuid")]
     [TestCase("email")]

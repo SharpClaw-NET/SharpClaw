@@ -33,7 +33,7 @@ internal static class GatewayProxyEndpoints
 
         if (context.WebSockets.IsWebSocketRequest)
         {
-            await client.ForwardWebSocketAsync(context, pathAndQuery, cancellationToken);
+            await client.ForwardWebSocketAsync(context, pathAndQuery, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -54,7 +54,7 @@ internal static class GatewayProxyEndpoints
                     new System.Net.Http.Headers.MediaTypeHeaderValue(context.Request.ContentType);
         }
 
-        using var response = await client.SendRawAsync(request, cancellationToken);
+        using var response = await client.SendRawAsync(request, cancellationToken).ConfigureAwait(false);
         context.Response.StatusCode = (int)response.StatusCode;
         foreach (var header in response.Headers)
             context.Response.Headers[header.Key] = header.Value.ToArray();
@@ -63,6 +63,6 @@ internal static class GatewayProxyEndpoints
         context.Response.Headers.Remove("transfer-encoding");
         if (response.Content.Headers.ContentType is { } contentType)
             context.Response.ContentType = contentType.ToString();
-        await response.Content.CopyToAsync(context.Response.Body, cancellationToken);
+        await response.Content.CopyToAsync(context.Response.Body, cancellationToken).ConfigureAwait(false);
     }
 }

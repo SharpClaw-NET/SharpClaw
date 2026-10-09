@@ -67,13 +67,13 @@ public sealed class RuntimeTransactionActionRunner(
             CancellationToken actionCancellationToken)
         {
             if (Interlocked.CompareExchange(ref terminalStarted, 1, 0) != 0)
-                return await completion.Task;
+                return await completion.Task.ConfigureAwait(false);
 
             try
             {
                 var transaction = await db.Database.BeginTransactionAsync(
                     IsolationLevel.Serializable,
-                    actionCancellationToken);
+                    actionCancellationToken).ConfigureAwait(false);
                 var result = new RuntimeTransactionActionResult(transaction);
                 completion.TrySetResult(result);
                 return result;
@@ -91,7 +91,7 @@ public sealed class RuntimeTransactionActionRunner(
                 IsolationLevel.Serializable,
                 HasExistingTransaction: false),
             BeginTerminalAsync,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return result.Transaction;
     }
 
@@ -129,11 +129,11 @@ public sealed class RuntimeTransactionActionRunner(
             CancellationToken actionCancellationToken)
         {
             if (Interlocked.CompareExchange(ref terminalStarted, 1, 0) != 0)
-                return await completion.Task;
+                return await completion.Task.ConfigureAwait(false);
 
             try
             {
-                await operation(transaction, actionCancellationToken);
+                await operation(transaction, actionCancellationToken).ConfigureAwait(false);
                 var result = RuntimeTransactionActionResult.Completed;
                 completion.TrySetResult(result);
                 return result;
@@ -151,6 +151,6 @@ public sealed class RuntimeTransactionActionRunner(
                 IsolationLevel: null,
                 HasExistingTransaction: true),
             OperationTerminalAsync,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 }

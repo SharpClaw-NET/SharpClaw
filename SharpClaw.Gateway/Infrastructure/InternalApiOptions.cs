@@ -3,7 +3,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 /// <summary>
 /// Configuration for connecting to the internal SharpClaw Runtime Host.
 /// </summary>
-public sealed class InternalApiOptions
+internal sealed class InternalApiOptions
 {
     public const string SectionName = "InternalApi";
 

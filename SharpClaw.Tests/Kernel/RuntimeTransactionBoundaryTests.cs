@@ -4,8 +4,10 @@ using SharpClaw.Runtime.BLL.Kernel;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeTransactionBoundaryTests
+internal sealed class RuntimeTransactionBoundaryTests
 {
     [Test]
     public void Transaction_manifest_matches_the_published_catalog()

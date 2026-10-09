@@ -31,22 +31,22 @@ internal static class RuntimeCliSession
                 RuntimeCliActionCatalog.Parse,
                 new RuntimeCliActionInvocation("parse", null, rawArguments.Count),
                 _ => ValueTask.FromResult(RuntimeCliCommandLine.Parse(rawArguments)),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
             command = await runtimeKernel.RunCliActionAsync(
                 context,
                 RuntimeCliActionCatalog.CommandSelect,
                 new RuntimeCliActionInvocation("command-select", command.Name, command.Arguments.Count),
                 _ => ValueTask.FromResult(command),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
         }
         catch (KernelActionCancelledException)
         {
-            await RunCancellationAsync(runtimeKernel, context, error);
+            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
             return 130;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await RunCancellationAsync(runtimeKernel, context, error);
+            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
             return 130;
         }
         catch (Exception exception)
@@ -55,7 +55,7 @@ internal static class RuntimeCliSession
                 runtimeKernel,
                 context,
                 error,
-                exception);
+                exception).ConfigureAwait(false);
         }
 
         RuntimeCliResult result;
@@ -72,7 +72,7 @@ internal static class RuntimeCliSession
                     applications,
                     context,
                     cancellation),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             if (!result.Succeeded)
             {
@@ -84,17 +84,17 @@ internal static class RuntimeCliSession
                     {
                         return ValueTask.FromResult(true);
                     },
-                    CancellationToken.None);
+                    CancellationToken.None).ConfigureAwait(false);
             }
         }
         catch (KernelActionCancelledException)
         {
-            await RunCancellationAsync(runtimeKernel, context, error);
+            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
             return 130;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await RunCancellationAsync(runtimeKernel, context, error);
+            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
             return 130;
         }
         catch (Exception exception)
@@ -103,7 +103,7 @@ internal static class RuntimeCliSession
                 runtimeKernel,
                 context,
                 error,
-                exception);
+                exception).ConfigureAwait(false);
         }
 
         try
@@ -113,23 +113,23 @@ internal static class RuntimeCliSession
                 RuntimeCliActionCatalog.OutputWrite,
                 new RuntimeCliActionInvocation("output-write", command.Name, command.Arguments.Count),
                 _ => WriteOutputAsync(result, output, error),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             return await runtimeKernel.RunCliActionAsync(
                 context,
                 RuntimeCliActionCatalog.Complete,
                 new RuntimeCliActionInvocation("complete", command.Name, command.Arguments.Count),
                 _ => ValueTask.FromResult(result.ExitCode),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
         }
         catch (KernelActionCancelledException)
         {
-            await RunCancellationAsync(runtimeKernel, context, error);
+            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
             return 130;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await RunCancellationAsync(runtimeKernel, context, error);
+            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
             return 130;
         }
         catch (Exception exception)
@@ -138,7 +138,7 @@ internal static class RuntimeCliSession
                 runtimeKernel,
                 context,
                 error,
-                exception);
+                exception).ConfigureAwait(false);
         }
     }
 
@@ -157,14 +157,14 @@ internal static class RuntimeCliSession
                 "SharpClaw Runtime CLI\n  --cli help\n  --cli chat <message>\n");
         }
         if (command.Name == "chat")
-            return await ExecuteChatAsync(command, kernel, cancellationToken);
+            return await ExecuteChatAsync(command, kernel, cancellationToken).ConfigureAwait(false);
 
         var registrationResult = await applications.TryInvokeCliAsync(
             command.Name,
             command.Arguments,
             runtimeKernel,
             executionContext,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return registrationResult is null
             ? RuntimeCliResult.Failure(
                 $"Unknown Runtime CLI command '{command.Name}'. Use '--cli help'.")
@@ -200,7 +200,7 @@ internal static class RuntimeCliSession
 
         var result = await kernel.RunAsync(
             new ChatTurnInput(string.Join(' ', command.Arguments)),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return RuntimeCliResult.Success(
             result.Completion.Content ?? string.Empty);
     }
@@ -211,9 +211,9 @@ internal static class RuntimeCliSession
         TextWriter error)
     {
         if (result.Output.Length > 0)
-            await output.WriteAsync(result.Output);
+            await output.WriteAsync(result.Output).ConfigureAwait(false);
         if (result.Error is not null)
-            await error.WriteLineAsync(result.Error);
+            await error.WriteLineAsync(result.Error).ConfigureAwait(false);
         return true;
     }
 
@@ -228,7 +228,7 @@ internal static class RuntimeCliSession
             RuntimeCliActionCatalog.Fail,
             new RuntimeCliActionInvocation("fail", null, 0, exception.GetType().Name),
             _ => ValueTask.FromResult(true),
-            CancellationToken.None);
+            CancellationToken.None).ConfigureAwait(false);
         await runtimeKernel.RunCliActionAsync(
             context,
             RuntimeCliActionCatalog.OutputWrite,
@@ -238,7 +238,7 @@ internal static class RuntimeCliSession
                 error.WriteLine("The Runtime CLI command failed.");
                 return ValueTask.FromResult(true);
             },
-            CancellationToken.None);
+            CancellationToken.None).ConfigureAwait(false);
         return 1;
     }
 
@@ -252,7 +252,7 @@ internal static class RuntimeCliSession
             RuntimeCliActionCatalog.Cancel,
             new RuntimeCliActionInvocation("cancel", null, 0),
             _ => ValueTask.FromResult(true),
-            CancellationToken.None);
+            CancellationToken.None).ConfigureAwait(false);
         await runtimeKernel.RunCliActionAsync(
             context,
             RuntimeCliActionCatalog.OutputWrite,
@@ -262,7 +262,7 @@ internal static class RuntimeCliSession
                 error.WriteLine("The Runtime CLI command was cancelled.");
                 return ValueTask.FromResult(true);
             },
-            CancellationToken.None);
+            CancellationToken.None).ConfigureAwait(false);
     }
 
     private sealed record RuntimeCliResult(

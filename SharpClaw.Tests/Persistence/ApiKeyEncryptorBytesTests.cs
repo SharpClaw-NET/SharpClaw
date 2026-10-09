@@ -4,8 +4,10 @@ using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Tests.Persistence;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public class ApiKeyEncryptorBytesTests
+internal class ApiKeyEncryptorBytesTests
 {
     private byte[] _key = null!;
 

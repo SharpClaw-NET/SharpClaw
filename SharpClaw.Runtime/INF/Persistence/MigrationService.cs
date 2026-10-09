@@ -23,13 +23,13 @@ public sealed class MigrationService(
     /// </summary>
     public async Task<MigrationResult> MigrateAsync(CancellationToken ct = default)
     {
-        if (!await _singleRun.WaitAsync(0, ct))
+        if (!await _singleRun.WaitAsync(0, ct).ConfigureAwait(false))
             return MigrationResult.AlreadyRunning();
 
         try
         {
             logger.LogWarning("Migration requested. Draining in-flight requests...");
-            using var migrationLock = await gate.EnterMigrationAsync(ct);
+            using var migrationLock = await gate.EnterMigrationAsync(ct).ConfigureAwait(false);
             logger.LogWarning("All requests drained. Applying migrations...");
 
             using var scope = scopeFactory.CreateScope();
@@ -37,12 +37,12 @@ public sealed class MigrationService(
             if (!db.Database.IsRelational())
                 return MigrationResult.NoPending();
 
-            var pending = (await db.Database.GetPendingMigrationsAsync(ct)).ToList();
+            var pending = (await db.Database.GetPendingMigrationsAsync(ct).ConfigureAwait(false)).ToList();
 
             if (pending.Count == 0)
                 return MigrationResult.NoPending();
 
-            await db.Database.MigrateAsync(ct);
+            await db.Database.MigrateAsync(ct).ConfigureAwait(false);
             logger.LogWarning("Applied {Count} migration(s): {Names}",
                 pending.Count, string.Join(", ", pending));
 
@@ -66,8 +66,8 @@ public sealed class MigrationService(
         if (!db.Database.IsRelational())
             return new(gate.State, [], []);
 
-        var applied = (await db.Database.GetAppliedMigrationsAsync(ct)).ToList();
-        var pending = (await db.Database.GetPendingMigrationsAsync(ct)).ToList();
+        var applied = (await db.Database.GetAppliedMigrationsAsync(ct).ConfigureAwait(false)).ToList();
+        var pending = (await db.Database.GetPendingMigrationsAsync(ct).ConfigureAwait(false)).ToList();
         return new(gate.State, applied, pending);
     }
 }

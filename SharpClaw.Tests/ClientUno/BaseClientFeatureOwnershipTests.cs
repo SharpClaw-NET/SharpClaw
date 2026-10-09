@@ -4,8 +4,10 @@ using SharpClaw.Presentation;
 
 namespace SharpClaw.Tests.ClientUno;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class BaseClientFeatureOwnershipTests
+internal sealed class BaseClientFeatureOwnershipTests
 {
     [Test]
     public void Base_client_does_not_define_permission_metadata_controls_or_endpoint_reader()

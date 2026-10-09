@@ -10,8 +10,10 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeProviderBoundaryTests
+internal sealed class RuntimeProviderBoundaryTests
 {
     [Test]
     public void Provider_transport_calls_are_confined_to_the_terminal_adapter()
@@ -61,7 +63,7 @@ public sealed class RuntimeProviderBoundaryTests
         RuntimeProviderActionManifest.Required.Should().OnlyContain(
             key => adapter.Graph.ContainsAction(key));
 
-        var buffered = await adapter.Kernel.RunAsync(new ChatTurnInput("buffered"));
+        var buffered = await adapter.Kernel.RunAsync(new ChatTurnInput("buffered")).ConfigureAwait(false);
         buffered.Completion.Content.Should().Be("provider response");
 
         var bufferedActions = probe.Observations
@@ -82,7 +84,7 @@ public sealed class RuntimeProviderBoundaryTests
         probe.Observations.Clear();
         provider.Reset();
         var stream = new List<ChatStreamChunk>();
-        await foreach (var chunk in adapter.Kernel.StreamAsync(new ChatTurnInput("stream")))
+        await foreach (var chunk in adapter.Kernel.StreamAsync(new ChatTurnInput("stream")).ConfigureAwait(false))
             stream.Add(chunk);
 
         stream.Should().ContainSingle(chunk => chunk.IsFinished);
@@ -118,7 +120,7 @@ public sealed class RuntimeProviderBoundaryTests
             new ChatTurnInput("second", Guid.NewGuid()),
             (input, ct) => adapter.Kernel.RunAsync(input, ct));
 
-        await Task.WhenAll(first.AsTask(), second.AsTask());
+        await Task.WhenAll(first.AsTask(), second.AsTask()).ConfigureAwait(false);
 
         probe.Observations
             .Where(static observation => observation.Action.StartsWith("provider.", StringComparison.Ordinal))
@@ -152,7 +154,7 @@ public sealed class RuntimeProviderBoundaryTests
             provider,
             mode == "repeat" ? new MatchingRepeatEvidenceAuthority() : null);
 
-        var result = await adapter.Kernel.RunAsync(new ChatTurnInput("controlled"));
+        var result = await adapter.Kernel.RunAsync(new ChatTurnInput("controlled")).ConfigureAwait(false);
 
         result.Completion.Content.Should().Be("provider response");
         provider.TransportCalls.Should().Be(1);
@@ -176,11 +178,11 @@ public sealed class RuntimeProviderBoundaryTests
         var adapter = CreateAdapter(workspace, probe, provider);
 
         Func<Task> run = async () => await adapter.Kernel.RunAsync(
-            new ChatTurnInput("blocked", Guid.NewGuid()));
+            new ChatTurnInput("blocked", Guid.NewGuid())).ConfigureAwait(false);
         if (mode == "cancel")
-            await run.Should().ThrowAsync<KernelActionCancelledException>();
+            await run.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         else
-            await run.Should().ThrowAsync<KernelActionFailedException>();
+            await run.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
 
         provider.TransportCalls.Should().Be(0);
         probe.Observations.Should().Contain(observation =>
@@ -365,7 +367,7 @@ public sealed class RuntimeProviderBoundaryTests
                             context.Action,
                             "Provider pure action repeat.",
                             null),
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
                 }
                 if (context.Action.Payload is KernelProviderRequestEnvelope request)
                 {
@@ -385,14 +387,14 @@ public sealed class RuntimeProviderBoundaryTests
                             new ActionReplacement<KernelActionEnvelope>(
                                 context.Action with { Payload = replacement },
                                 "Replace provider request input."),
-                            cancellationToken);
+                            cancellationToken).ConfigureAwait(false);
                     }
                     if (probe.Mode == "replace-result")
                         return control.ReplaceResult(request, "Replace pure provider preparation result.");
                 }
             }
 
-            return await control.ProceedAsync(cancellationToken);
+            return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -446,7 +448,7 @@ public sealed class RuntimeProviderBoundaryTests
             if (probe.WaitForConcurrentTransport && call == 2)
                 _bothTransports.TrySetResult(true);
             if (probe.WaitForConcurrentTransport)
-                await _bothTransports.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+                await _bothTransports.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
 
             cancellationToken.ThrowIfCancellationRequested();
             return new ChatCompletionResult

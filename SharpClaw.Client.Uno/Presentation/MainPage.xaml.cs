@@ -52,9 +52,9 @@ public sealed partial class MainPage : Page
                 SetChatAvailability(false);
                 CancelButton.Visibility = Visibility.Collapsed;
                 return ValueTask.CompletedTask;
-            }, token);
+            }, token).ConfigureAwait(true);
             UpdateCursor();
-            await RefreshChatAvailabilityAsync(token);
+            await RefreshChatAvailabilityAsync(token).ConfigureAwait(true);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -81,7 +81,7 @@ public sealed partial class MainPage : Page
                     {
                         _streamCts?.Cancel();
                         return ValueTask.CompletedTask;
-                    });
+                    }).ConfigureAwait(true);
             }
         }
         catch
@@ -101,20 +101,20 @@ public sealed partial class MainPage : Page
     private async Task<bool> RefreshChatAvailabilityAsync(CancellationToken cancellationToken)
     {
         var available = await StatelessChatReadiness.CheckAsync(
-            App.Services!.GetRequiredService<SharpClawApiClient>(), cancellationToken);
+            App.Services!.GetRequiredService<SharpClawApiClient>(), cancellationToken).ConfigureAwait(true);
         cancellationToken.ThrowIfCancellationRequested();
         await CommitUiStateAsync(_ =>
         {
             SetChatAvailability(available);
             return ValueTask.CompletedTask;
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(true);
         return available;
     }
 
     private async void OnCheckProviderClick(object sender, RoutedEventArgs e)
     {
         if (_isSending || _pageLifetime is not { IsCancellationRequested: false } lifetime) return;
-        try { await RefreshChatAvailabilityAsync(lifetime.Token); }
+        try { await RefreshChatAvailabilityAsync(lifetime.Token).ConfigureAwait(true); }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         catch (Exception) { /* Keep the last fail-closed state if a client action is denied. */ }
     }
@@ -197,7 +197,7 @@ public sealed partial class MainPage : Page
             stateKey,
             actions.GetStateVersion(stateKey),
             mutation,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(true);
     }
 
     private static SolidColorBrush Brush(int rgb) => TerminalUI.Brush(rgb);

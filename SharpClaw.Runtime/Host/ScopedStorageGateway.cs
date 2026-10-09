@@ -12,7 +12,7 @@ using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Runtime.Host;
 
-public sealed class ScopedStorageGateway(
+internal sealed class ScopedStorageGateway(
     SharpClawDbContext db,
     IStorageContractProvider contracts,
     IRuntimeTransactionActionRunnerAccessor transactionRunnerAccessor,
@@ -50,7 +50,8 @@ public sealed class ScopedStorageGateway(
             throw new ArgumentException("The atomic registration storage commit has an invalid mutation count.", nameof(request));
 
         var transactionRunner = transactionRunnerAccessor.GetRequiredRunner();
-        await using var transaction = await transactionRunner.BeginSerializableAsync(ct);
+        var transaction = await transactionRunner.BeginSerializableAsync(ct).ConfigureAwait(false);
+        await using var transactionAsyncDisposal = transaction.ConfigureAwait(false);
         try
         {
             var pending = new List<PendingMutation>(request.Mutations.Count);
@@ -61,7 +62,7 @@ public sealed class ScopedStorageGateway(
                     throw new NotSupportedException($"Atomic registration storage operation '{mutation.Operation}' is not supported.");
 
                 var record = await Records(contract)
-                    .SingleOrDefaultAsync(candidate => candidate.RecordKey == key, ct);
+                    .SingleOrDefaultAsync(candidate => candidate.RecordKey == key, ct).ConfigureAwait(false);
                 var actualRevision = record is null ? 0 : Revision(record);
                 if (mutation.ExpectedRevision is { } expected && expected != actualRevision)
                     throw RevisionConflict(key, expected, actualRevision);
@@ -101,7 +102,7 @@ public sealed class ScopedStorageGateway(
                 {
                     if (item.Record is not null)
                         db.ScopedStorageRecords.Remove(item.Record);
-                    await DeleteIndexesAsync(contract, item.Key, ct);
+                    await DeleteIndexesAsync(contract, item.Key, ct).ConfigureAwait(false);
                     continue;
                 }
 
@@ -119,11 +120,11 @@ public sealed class ScopedStorageGateway(
                     record.ValueJson = item.ValueJson!;
                 writtenRecords[item.Key] = record;
 
-                await DeleteIndexesAsync(contract, item.Key, ct);
+                await DeleteIndexesAsync(contract, item.Key, ct).ConfigureAwait(false);
                 db.ScopedStorageIndexEntries.AddRange(item.Indexes);
             }
 
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
             var revisions = pending
                 .Select(item => new ScopedStorageRevision(
                     item.Key,
@@ -133,7 +134,7 @@ public sealed class ScopedStorageGateway(
                 .ToArray();
 
             if (transaction is not null)
-                await transactionRunner.CommitAsync(transaction, ct);
+                await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
 
             var result = new ScopedStorageMutationAndOutboxResult(
                 request.Commit,
@@ -151,7 +152,7 @@ public sealed class ScopedStorageGateway(
             {
                 try
                 {
-                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None);
+                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -186,14 +187,15 @@ public sealed class ScopedStorageGateway(
         }, JsonOptions));
         var claim = ReadClaim(contract, parameters.RootElement);
         var transactionRunner = transactionRunnerAccessor.GetRequiredRunner();
-        await using var transaction = await transactionRunner.BeginSerializableAsync(ct);
+        var transaction = await transactionRunner.BeginSerializableAsync(ct).ConfigureAwait(false);
+        await using var transactionAsyncDisposal2 = transaction.ConfigureAwait(false);
         try
         {
-            var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct);
+            var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct).ConfigureAwait(false);
             if (records.Count == 0)
             {
                 if (transaction is not null)
-                    await transactionRunner.CommitAsync(transaction, ct);
+                    await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
                 return new ScopedStorageClaimResult<T>(
                     [],
                     NewClaimAuthority(SourceId, storageName, null, 0, request.Authority));
@@ -227,8 +229,8 @@ public sealed class ScopedStorageGateway(
                 contract,
                 records.Select(record => record.RecordKey).ToArray(),
                 claim.IndexUpdates,
-                ct);
-            await db.SaveChangesAsync(ct);
+                ct).ConfigureAwait(false);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
             var authority = NewClaimAuthority(
                 SourceId,
@@ -243,7 +245,7 @@ public sealed class ScopedStorageGateway(
                     ?? throw new InvalidOperationException("A claimed registration storage value could not be decoded.");
                 var indexes = await Indexes(contract)
                     .Where(index => index.RecordKey == record.RecordKey)
-                    .ToListAsync(ct);
+                    .ToListAsync(ct).ConfigureAwait(false);
                 resultRecordsList.Add(new ScopedStorageClaimRecord<T>(
                     record.RecordKey,
                     value,
@@ -260,7 +262,7 @@ public sealed class ScopedStorageGateway(
                 Claims[ClaimKey(SourceId, storageName, record.Key)] = authority;
 
             if (transaction is not null)
-                await transactionRunner.CommitAsync(transaction, ct);
+                await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
             return new ScopedStorageClaimResult<T>(resultRecords, authority);
         }
         catch
@@ -269,7 +271,7 @@ public sealed class ScopedStorageGateway(
             {
                 try
                 {
-                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None);
+                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -301,7 +303,7 @@ public sealed class ScopedStorageGateway(
 
             var key = pair.Key[prefix.Length..];
             var contract = RequireContract(SourceId, storageName);
-            var record = await Records(contract).SingleOrDefaultAsync(item => item.RecordKey == key, ct);
+            var record = await Records(contract).SingleOrDefaultAsync(item => item.RecordKey == key, ct).ConfigureAwait(false);
             if (record is null)
                 break;
             var renewed = current with
@@ -366,14 +368,14 @@ public sealed class ScopedStorageGateway(
         {
             var result = operation switch
             {
-                ScopedStorageOperations.Get => await GetAsync(contract, parameters, ct),
-                ScopedStorageOperations.Upsert => await UpsertAsync(contract, parameters, ct),
-                ScopedStorageOperations.BatchUpsert => await BatchUpsertAsync(contract, parameters, ct),
-                ScopedStorageOperations.Delete => await DeleteAsync(contract, parameters, ct),
-                ScopedStorageOperations.BatchDelete => await BatchDeleteAsync(contract, parameters, ct),
-                ScopedStorageOperations.List => await ListAsync(contract, parameters, ct),
-                ScopedStorageOperations.Query => await QueryAsync(contract, parameters, ct),
-                ScopedStorageOperations.Claim => await ClaimAsync(contract, parameters, ct),
+                ScopedStorageOperations.Get => await GetAsync(contract, parameters, ct).ConfigureAwait(false),
+                ScopedStorageOperations.Upsert => await UpsertAsync(contract, parameters, ct).ConfigureAwait(false),
+                ScopedStorageOperations.BatchUpsert => await BatchUpsertAsync(contract, parameters, ct).ConfigureAwait(false),
+                ScopedStorageOperations.Delete => await DeleteAsync(contract, parameters, ct).ConfigureAwait(false),
+                ScopedStorageOperations.BatchDelete => await BatchDeleteAsync(contract, parameters, ct).ConfigureAwait(false),
+                ScopedStorageOperations.List => await ListAsync(contract, parameters, ct).ConfigureAwait(false),
+                ScopedStorageOperations.Query => await QueryAsync(contract, parameters, ct).ConfigureAwait(false),
+                ScopedStorageOperations.Claim => await ClaimAsync(contract, parameters, ct).ConfigureAwait(false),
                 _ => throw new NotSupportedException(
                     $"Registration storage operation '{operation}' is not supported."),
             };
@@ -405,7 +407,7 @@ public sealed class ScopedStorageGateway(
         var key = ReadRequiredString(parameters, "key", 256);
         var record = await Records(contract)
             .AsNoTracking()
-            .SingleOrDefaultAsync(record => record.RecordKey == key, ct);
+            .SingleOrDefaultAsync(record => record.RecordKey == key, ct).ConfigureAwait(false);
 
         if (record is null)
             return JsonSerializer.SerializeToElement(new { found = false }, JsonOptions);
@@ -417,7 +419,7 @@ public sealed class ScopedStorageGateway(
             key = record.RecordKey,
             value = value.RootElement,
             revision = Revision(record),
-            indexes = await ReadIndexesAsync(contract, record.RecordKey, ct),
+            indexes = await ReadIndexesAsync(contract, record.RecordKey, ct).ConfigureAwait(false),
         }, JsonOptions);
     }
 
@@ -427,8 +429,8 @@ public sealed class ScopedStorageGateway(
         CancellationToken ct)
     {
         var write = ReadWrite(contract, parameters);
-        await UpsertRecordAsync(contract, write, ct);
-        await db.SaveChangesAsync(ct);
+        await UpsertRecordAsync(contract, write, ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return JsonSerializer.SerializeToElement(new { saved = true }, JsonOptions);
     }
 
@@ -439,10 +441,10 @@ public sealed class ScopedStorageGateway(
     {
         var writes = ReadWrites(contract, parameters);
         foreach (var write in writes)
-            await UpsertRecordAsync(contract, write, ct);
+            await UpsertRecordAsync(contract, write, ct).ConfigureAwait(false);
 
         if (writes.Count > 0)
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return JsonSerializer.SerializeToElement(new { saved = writes.Count }, JsonOptions);
     }
@@ -453,7 +455,7 @@ public sealed class ScopedStorageGateway(
         CancellationToken ct)
     {
         var record = await Records(contract)
-            .SingleOrDefaultAsync(record => record.RecordKey == write.Key, ct);
+            .SingleOrDefaultAsync(record => record.RecordKey == write.Key, ct).ConfigureAwait(false);
         if (record is null)
         {
             record = new ScopedStorageRecordDB
@@ -471,7 +473,7 @@ public sealed class ScopedStorageGateway(
             record.ValueJson = write.ValueJson;
         }
 
-        await DeleteIndexesAsync(contract, write.Key, ct);
+        await DeleteIndexesAsync(contract, write.Key, ct).ConfigureAwait(false);
         db.ScopedStorageIndexEntries.AddRange(write.Indexes);
     }
 
@@ -482,15 +484,15 @@ public sealed class ScopedStorageGateway(
     {
         var key = ReadRequiredString(parameters, "key", 256);
         var record = await Records(contract)
-            .SingleOrDefaultAsync(record => record.RecordKey == key, ct);
+            .SingleOrDefaultAsync(record => record.RecordKey == key, ct).ConfigureAwait(false);
         var deleted = record is not null;
 
         if (record is not null)
             db.ScopedStorageRecords.Remove(record);
 
-        var removedIndexes = await DeleteIndexesAsync(contract, key, ct);
+        var removedIndexes = await DeleteIndexesAsync(contract, key, ct).ConfigureAwait(false);
         if (deleted || removedIndexes)
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return JsonSerializer.SerializeToElement(new { deleted }, JsonOptions);
     }
@@ -506,14 +508,14 @@ public sealed class ScopedStorageGateway(
 
         var records = await Records(contract)
             .Where(record => keys.Contains(record.RecordKey))
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
         var indexes = await Indexes(contract)
             .Where(index => keys.Contains(index.RecordKey))
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
 
         db.ScopedStorageRecords.RemoveRange(records);
         db.ScopedStorageIndexEntries.RemoveRange(indexes);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return JsonSerializer.SerializeToElement(new { deleted = records.Count }, JsonOptions);
     }
@@ -532,7 +534,7 @@ public sealed class ScopedStorageGateway(
         if (limit is { } take)
             query = query.Take(take);
 
-        return RecordsResponse(await query.ToListAsync(ct));
+        return RecordsResponse(await query.ToListAsync(ct).ConfigureAwait(false));
     }
 
     private async Task<JsonElement> QueryAsync(
@@ -541,7 +543,7 @@ public sealed class ScopedStorageGateway(
         CancellationToken ct)
     {
         var query = ReadQuery(contract, parameters);
-        var records = await LoadQueryRecordsAsync(contract, query, tracking: false, ct);
+        var records = await LoadQueryRecordsAsync(contract, query, tracking: false, ct).ConfigureAwait(false);
         return RecordsResponse(records);
     }
 
@@ -552,14 +554,15 @@ public sealed class ScopedStorageGateway(
     {
         var claim = ReadClaim(contract, parameters);
         var transactionRunner = transactionRunnerAccessor.GetRequiredRunner();
-        await using var transaction = await transactionRunner.BeginSerializableAsync(ct);
+        var transaction = await transactionRunner.BeginSerializableAsync(ct).ConfigureAwait(false);
+        await using var transactionAsyncDisposal3 = transaction.ConfigureAwait(false);
         try
         {
-            var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct);
+            var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct).ConfigureAwait(false);
             if (records.Count == 0)
             {
                 if (transaction is not null)
-                    await transactionRunner.CommitAsync(transaction, ct);
+                    await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
                 return RecordsResponse([]);
             }
 
@@ -572,11 +575,11 @@ public sealed class ScopedStorageGateway(
                 contract,
                 records.Select(record => record.RecordKey).ToArray(),
                 claim.IndexUpdates,
-                ct);
+                ct).ConfigureAwait(false);
 
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
             if (transaction is not null)
-                await transactionRunner.CommitAsync(transaction, ct);
+                await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
 
             return RecordsResponse(records);
         }
@@ -586,7 +589,7 @@ public sealed class ScopedStorageGateway(
             {
                 try
                 {
-                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None);
+                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception rollbackException)
                 {
@@ -611,22 +614,22 @@ public sealed class ScopedStorageGateway(
         if (query.Filters.Count == 0 && query.OrderBy is null)
             throw new ArgumentException("Registration storage query requires at least one filter or order index.");
 
-        var keys = await FindMatchingRecordKeysAsync(contract, query.Filters, ct);
+        var keys = await FindMatchingRecordKeysAsync(contract, query.Filters, ct).ConfigureAwait(false);
         if (query.Filters.Count > 0 && keys.Count == 0)
             return [];
 
         var limit = query.Limit ?? 1_000;
         if (query.OrderBy is not null)
         {
-            var orderedKeys = await LoadOrderedKeysAsync(contract, query.OrderBy, keys, limit, ct);
-            return await LoadRecordsByKeysAsync(contract, orderedKeys, tracking, ct);
+            var orderedKeys = await LoadOrderedKeysAsync(contract, query.OrderBy, keys, limit, ct).ConfigureAwait(false);
+            return await LoadRecordsByKeysAsync(contract, orderedKeys, tracking, ct).ConfigureAwait(false);
         }
 
         var unorderedKeys = keys
             .OrderBy(key => key, StringComparer.Ordinal)
             .Take(limit)
             .ToArray();
-        return await LoadRecordsByKeysAsync(contract, unorderedKeys, tracking, ct);
+        return await LoadRecordsByKeysAsync(contract, unorderedKeys, tracking, ct).ConfigureAwait(false);
     }
 
     private async Task<HashSet<string>> FindMatchingRecordKeysAsync(
@@ -650,7 +653,7 @@ public sealed class ScopedStorageGateway(
             var keys = await indexQuery
                 .Select(index => index.RecordKey)
                 .Distinct()
-                .ToListAsync(ct);
+                .ToListAsync(ct).ConfigureAwait(false);
 
             if (!initialized)
             {
@@ -693,7 +696,7 @@ public sealed class ScopedStorageGateway(
 
         var orderedIndexes = await OrderIndexes(orderQuery, descriptor.ValueKind, descending)
             .Take(limit)
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
 
         var orderedKeys = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -721,7 +724,7 @@ public sealed class ScopedStorageGateway(
         if (!tracking)
             query = query.AsNoTracking();
 
-        var records = await query.ToListAsync(ct);
+        var records = await query.ToListAsync(ct).ConfigureAwait(false);
         var byKey = records.ToDictionary(record => record.RecordKey, StringComparer.Ordinal);
         var ordered = new List<ScopedStorageRecordDB>();
         foreach (var key in keys)
@@ -745,7 +748,7 @@ public sealed class ScopedStorageGateway(
         var indexNames = indexUpdates.Keys.ToArray();
         var existing = await Indexes(contract)
             .Where(index => keys.Contains(index.RecordKey) && indexNames.Contains(index.IndexName))
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
         db.ScopedStorageIndexEntries.RemoveRange(existing);
 
         foreach (var key in keys)
@@ -842,7 +845,7 @@ public sealed class ScopedStorageGateway(
     {
         var indexes = await Indexes(contract)
             .Where(index => index.RecordKey == key)
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
         db.ScopedStorageIndexEntries.RemoveRange(indexes);
         return indexes.Count > 0;
     }
@@ -1307,7 +1310,7 @@ public sealed class ScopedStorageGateway(
         var indexes = await Indexes(contract)
             .AsNoTracking()
             .Where(index => index.RecordKey == key)
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
         return IndexesResponse(indexes);
     }
 

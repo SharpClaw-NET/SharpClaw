@@ -16,7 +16,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 /// internal SharpClaw Runtime Host, automatically attaching the
 /// <c>X-Api-Key</c> header and forwarding the caller's JWT when present.
 /// </summary>
-public sealed class InternalApiClient(
+internal sealed class InternalApiClient(
     HttpClient httpClient,
     IOptions<InternalApiOptions> options,
     IHttpContextAccessor httpContextAccessor,
@@ -43,7 +43,7 @@ public sealed class InternalApiClient(
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, path);
         AttachApiKey(request);
-        using var response = await httpClient.SendAsync(request, ct);
+        using var response = await httpClient.SendAsync(request, ct).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
@@ -55,15 +55,15 @@ public sealed class InternalApiClient(
             if (TryInvalidateAndReAttach(request))
             {
                 using var retry = CloneRequest(request);
-                using var retryResp = await httpClient.SendAsync(retry, ct);
+                using var retryResp = await httpClient.SendAsync(retry, ct).ConfigureAwait(false);
                 retryResp.EnsureSuccessStatusCode();
-                var retryJson = await retryResp.Content.ReadAsStringAsync(ct);
+                var retryJson = await retryResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 return JsonSerializer.Deserialize<T>(retryJson, JsonOptions);
             }
         }
 
         response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync(ct);
+        var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         return JsonSerializer.Deserialize<T>(json, JsonOptions);
     }
 
@@ -75,21 +75,21 @@ public sealed class InternalApiClient(
         using var request = new HttpRequestMessage(HttpMethod.Post, path);
         AttachApiKey(request);
         request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, ct);
+        using var response = await httpClient.SendAsync(request, ct).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.Unauthorized && TryInvalidateAndReAttach(request))
         {
             using var retry = new HttpRequestMessage(HttpMethod.Post, path);
             AttachApiKey(retry);
             retry.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-            using var retryResp = await httpClient.SendAsync(retry, ct);
+            using var retryResp = await httpClient.SendAsync(retry, ct).ConfigureAwait(false);
             retryResp.EnsureSuccessStatusCode();
-            var retryJson = await retryResp.Content.ReadAsStringAsync(ct);
+            var retryJson = await retryResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             return JsonSerializer.Deserialize<TResponse>(retryJson, JsonOptions);
         }
 
         response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync(ct);
+        var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         return JsonSerializer.Deserialize<TResponse>(json, JsonOptions);
     }
 
@@ -100,14 +100,14 @@ public sealed class InternalApiClient(
         using var request = new HttpRequestMessage(HttpMethod.Post, path);
         AttachApiKey(request);
         request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, ct);
+        using var response = await httpClient.SendAsync(request, ct).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.Unauthorized && TryInvalidateAndReAttach(request))
         {
             using var retry = new HttpRequestMessage(HttpMethod.Post, path);
             AttachApiKey(retry);
             retry.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-            using var retryResp = await httpClient.SendAsync(retry, ct);
+            using var retryResp = await httpClient.SendAsync(retry, ct).ConfigureAwait(false);
             retryResp.EnsureSuccessStatusCode();
             return;
         }
@@ -123,21 +123,21 @@ public sealed class InternalApiClient(
         using var request = new HttpRequestMessage(HttpMethod.Put, path);
         AttachApiKey(request);
         request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, ct);
+        using var response = await httpClient.SendAsync(request, ct).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.Unauthorized && TryInvalidateAndReAttach(request))
         {
             using var retry = new HttpRequestMessage(HttpMethod.Put, path);
             AttachApiKey(retry);
             retry.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-            using var retryResp = await httpClient.SendAsync(retry, ct);
+            using var retryResp = await httpClient.SendAsync(retry, ct).ConfigureAwait(false);
             retryResp.EnsureSuccessStatusCode();
-            var retryJson = await retryResp.Content.ReadAsStringAsync(ct);
+            var retryJson = await retryResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             return JsonSerializer.Deserialize<TResponse>(retryJson, JsonOptions);
         }
 
         response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync(ct);
+        var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         return JsonSerializer.Deserialize<TResponse>(json, JsonOptions);
     }
 
@@ -145,13 +145,13 @@ public sealed class InternalApiClient(
     {
         using var request = new HttpRequestMessage(HttpMethod.Delete, path);
         AttachApiKey(request);
-        using var response = await httpClient.SendAsync(request, ct);
+        using var response = await httpClient.SendAsync(request, ct).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.Unauthorized && TryInvalidateAndReAttach(request))
         {
             using var retry = new HttpRequestMessage(HttpMethod.Delete, path);
             AttachApiKey(retry);
-            using var retryResp = await httpClient.SendAsync(retry, ct);
+            using var retryResp = await httpClient.SendAsync(retry, ct).ConfigureAwait(false);
             return retryResp.IsSuccessStatusCode;
         }
 
@@ -167,7 +167,7 @@ public sealed class InternalApiClient(
         HttpRequestMessage request, CancellationToken ct = default)
     {
         AttachApiKey(request);
-        return await httpClient.SendAsync(request, ct);
+        return await httpClient.SendAsync(request, ct).ConfigureAwait(false);
     }
 
     public async Task ForwardWebSocketAsync(
@@ -191,17 +191,17 @@ public sealed class InternalApiClient(
         foreach (var protocol in context.WebSockets.WebSocketRequestedProtocols)
             upstream.Options.AddSubProtocol(protocol);
 
-        await upstream.ConnectAsync(CreateWebSocketUri(pathAndQuery), cancellationToken);
-        using var downstream = await context.WebSockets.AcceptWebSocketAsync(upstream.SubProtocol);
+        await upstream.ConnectAsync(CreateWebSocketUri(pathAndQuery), cancellationToken).ConfigureAwait(false);
+        using var downstream = await context.WebSockets.AcceptWebSocketAsync(upstream.SubProtocol).ConfigureAwait(false);
         using var relayCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var toRuntime = RelayWebSocketAsync(downstream, upstream, relayCancellation.Token);
         var toClient = RelayWebSocketAsync(upstream, downstream, relayCancellation.Token);
-        await Task.WhenAny(toRuntime, toClient);
+        await Task.WhenAny(toRuntime, toClient).ConfigureAwait(false);
         relayCancellation.Cancel();
 
         try
         {
-            await Task.WhenAll(toRuntime, toClient);
+            await Task.WhenAll(toRuntime, toClient).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (relayCancellation.IsCancellationRequested)
         {
@@ -298,7 +298,7 @@ public sealed class InternalApiClient(
         var buffer = new byte[64 * 1024];
         while (!cancellationToken.IsCancellationRequested)
         {
-            var result = await source.ReceiveAsync(buffer, cancellationToken);
+            var result = await source.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
             if (result.MessageType == WebSocketMessageType.Close)
             {
                 if (destination.State is WebSocketState.Open or WebSocketState.CloseReceived)
@@ -306,7 +306,7 @@ public sealed class InternalApiClient(
                     await destination.CloseOutputAsync(
                         result.CloseStatus ?? WebSocketCloseStatus.NormalClosure,
                         result.CloseStatusDescription,
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
                 }
 
                 return;
@@ -316,7 +316,7 @@ public sealed class InternalApiClient(
                 buffer.AsMemory(0, result.Count),
                 result.MessageType,
                 result.EndOfMessage,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
         }
     }
 

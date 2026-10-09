@@ -162,7 +162,7 @@ public sealed class RuntimeKernelAdapter :
                 ValidateEventInvocation(effective, "define");
                 return ValueTask.FromResult(effective);
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         var preview = await RunEventActionAsync(
             new SharpClawActionKey("event.publish.preview"),
@@ -177,7 +177,7 @@ public sealed class RuntimeKernelAdapter :
 
                 return ValueTask.FromResult(effectivePayload.Validate());
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         var committedInvocation = defined with
         {
@@ -203,7 +203,7 @@ public sealed class RuntimeKernelAdapter :
                         await _eventDispatcher.PublishAsync(
                             RuntimeEventDefinitions.Committed,
                             eventPayload.Validate(),
-                            deliveryCt);
+                            deliveryCt).ConfigureAwait(false);
                         if (deliveryInvocation.Delivery != EventDelivery.Inline)
                         {
                             await _eventDeliverySink.EnqueueAsync(
@@ -217,14 +217,14 @@ public sealed class RuntimeKernelAdapter :
                                     eventPayload),
                                 deliveryInvocation.Delivery,
                                 deliveryCt,
-                                "runtime-event-outbox");
+                                "runtime-event-outbox").ConfigureAwait(false);
                         }
 
                         return deliveryInvocation;
                     },
-                    ct);
+                    ct).ConfigureAwait(false);
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         ValidateEventInvocation(committed, "commit");
         if (committed.Payload is not RuntimeEventPayload committedPayload)
@@ -284,14 +284,14 @@ public sealed class RuntimeKernelAdapter :
 
                     if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
                     {
-                        var repeated = await terminalResult.Task.WaitAsync(ct);
+                        var repeated = await terminalResult.Task.WaitAsync(ct).ConfigureAwait(false);
                         return (object?)repeated ?? throw new KernelActionExecutionException(
                             $"Event action '{actionKey.Value}' returned a null repeated result.");
                     }
 
                     try
                     {
-                        var value = await terminal(effective, ct);
+                        var value = await terminal(effective, ct).ConfigureAwait(false);
                         terminalResult.TrySetResult(value);
                         return (object?)value ?? throw new KernelActionExecutionException(
                             $"Event action '{actionKey.Value}' returned a null result.");
@@ -303,7 +303,7 @@ public sealed class RuntimeKernelAdapter :
                     }
                 },
                 Graph.ActionSnapshot,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             if (Volatile.Read(ref terminalState) == 0)
             {
@@ -315,19 +315,19 @@ public sealed class RuntimeKernelAdapter :
         }
         catch (KernelActionCancelledException exception)
         {
-            await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: true);
+            await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: true).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
             throw;
         }
         catch (OperationCanceledException exception)
         {
-            await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: true);
+            await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: true).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
             throw;
         }
         catch (Exception exception)
         {
-            await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: false);
+            await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: false).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
             throw;
         }
@@ -438,7 +438,7 @@ public sealed class RuntimeKernelAdapter :
                     }),
                 static (_, _) => ValueTask.FromResult<object>(true),
                 Graph.ActionSnapshot,
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception outcomeException)
         {
@@ -481,12 +481,12 @@ public sealed class RuntimeKernelAdapter :
                         $"CLI action '{actionKey.Value}' returned an invalid invocation payload.");
                 }
 
-                return (object?)await terminal(ct) ??
+                return (object?)await terminal(ct).ConfigureAwait(false) ??
                     throw new KernelActionExecutionException(
                         $"CLI action '{actionKey.Value}' returned a null result.");
             },
             Graph.ActionSnapshot,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (result is not TResult typedResult)
         {
@@ -604,13 +604,13 @@ public sealed class RuntimeKernelAdapter :
                 }
 
                 if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
-                    return (object?)await terminalResult.Task
+                    return (object?)await terminalResult.Task.ConfigureAwait(false)
                         ?? throw new KernelActionExecutionException(
                             "Runtime request terminal returned a null repeated result.");
 
                 try
                 {
-                    var value = await terminal(effectiveRequest, ct);
+                    var value = await terminal(effectiveRequest, ct).ConfigureAwait(false);
                     if (value is null)
                     {
                         throw new KernelActionExecutionException(
@@ -626,7 +626,7 @@ public sealed class RuntimeKernelAdapter :
                 }
             },
             Graph.ActionSnapshot,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (Volatile.Read(ref terminalState) == 0)
         {
@@ -711,12 +711,12 @@ public sealed class RuntimeKernelAdapter :
                         $"Persistence action '{invocation.ActionKey.Value}' returned an invalid invocation payload.");
                 }
 
-                var result = await terminal(actionCancellationToken);
+                var result = await terminal(actionCancellationToken).ConfigureAwait(false);
                 terminalCompleted = true;
                 return result;
             },
             Graph.ActionSnapshot,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (!terminalCompleted)
         {
@@ -753,12 +753,12 @@ public sealed class RuntimeKernelAdapter :
                         $"Transaction action '{invocation.ActionKey.Value}' returned an invalid invocation payload.");
                 }
 
-                var terminalResult = await terminal(actionCancellationToken);
+                var terminalResult = await terminal(actionCancellationToken).ConfigureAwait(false);
                 terminalCompleted = true;
                 return terminalResult;
             },
             Graph.ActionSnapshot,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (!terminalCompleted)
         {
@@ -804,17 +804,17 @@ public sealed class RuntimeKernelAdapter :
 
         try
         {
-            await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken))
+            await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
                 yield return item;
 
-            await dispatchTask;
+            await dispatchTask.ConfigureAwait(false);
         }
         finally
         {
             linkedCancellation.Cancel();
             try
             {
-                await dispatchTask;
+                await dispatchTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -855,13 +855,13 @@ public sealed class RuntimeKernelAdapter :
                     }
 
                     await foreach (var item in terminal(effectiveRequest, ct).WithCancellation(ct))
-                        await writer.WriteAsync(item, ct);
+                        await writer.WriteAsync(item, ct).ConfigureAwait(false);
 
                     terminalCompleted = true;
                     return true;
                 },
                 Graph.ActionSnapshot,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             if (!terminalCompleted)
             {
@@ -915,11 +915,11 @@ public sealed class RuntimeKernelAdapter :
                         $"Security action '{actionKey.Value}' returned an invalid invocation payload.");
                 }
 
-                baseAllowed = await baseDecision(invocation, ct);
+                baseAllowed = await baseDecision(invocation, ct).ConfigureAwait(false);
                 return baseAllowed;
             },
             Graph.ActionSnapshot,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (result is not bool actionAllowed)
         {
@@ -953,7 +953,7 @@ public sealed class RuntimeKernelAdapter :
                 hostVersion,
                 effectiveFeatures,
                 ct),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         _started = true;
     }
 
@@ -979,7 +979,7 @@ public sealed class RuntimeKernelAdapter :
             ExceptionDispatchInfo? prepareFailure = null;
             try
             {
-                await prepare(CancellationToken.None);
+                await prepare(CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
@@ -990,7 +990,7 @@ public sealed class RuntimeKernelAdapter :
             {
                 try
                 {
-                    await StopParticipantsAsync(CancellationToken.None);
+                    await StopParticipantsAsync(CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
@@ -1004,7 +1004,7 @@ public sealed class RuntimeKernelAdapter :
         async ValueTask CompleteHostAsync(CancellationToken _)
         {
             completionInvoked = true;
-            await completion(CancellationToken.None);
+            await completion(CancellationToken.None).ConfigureAwait(false);
         }
 
         try
@@ -1016,7 +1016,7 @@ public sealed class RuntimeKernelAdapter :
                     null,
                     executionContext,
                     PrepareHostAndParticipantsAsync,
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
@@ -1028,7 +1028,7 @@ public sealed class RuntimeKernelAdapter :
                 {
                     try
                     {
-                        await PrepareHostAndParticipantsAsync(CancellationToken.None);
+                        await PrepareHostAndParticipantsAsync(CancellationToken.None).ConfigureAwait(false);
                     }
                     catch (Exception exception)
                     {
@@ -1044,7 +1044,7 @@ public sealed class RuntimeKernelAdapter :
                         null,
                         executionContext,
                         CompleteHostAsync,
-                        CancellationToken.None);
+                        CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
@@ -1058,7 +1058,7 @@ public sealed class RuntimeKernelAdapter :
             {
                 try
                 {
-                    await completion(CancellationToken.None);
+                    await completion(CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
@@ -1084,11 +1084,11 @@ public sealed class RuntimeKernelAdapter :
             new KernelActionEnvelope(actionKey, payload),
             async (_, ct) =>
             {
-                await terminal(ct);
+                await terminal(ct).ConfigureAwait(false);
                 return true;
             },
             Graph.ActionSnapshot,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask StartParticipantsAsync(
@@ -1104,7 +1104,7 @@ public sealed class RuntimeKernelAdapter :
                     hostVersion,
                     Graph.ActionSnapshot.ContractHash,
                     features);
-                await service.StartAsync(context, cancellationToken);
+                await service.StartAsync(context, cancellationToken).ConfigureAwait(false);
                 _startedServices.Add(service);
             }
         }
@@ -1112,7 +1112,7 @@ public sealed class RuntimeKernelAdapter :
         {
             try
             {
-                await StopParticipantsAsync(CancellationToken.None);
+                await StopParticipantsAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception stopException)
             {
@@ -1131,7 +1131,7 @@ public sealed class RuntimeKernelAdapter :
         {
             try
             {
-                await _startedServices[index].StopAsync(cancellationToken);
+                await _startedServices[index].StopAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception)
             {

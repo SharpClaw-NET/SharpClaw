@@ -5,7 +5,7 @@ using SharpClaw.Runtime.BLL.Kernel;
 namespace SharpClaw.Runtime.Host;
 
 /// <summary>Routes Runtime event outbox state changes through event actions.</summary>
-public sealed class RuntimeEventOutboxService(
+internal sealed class RuntimeEventOutboxService(
     IRuntimeEventActionBoundaryAccessor boundaryAccessor,
     IRuntimeEventOutboxStore store) : IRuntimeEventOutboxService
 {
@@ -81,9 +81,9 @@ public sealed class RuntimeEventOutboxService(
                         "The event outbox action returned an invalid record identity.");
                 }
 
-                await terminal(store, effectiveTransition, ct);
+                await terminal(store, effectiveTransition, ct).ConfigureAwait(false);
                 return true;
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 }

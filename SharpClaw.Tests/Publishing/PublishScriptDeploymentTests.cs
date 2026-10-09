@@ -4,8 +4,10 @@ using System.Xml.Linq;
 
 namespace SharpClaw.Tests.Publishing;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class PublishScriptDeploymentTests
+internal sealed class PublishScriptDeploymentTests
 {
     [Test]
     public void PublishScriptExposesOnlyApplicationServerAndRuntimeDeploymentTypes()

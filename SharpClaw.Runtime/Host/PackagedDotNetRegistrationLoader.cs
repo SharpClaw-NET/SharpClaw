@@ -164,18 +164,18 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                 var process = await PackagedSidecarProcess.StartAsync(
                     manifest,
                     configuration,
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
                 try
                 {
                     var discovery = await OutOfProcessRegistrationClient.DiscoverAsync(
                         process.ControlAddress,
                         process.ControlToken,
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
                     pending.Add(new PendingSidecar(manifest, process, discovery));
                 }
                 catch
                 {
-                    await process.DisposeAsync();
+                    await process.DisposeAsync().ConfigureAwait(false);
                     throw;
                 }
             }
@@ -209,7 +209,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             foreach (var item in pending)
             {
                 var hostCatalog = CreateHostCatalog(item.Discovery.Discovery, discoveries);
-                var client = await item.Discovery.AuthorizeAsync(hostCatalog, cancellationToken);
+                var client = await item.Discovery.AuthorizeAsync(hostCatalog, cancellationToken).ConfigureAwait(false);
                 var proxy = new OutOfProcessRegistrationProxy(
                     item.Manifest.Manifest.Id,
                     item.Manifest.Manifest.DisplayName,
@@ -238,11 +238,11 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         {
             foreach (var item in pending)
             {
-                await item.Discovery.DisposeAsync();
-                await item.Process.DisposeAsync();
+                await item.Discovery.DisposeAsync().ConfigureAwait(false);
+                await item.Process.DisposeAsync().ConfigureAwait(false);
             }
 
-            await registrationSet.DisposeAsync();
+            await registrationSet.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
@@ -289,14 +289,14 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                         new OutOfProcessHostActionEntryContextRegistry(),
                         registry,
                         crossSidecarEntries),
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
 
             _capabilityScope = scope;
         }
         catch
         {
-            await scope.DisposeAsync();
+            await scope.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
@@ -316,7 +316,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         {
             try
             {
-                await registration.DisposeAsync();
+                await registration.DisposeAsync().ConfigureAwait(false);
             }
             catch (Exception exception)
             {
@@ -328,7 +328,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         {
             try
             {
-                await scope.DisposeAsync();
+                await scope.DisposeAsync().ConfigureAwait(false);
             }
             catch (Exception exception)
             {
@@ -340,7 +340,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         {
             try
             {
-                await process.DisposeAsync();
+                await process.DisposeAsync().ConfigureAwait(false);
             }
             catch (Exception exception)
             {
@@ -352,7 +352,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         {
             try
             {
-                await host.DisposeAsync();
+                await host.DisposeAsync().ConfigureAwait(false);
             }
             catch (Exception exception)
             {
@@ -854,18 +854,18 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             var result = new PackagedSidecarProcess(process, address, token, stdout, stderr);
             try
             {
-                await result.WaitForReadinessAsync(startupTimeout, cancellationToken);
+                await result.WaitForReadinessAsync(startupTimeout, cancellationToken).ConfigureAwait(false);
                 return result;
             }
             catch (Exception exception)
             {
-                await result.DisposeAsync();
+                await result.DisposeAsync().ConfigureAwait(false);
                 if (exception is OperationCanceledException && cancellationToken.IsCancellationRequested)
                     throw;
                 throw new InvalidOperationException(
                     $"The sidecar process for registration '{manifest.Id}' did not become ready " +
                     $"within its {startupTimeout.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}-second bootstrap budget. " +
-                    $"stdout={await SafeOutputAsync(stdout)} stderr={await SafeOutputAsync(stderr)}",
+                    $"stdout={await SafeOutputAsync(stdout).ConfigureAwait(false)} stderr={await SafeOutputAsync(stderr).ConfigureAwait(false)}",
                     exception);
             }
         }
@@ -880,7 +880,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                 {
                     _process.Kill(entireProcessTree: true);
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    await _process.WaitForExitAsync(timeout.Token);
+                    await _process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
                 }
             }
             finally
@@ -907,7 +907,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         {
             try
             {
-                return await output;
+                return await output.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

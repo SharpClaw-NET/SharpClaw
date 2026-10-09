@@ -42,7 +42,7 @@ internal sealed class ConversationTurnGate
 
         try
         {
-            await entry.Semaphore.WaitAsync(cancellationToken);
+            await entry.Semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             return new Lease(this, conversationId, entry);
         }
         catch
@@ -129,8 +129,8 @@ internal sealed class RunScopedConversationResolver(
         if (scope.Lease is not null)
             throw new InvalidOperationException("A direct-chat run resolved more than one conversation.");
 
-        var selection = await inner.ResolveAsync(input, context, ct);
-        scope.Lease = await gate.EnterAsync(selection.ConversationId, ct);
+        var selection = await inner.ResolveAsync(input, context, ct).ConfigureAwait(false);
+        scope.Lease = await gate.EnterAsync(selection.ConversationId, ct).ConfigureAwait(false);
         return selection;
     }
 
@@ -139,7 +139,7 @@ internal sealed class RunScopedConversationResolver(
         if (ReferenceEquals(_scope.Value, scope))
             _scope.Value = null;
         if (scope.Lease is not null)
-            await scope.Lease.DisposeAsync();
+            await scope.Lease.DisposeAsync().ConfigureAwait(false);
     }
 
     internal sealed class RunScope(RunScopedConversationResolver owner) : IAsyncDisposable

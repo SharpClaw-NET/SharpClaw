@@ -13,8 +13,10 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeLifecycleActionTests
+internal sealed class RuntimeLifecycleActionTests
 {
     private static readonly string[] LifecycleActionNames =
     [
@@ -39,8 +41,8 @@ public sealed class RuntimeLifecycleActionTests
             {
                 probe.Terminals.Enqueue("runtime.start.prepare");
                 return ValueTask.CompletedTask;
-            });
-        await adapter.StartAsync("test-host");
+            }).ConfigureAwait(false);
+        await adapter.StartAsync("test-host").ConfigureAwait(false);
         await adapter.RunRuntimeLifecycleActionAsync(
             Action("runtime.start.bind"),
             "loopback",
@@ -48,14 +50,14 @@ public sealed class RuntimeLifecycleActionTests
             {
                 probe.Terminals.Enqueue("runtime.start.bind");
                 return ValueTask.CompletedTask;
-            });
+            }).ConfigureAwait(false);
 
         await adapter.StopAsync(
             onComplete: _ =>
             {
                 probe.Terminals.Enqueue("runtime.stop.complete");
                 return ValueTask.CompletedTask;
-            });
+            }).ConfigureAwait(false);
 
         probe.Actions.Should().Equal(LifecycleActionNames);
         probe.Terminals.Should().Equal(
@@ -80,9 +82,9 @@ public sealed class RuntimeLifecycleActionTests
             {
                 Interlocked.Increment(ref terminalCalls);
                 return ValueTask.CompletedTask;
-            });
+            }).ConfigureAwait(false);
 
-        await action.Should().ThrowAsync<KernelActionCancelledException>();
+        await action.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         terminalCalls.Should().Be(0);
         probe.Actions.Should().ContainSingle().Which.Should().Be("runtime.start.prepare");
     }
@@ -260,7 +262,7 @@ public sealed class RuntimeLifecycleActionTests
         var probe = new LifecycleProbe();
         using var workspace = new TemporaryWorkspace();
         var adapter = CreateAdapter(workspace, probe);
-        await adapter.StartAsync("test-host");
+        await adapter.StartAsync("test-host").ConfigureAwait(false);
 
         var requestCount = 0;
         var builder = WebApplication.CreateBuilder();
@@ -273,7 +275,7 @@ public sealed class RuntimeLifecycleActionTests
                 Interlocked.Increment(ref requestCount);
                 return Results.Ok();
             });
-        await app.StartAsync();
+        await app.StartAsync().ConfigureAwait(false);
 
         using var client = new HttpClient
         {
@@ -286,11 +288,11 @@ public sealed class RuntimeLifecycleActionTests
             async () =>
             {
                 probe.ShutdownEvents.Enqueue("listener");
-                await app.StopAsync(CancellationToken.None);
+                await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                 try
                 {
-                    await client.GetAsync("/shutdown-probe", timeout.Token);
+                    await client.GetAsync("/shutdown-probe", timeout.Token).ConfigureAwait(false);
                 }
                 catch (HttpRequestException)
                 {
@@ -304,7 +306,7 @@ public sealed class RuntimeLifecycleActionTests
         {
             await adapter.StopAsync(
                 onPrepare: _ => cleanup.BeginAsync(),
-                onComplete: _ => cleanup.CompleteAsync());
+                onComplete: _ => cleanup.CompleteAsync()).ConfigureAwait(false);
 
             requestCount.Should().Be(0);
             probe.RegistrationStopCount.Should().Be(1);
@@ -317,7 +319,7 @@ public sealed class RuntimeLifecycleActionTests
         }
         finally
         {
-            await app.DisposeAsync();
+            await app.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -427,7 +429,7 @@ public sealed class RuntimeLifecycleActionTests
         };
         using var workspace = new TemporaryWorkspace();
         var adapter = CreateAdapter(workspace, probe);
-        await adapter.StartAsync("test-host");
+        await adapter.StartAsync("test-host").ConfigureAwait(false);
 
         var cleanupEvents = new ConcurrentQueue<string>();
         var cleanup = new RuntimeHostCleanup(
@@ -442,11 +444,11 @@ public sealed class RuntimeLifecycleActionTests
 
         Func<Task> stop = async () => await adapter.StopAsync(
             onPrepare: _ => cleanup.BeginAsync(),
-            onComplete: _ => cleanup.CompleteAsync());
+            onComplete: _ => cleanup.CompleteAsync()).ConfigureAwait(false);
         if (cancel)
-            await stop.Should().ThrowAsync<KernelActionCancelledException>();
+            await stop.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         else
-            await stop.Should().ThrowAsync<KernelActionFailedException>();
+            await stop.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
 
         cleanup.PreparationAttempted.Should().BeTrue();
         cleanup.CompletionAttempted.Should().BeTrue();
@@ -537,10 +539,12 @@ public sealed class RuntimeLifecycleActionTests
             {
                 case "cancel": return control.Cancel("TEST_CANCEL", "Initialization cancelled.");
                 case "fail": return control.Fail(new ExecutionError("TEST_FAILURE", "Initialization denied."));
-                case "replace-input": return await control.ProceedWithInputAsync(
+                case "replace-input":
+                    return await control.ProceedWithInputAsync(
                     new ActionReplacement<string>("wrong-preparation", "Test invalid replacement."), cancellationToken).ConfigureAwait(false);
                 case "replace-result": return control.ReplaceResult(true, "Test skipped required terminal.");
-                case "repeat": return await control.RepeatAsync(
+                case "repeat":
+                    return await control.RepeatAsync(
                     new ActionRepeatRequest<string>(context.Action, "Test invalid repeat."), cancellationToken).ConfigureAwait(false);
                 case "skip": return KernelActionOutcome<bool>.Completed(true);
                 case "swallow-failure":

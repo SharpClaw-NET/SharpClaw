@@ -90,7 +90,7 @@ public sealed partial class BootPage : Page
                 return;
             }
         }
-        await RunConnectionFlowAsync(customUrl: null, _retryCts.Token);
+        await RunConnectionFlowAsync(customUrl: null, _retryCts.Token).ConfigureAwait(true);
     }
 
     // ---------------------------------------------------------------
@@ -100,8 +100,8 @@ public sealed partial class BootPage : Page
     {
         try
         {
-            await _connectionGate.WaitAsync(ct);
-            try { await RunConnectionCoreAsync(customUrl, ct); }
+            await _connectionGate.WaitAsync(ct).ConfigureAwait(true);
+            try { await RunConnectionCoreAsync(customUrl, ct).ConfigureAwait(true); }
             finally { _connectionGate.Release(); }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
@@ -114,7 +114,7 @@ public sealed partial class BootPage : Page
 
         try
         {
-            await _model.ApplyCustomUrlAsync(customUrl, ct);
+            await _model.ApplyCustomUrlAsync(customUrl, ct).ConfigureAwait(true);
             for (int attempt = 1; attempt <= BootModel.MaxRetries; attempt++)
             {
                 if (ct.IsCancellationRequested)
@@ -127,12 +127,12 @@ public sealed partial class BootPage : Page
                 if (attempt > 1)
                 {
                     Cursor.SetCommand($"Retrying ({attempt}/{BootModel.MaxRetries})...");
-                    await Task.Delay(600, ct);
+                    await Task.Delay(600, ct).ConfigureAwait(true);
                     Cursor.ClearCommand();
                 }
 
                 // -- Step 1: Backend (silent) --
-                var backendResult = await _model.RunBackendStepAsync(ct);
+                var backendResult = await _model.RunBackendStepAsync(ct).ConfigureAwait(true);
                 ct.ThrowIfCancellationRequested();
                 diag.Add(backendResult.Line);
 
@@ -141,17 +141,17 @@ public sealed partial class BootPage : Page
                     ShowFailure(diag.ToImmutable());
                     if (_model.ShouldRetry(backendResult, attempt))
                     {
-                        await RetryPauseAsync(attempt, diag.ToImmutable(), ct);
+                        await RetryPauseAsync(attempt, diag.ToImmutable(), ct).ConfigureAwait(true);
                         continue;
                     }
                     break;
                 }
 
                 // -- Step 2: Type "sharpclaw echo" → run echo probe --
-                await Cursor.TypeCommandAsync("sharpclaw echo");
+                await Cursor.TypeCommandAsync("sharpclaw echo").ConfigureAwait(true);
                 StartDots(DotsBlock);
 
-                var echoResult = await _model.RunEchoStepAsync(ct);
+                var echoResult = await _model.RunEchoStepAsync(ct).ConfigureAwait(true);
                 ct.ThrowIfCancellationRequested();
                 diag.Add(echoResult.Line);
 
@@ -162,7 +162,7 @@ public sealed partial class BootPage : Page
                 {
                     if (_model.ShouldRetry(echoResult, attempt))
                     {
-                        await RetryPauseAsync(attempt, diag.ToImmutable(), ct);
+                        await RetryPauseAsync(attempt, diag.ToImmutable(), ct).ConfigureAwait(true);
                         continue;
                     }
                     break;
@@ -171,10 +171,10 @@ public sealed partial class BootPage : Page
                 // -- Step 3: Type "sharpclaw ping" → run ping probe --
                 Cursor.Freeze();
                 PingCursor.Visibility = Visibility.Visible;
-                await PingCursor.TypeCommandAsync("sharpclaw ping");
+                await PingCursor.TypeCommandAsync("sharpclaw ping").ConfigureAwait(true);
                 StartDots(PingDotsBlock);
 
-                var (pingResult, apiKeyLine) = await _model.RunPingStepAsync(ct);
+                var (pingResult, apiKeyLine) = await _model.RunPingStepAsync(ct).ConfigureAwait(true);
                 ct.ThrowIfCancellationRequested();
                 if (apiKeyLine is not null) diag.Add(apiKeyLine);
                 diag.Add(pingResult.Line);
@@ -185,7 +185,7 @@ public sealed partial class BootPage : Page
                 if (pingResult.Ok)
                 {
                     // Optional: start the public gateway (non-blocking, non-fatal).
-                    var gatewayResult = await _model.RunGatewayStepAsync(ct);
+                    var gatewayResult = await _model.RunGatewayStepAsync(ct).ConfigureAwait(true);
                     if (gatewayResult is not null)
                         diag.Add(gatewayResult.Line);
 
@@ -196,7 +196,7 @@ public sealed partial class BootPage : Page
 
                 if (_model.ShouldRetry(pingResult, attempt))
                 {
-                    await RetryPauseAsync(attempt, diag.ToImmutable(), ct);
+                    await RetryPauseAsync(attempt, diag.ToImmutable(), ct).ConfigureAwait(true);
                     continue;
                 }
             }
@@ -271,7 +271,7 @@ public sealed partial class BootPage : Page
         var msg = $"Attempt {attempt} of {BootModel.MaxRetries} failed. Retrying in {(int)BootModel.RetryDelay.TotalSeconds}s...";
         ShowFinalStatus("⟳", GrayColor, msg, LightGrayColor);
 
-        try { await Task.Delay(BootModel.RetryDelay, ct); }
+        try { await Task.Delay(BootModel.RetryDelay, ct).ConfigureAwait(true); }
         catch (OperationCanceledException) { /* caller checks ct */ }
     }
 
@@ -423,7 +423,7 @@ public sealed partial class BootPage : Page
         Clipboard.SetContent(dp);
 
         CopyLogsLabel.Text = "Copied!";
-        await Task.Delay(2000);
+        await Task.Delay(2000).ConfigureAwait(true);
         CopyLogsLabel.Text = "Copy";
     }
 
@@ -461,7 +461,7 @@ public sealed partial class BootPage : Page
             var url = UrlBox.Text?.Trim();
             _retryCts?.Dispose();
             _retryCts = new CancellationTokenSource();
-            await RunConnectionFlowAsync(url, _retryCts.Token);
+            await RunConnectionFlowAsync(url, _retryCts.Token).ConfigureAwait(true);
         }
     }
 

@@ -4,7 +4,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 /// Consistent JSON error envelope for all gateway responses.
 /// Shape: <c>{ "error": "...", "code": "...", "requestId": "..." }</c>
 /// </summary>
-public static class GatewayErrors
+internal static class GatewayErrors
 {
     // ── Error codes ──────────────────────────────────────────────
 

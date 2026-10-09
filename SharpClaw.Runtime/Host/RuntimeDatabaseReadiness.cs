@@ -13,11 +13,12 @@ internal sealed class RuntimeDatabaseReadiness(
 {
     public async Task ValidateAsync(CancellationToken cancellationToken = default)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
+        var scope = scopeFactory.CreateAsyncScope();
+        await using var scopeAsyncDisposal = scope.ConfigureAwait(false);
         var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
-        await selection.Provider.InitializeAsync(dbContext, cancellationToken);
+        await selection.Provider.InitializeAsync(dbContext, cancellationToken).ConfigureAwait(false);
 
-        if (!await dbContext.Database.CanConnectAsync(cancellationToken))
+        if (!await dbContext.Database.CanConnectAsync(cancellationToken).ConfigureAwait(false))
         {
             throw new InvalidOperationException(
                 $"The configured {persistenceOptions.ProviderKey} database is not ready.");

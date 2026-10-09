@@ -11,7 +11,7 @@ namespace SharpClaw.Runtime.Host.Api;
 /// read these files (i.e., running as the same user) can authenticate with
 /// the localhost API.
 /// </summary>
-public sealed class ApiKeyProvider
+internal sealed class ApiKeyProvider
 {
     private readonly SharpClawInstancePaths _instancePaths;
 

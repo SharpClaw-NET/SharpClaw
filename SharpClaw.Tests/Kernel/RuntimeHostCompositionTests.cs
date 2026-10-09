@@ -28,8 +28,10 @@ using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeHostCompositionTests
+internal sealed class RuntimeHostCompositionTests
 {
     [Test]
     [NonParallelizable]
@@ -91,7 +93,8 @@ public sealed class RuntimeHostCompositionTests
             databaseOptions,
             registrationSet.Services);
 
-        await using var app = builder.Build();
+        var app = builder.Build();
+        await using var appAsyncDisposal = app.ConfigureAwait(false);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         readiness.IsReady.Should().BeFalse();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
@@ -108,43 +111,46 @@ public sealed class RuntimeHostCompositionTests
             .Should().BeTrue();
         adapter.Graph.ContainsAction(new SharpClawActionKey("storage.query"))
             .Should().BeTrue();
-        await using (var jobsScope = app.Services.CreateAsyncScope())
         {
-            jobsScope.ServiceProvider
-                .GetRequiredService<KernelJobsStore>()
-                .Should().NotBeNull();
-            jobsScope.ServiceProvider
-                .GetRequiredService<KernelJobsCoordinator>()
-                .Should().NotBeNull();
+            var jobsScope = app.Services.CreateAsyncScope();
+            await using (jobsScope.ConfigureAwait(false))
+            {
+                jobsScope.ServiceProvider
+                    .GetRequiredService<KernelJobsStore>()
+                    .Should().NotBeNull();
+                jobsScope.ServiceProvider
+                    .GetRequiredService<KernelJobsCoordinator>()
+                    .Should().NotBeNull();
+            }
         }
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
-        await registrationSet.ConnectCapabilitiesAsync(app.Services);
-        await adapter.StartAsync("test-host");
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
+        await registrationSet.ConnectCapabilitiesAsync(app.Services).ConfigureAwait(false);
+        await adapter.StartAsync("test-host").ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
 
         try
         {
-            await app.StartAsync();
+            await app.StartAsync().ConfigureAwait(false);
             var cliContext = adapter.CreateCliExecutionContext(RequestPrincipal.Anonymous);
             var firstCli = await registrationSet.Application.TryInvokeCliAsync(
                 "test-harness-scope",
                 [],
                 adapter,
                 cliContext,
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
             var secondCli = await registrationSet.Application.TryInvokeCliAsync(
                 "test-harness-scope",
                 [],
                 adapter,
                 cliContext,
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
             var thirdCli = await registrationSet.Application.TryInvokeCliAsync(
                 "test-harness-scope",
                 [],
                 adapter,
                 cliContext,
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
             firstCli.Should().NotBeNull();
             secondCli.Should().NotBeNull();
             thirdCli.Should().NotBeNull();
@@ -163,16 +169,16 @@ public sealed class RuntimeHostCompositionTests
             };
             using var response = await client.PostAsJsonAsync(
                 "/chat",
-                new { message = "hello" });
-            var body = await response.Content.ReadAsStringAsync();
+                new { message = "hello" }).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
             response.StatusCode.Should().Be(HttpStatusCode.OK, body);
             body.Should().Contain("test harness response");
 
             using var streamResponse = await client.PostAsJsonAsync(
                 "/chat/stream",
-                new { message = "stream hello" });
-            var streamBody = await streamResponse.Content.ReadAsStringAsync();
+                new { message = "stream hello" }).ConfigureAwait(false);
+            var streamBody = await streamResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
 
             streamResponse.StatusCode.Should().Be(HttpStatusCode.OK, streamBody);
             streamResponse.Content.Headers.ContentType!.MediaType
@@ -185,8 +191,8 @@ public sealed class RuntimeHostCompositionTests
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync();
-            await app.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
+            await app.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -258,7 +264,8 @@ public sealed class RuntimeHostCompositionTests
             },
         });
 
-        await using var app = builder.Build();
+        var app = builder.Build();
+        await using var appAsyncDisposal_ = app.ConfigureAwait(false);
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
         using (var jobsScope = app.Services.CreateScope())
         {
@@ -267,15 +274,15 @@ public sealed class RuntimeHostCompositionTests
                 .Should().NotBeNull();
         }
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
-        await adapter.StartAsync("jobs-http-test");
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
+        await adapter.StartAsync("jobs-http-test").ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
         app.MapHandlers(typeof(KernelJobsHandlers).Assembly);
 
         try
         {
-            await app.StartAsync();
+            await app.StartAsync().ConfigureAwait(false);
             using var client = new HttpClient
             {
                 BaseAddress = new Uri(app.Urls.Single()),
@@ -294,8 +301,8 @@ public sealed class RuntimeHostCompositionTests
                             value = "queued-value",
                         }),
                     },
-                });
-            var submitBody = await submitResponse.Content.ReadAsStringAsync();
+                }).ConfigureAwait(false);
+            var submitBody = await submitResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
 
             submitResponse.StatusCode.Should().Be(HttpStatusCode.OK, submitBody);
             using var submitted = JsonDocument.Parse(submitBody);
@@ -305,8 +312,8 @@ public sealed class RuntimeHostCompositionTests
 
             using var dispatchResponse = await client.PostAsync(
                 $"/jobs/{jobId:D}/dispatch",
-                content: null);
-            var dispatchBody = await dispatchResponse.Content.ReadAsStringAsync();
+                content: null).ConfigureAwait(false);
+            var dispatchBody = await dispatchResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
 
             dispatchResponse.StatusCode.Should().Be(HttpStatusCode.OK, dispatchBody);
             using var dispatched = JsonDocument.Parse(dispatchBody);
@@ -323,37 +330,37 @@ public sealed class RuntimeHostCompositionTests
             jobCapture.ExecutionCount.Should().Be(1);
 
             using var progressResponse = await client.GetAsync(
-                $"/jobs/{jobId:D}/progress");
+                $"/jobs/{jobId:D}/progress").ConfigureAwait(false);
             progressResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             using (var progress = JsonDocument.Parse(
-                await progressResponse.Content.ReadAsStringAsync()))
+                await progressResponse.Content.ReadAsStringAsync().ConfigureAwait(false)))
             {
                 progress.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
             }
 
             using var attemptsResponse = await client.GetAsync(
-                $"/jobs/{jobId:D}/attempts");
+                $"/jobs/{jobId:D}/attempts").ConfigureAwait(false);
             attemptsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             using (var attempts = JsonDocument.Parse(
-                await attemptsResponse.Content.ReadAsStringAsync()))
+                await attemptsResponse.Content.ReadAsStringAsync().ConfigureAwait(false)))
             {
                 attempts.RootElement.GetArrayLength().Should().Be(1);
             }
 
             using var artifactResponse = await client.GetAsync(
-                $"/jobs/{jobId:D}/artifact");
+                $"/jobs/{jobId:D}/artifact").ConfigureAwait(false);
             artifactResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             var artifact = await artifactResponse.Content
-                .ReadFromJsonAsync<JobPayloadEnvelope>();
+                .ReadFromJsonAsync<JobPayloadEnvelope>().ConfigureAwait(false);
             artifact.Should().NotBeNull();
             artifact!.Value.Should().Contain("queued-value-executed");
 
             using var recoveryResponse = await client.PostAsync(
                 $"/jobs/{jobId:D}/recover",
-                content: null);
+                content: null).ConfigureAwait(false);
             recoveryResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             using (var recovered = JsonDocument.Parse(
-                await recoveryResponse.Content.ReadAsStringAsync()))
+                await recoveryResponse.Content.ReadAsStringAsync().ConfigureAwait(false)))
             {
                 recovered.RootElement.GetProperty("status").GetInt32()
                     .Should().Be((int)JobStatus.Completed);
@@ -361,10 +368,10 @@ public sealed class RuntimeHostCompositionTests
 
             using var replayResponse = await client.PostAsync(
                 $"/jobs/{jobId:D}/dispatch",
-                content: null);
+                content: null).ConfigureAwait(false);
             replayResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             using (var replay = JsonDocument.Parse(
-                await replayResponse.Content.ReadAsStringAsync()))
+                await replayResponse.Content.ReadAsStringAsync().ConfigureAwait(false)))
             {
                 replay.RootElement.GetProperty("outcome").GetInt32()
                     .Should().Be((int)ActionOutcomeKind.Completed);
@@ -385,30 +392,30 @@ public sealed class RuntimeHostCompositionTests
                             value = "second-value",
                         }),
                     },
-                });
+                }).ConfigureAwait(false);
             secondSubmitResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             using var secondSubmitted = JsonDocument.Parse(
-                await secondSubmitResponse.Content.ReadAsStringAsync());
+                await secondSubmitResponse.Content.ReadAsStringAsync().ConfigureAwait(false));
             var secondJobId = secondSubmitted.RootElement.GetProperty("id").GetGuid();
 
             using var secondDispatchResponse = await client.PostAsync(
                 $"/jobs/{secondJobId:D}/dispatch",
-                content: null);
+                content: null).ConfigureAwait(false);
             secondDispatchResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             jobCapture.ExecutionCount.Should().Be(2);
             jobCapture.ExecutionInstanceIds.Should().OnlyHaveUniqueItems();
             jobCapture.ExecutionInstanceIds.Should().HaveCount(2);
 
             using var secondDeleteResponse = await client.DeleteAsync(
-                $"/jobs/{secondJobId:D}");
+                $"/jobs/{secondJobId:D}").ConfigureAwait(false);
             secondDeleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
             using var deleteResponse = await client.DeleteAsync(
-                $"/jobs/{jobId:D}");
+                $"/jobs/{jobId:D}").ConfigureAwait(false);
             deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
             using var deletedResponse = await client.GetAsync(
-                $"/jobs/{jobId:D}");
+                $"/jobs/{jobId:D}").ConfigureAwait(false);
             deletedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
             jobCapture.ActiveCount.Should().Be(0);
             jobCapture.DisposedCount.Should().Be(jobCapture.CreatedCount);
@@ -416,8 +423,8 @@ public sealed class RuntimeHostCompositionTests
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync();
-            await app.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
+            await app.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -485,11 +492,12 @@ public sealed class RuntimeHostCompositionTests
             ],
         });
 
-        await using var app = builder.Build();
+        var app = builder.Build();
+        await using var appAsyncDisposal__ = app.ConfigureAwait(false);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
-        await adapter.StartAsync("request-context-test");
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
+        await adapter.StartAsync("request-context-test").ConfigureAwait(false);
         readiness.MarkReady();
         app.Use(async (context, next) =>
         {
@@ -510,26 +518,26 @@ public sealed class RuntimeHostCompositionTests
                     256,
                     JsonSerializer.SerializeToElement(new { subject })),
             ]);
-            await next(context);
+            await next(context).ConfigureAwait(false);
         });
         KernelHostEndpoints.Map(app);
 
         try
         {
-            await app.StartAsync();
+            await app.StartAsync().ConfigureAwait(false);
             using var client = new HttpClient
             {
                 BaseAddress = new Uri(app.Urls.Single()),
             };
             var first = SendAuthenticatedChatAsync(client, "caller-a", "idempotency-a");
             var second = SendAuthenticatedChatAsync(client, "caller-b", "idempotency-b");
-            await probe.Observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await probe.Observed.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             probe.Release.TrySetResult(true);
-            var responses = await Task.WhenAll(first, second);
+            var responses = await Task.WhenAll(first, second).ConfigureAwait(false);
             var completedResponse = await SendAuthenticatedChatAsync(
                 client,
                 "caller-c",
-                "idempotency-c");
+                "idempotency-c").ConfigureAwait(false);
             completedResponse.StatusCode.Should().Be(HttpStatusCode.OK, completedResponse.Body);
 
             responses.Should().AllSatisfy(response =>
@@ -568,7 +576,7 @@ public sealed class RuntimeHostCompositionTests
             var failedResponse = await SendAuthenticatedChatAsync(
                 client,
                 "caller-fail",
-                "idempotency-fail");
+                "idempotency-fail").ConfigureAwait(false);
             failedResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
             failedResponse.Body.Should().Contain("An internal server error occurred.");
             failedResponse.Body.Should().NotContain("request context probe failure");
@@ -577,7 +585,7 @@ public sealed class RuntimeHostCompositionTests
                 client,
                 "/chat/stream",
                 "caller-fail",
-                "idempotency-stream-fail");
+                "idempotency-stream-fail").ConfigureAwait(false);
             failedStreamResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
             failedStreamResponse.Body.Should().Contain("An internal server error occurred.");
             failedStreamResponse.Body.Should().NotContain("request context probe failure");
@@ -587,7 +595,7 @@ public sealed class RuntimeHostCompositionTests
             var afterFailureResponse = await SendAuthenticatedChatAsync(
                 client,
                 "caller-d",
-                "idempotency-d");
+                "idempotency-d").ConfigureAwait(false);
             afterFailureResponse.StatusCode.Should().Be(HttpStatusCode.OK, afterFailureResponse.Body);
             probe.Items.Should().Contain(item =>
                 item.Caller.SubjectId == "caller-d" && item.Depth == 0);
@@ -595,8 +603,8 @@ public sealed class RuntimeHostCompositionTests
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync();
-            await app.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
+            await app.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -604,7 +612,8 @@ public sealed class RuntimeHostCompositionTests
     [NonParallelizable]
     public async Task NormalHostPayload_ComposesPackagedProviderAndExecutesChat()
     {
-        await using var providerServer = await FakeOpenAiServer.CreateAsync();
+        var providerServer = await FakeOpenAiServer.CreateAsync().ConfigureAwait(false);
+        await using var providerServerAsyncDisposal = providerServer.ConfigureAwait(false);
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -657,7 +666,8 @@ public sealed class RuntimeHostCompositionTests
             databaseOptions,
             registrationSet.Services);
 
-        await using var app = builder.Build();
+        var app = builder.Build();
+        await using var appAsyncDisposal___ = app.ConfigureAwait(false);
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
         var graphPlugins = (IEnumerable<IProviderPlugin>?)adapter.Graph.GetService(
             typeof(IEnumerable<IProviderPlugin>));
@@ -665,22 +675,22 @@ public sealed class RuntimeHostCompositionTests
         graphPlugins!.Should().Contain(plugin => plugin.ProviderKey == "custom");
 
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
-        await adapter.StartAsync("normal-provider-test");
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
+        await adapter.StartAsync("normal-provider-test").ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
 
         try
         {
-            await app.StartAsync();
+            await app.StartAsync().ConfigureAwait(false);
             using var client = new HttpClient
             {
                 BaseAddress = new Uri(app.Urls.Single()),
             };
             using var response = await client.PostAsJsonAsync(
                 "/chat",
-                new { message = "normal packaged provider" });
-            var body = await response.Content.ReadAsStringAsync();
+                new { message = "normal packaged provider" }).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
             response.StatusCode.Should().Be(HttpStatusCode.OK, body);
             body.Should().Contain("normal packaged provider response");
@@ -689,8 +699,8 @@ public sealed class RuntimeHostCompositionTests
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync();
-            await app.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
+            await app.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -698,7 +708,8 @@ public sealed class RuntimeHostCompositionTests
     [NonParallelizable]
     public async Task NormalHostPayload_RestartRemainsStatelessWithoutContextRegistration()
     {
-        await using var providerServer = await FakeOpenAiServer.CreateAsync();
+        var providerServer = await FakeOpenAiServer.CreateAsync().ConfigureAwait(false);
+        await using var providerServerAsyncDisposal2 = providerServer.ConfigureAwait(false);
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -723,12 +734,12 @@ public sealed class RuntimeHostCompositionTests
                 };
                 using var response = await client.PostAsJsonAsync(
                     "/chat",
-                    new { message = "packaged restart" });
-                var body = await response.Content.ReadAsStringAsync();
+                    new { message = "packaged restart" }).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
                 response.StatusCode.Should().Be(HttpStatusCode.OK, body);
                 body.Should().Contain("normal packaged provider response");
-            });
+            }).ConfigureAwait(false);
 
         await RunNormalProductionHostAsync(
             workspace,
@@ -736,9 +747,9 @@ public sealed class RuntimeHostCompositionTests
             databaseOptions,
             async (app, _) =>
             {
-                await Task.CompletedTask;
+                await Task.CompletedTask.ConfigureAwait(false);
                 app.Services.GetService<IConversationStore>().Should().BeNull();
-            });
+            }).ConfigureAwait(false);
     }
 
     [Test]
@@ -768,10 +779,10 @@ public sealed class RuntimeHostCompositionTests
                     services,
                     async store =>
                     {
-                        await InvokeLlamaPlaceholderAsync(store, modelId);
-                        (await InvokeLlamaGetByModelIdAsync(store, modelId)).Should().NotBeNull();
-                    });
-            });
+                        await InvokeLlamaPlaceholderAsync(store, modelId).ConfigureAwait(false);
+                        (await InvokeLlamaGetByModelIdAsync(store, modelId).ConfigureAwait(false)).Should().NotBeNull();
+                    }).ConfigureAwait(false);
+            }).ConfigureAwait(false);
 
         await RunNormalProductionHostAsync(
             workspace,
@@ -784,12 +795,12 @@ public sealed class RuntimeHostCompositionTests
                     services,
                     async store =>
                     {
-                        var record = await InvokeLlamaGetByModelIdAsync(store, modelId);
+                        var record = await InvokeLlamaGetByModelIdAsync(store, modelId).ConfigureAwait(false);
                         record.Should().NotBeNull();
                         record!.GetType().GetProperty("ModelId")!.GetValue(record)
                             .Should().Be(modelId);
-                    });
-            });
+                    }).ConfigureAwait(false);
+            }).ConfigureAwait(false);
     }
 
     [Test]
@@ -815,19 +826,22 @@ public sealed class RuntimeHostCompositionTests
                 var adapter = runtime.Services.GetRequiredService<RuntimeKernelAdapter>();
                 runtime.Services.GetRequiredService<IActionDispatcher>()
                     .Should().BeSameAs(adapter.ActionDispatcher);
-                await using (var storageScope = runtime.Services.CreateAsyncScope())
                 {
-                    storageScope.ServiceProvider.GetServices<IScopedStorageGateway>()
-                        .Should().ContainSingle();
+                    var storageScope = runtime.Services.CreateAsyncScope();
+                    await using (storageScope.ConfigureAwait(false))
+                    {
+                        storageScope.ServiceProvider.GetServices<IScopedStorageGateway>()
+                            .Should().ContainSingle();
+                    }
                 }
 
                 using (var runtimeClient = new HttpClient
-                       {
-                           BaseAddress = new Uri(runtime.Urls.Single()),
-                       })
-                using (var runtimeResponse = await runtimeClient.GetAsync("/models/local/"))
                 {
-                    var body = await runtimeResponse.Content.ReadAsStringAsync();
+                    BaseAddress = new Uri(runtime.Urls.Single()),
+                })
+                using (var runtimeResponse = await runtimeClient.GetAsync("/models/local/").ConfigureAwait(false))
+                {
+                    var body = await runtimeResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                     runtimeResponse.StatusCode.Should().Be(HttpStatusCode.OK, body);
                     JsonDocument.Parse(body).RootElement.ValueKind.Should().Be(JsonValueKind.Array);
                 }
@@ -852,25 +866,26 @@ public sealed class RuntimeHostCompositionTests
                     client.Timeout = TimeSpan.FromSeconds(30);
                 });
 
-                await using var gateway = gatewayBuilder.Build();
+                var gateway = gatewayBuilder.Build();
+                await using var gatewayAsyncDisposal = gateway.ConfigureAwait(false);
                 gateway.MapGatewayProxyEndpoints();
-                await gateway.StartAsync();
+                await gateway.StartAsync().ConfigureAwait(false);
                 try
                 {
                     using var gatewayClient = new HttpClient
                     {
                         BaseAddress = new Uri(gateway.Urls.Single()),
                     };
-                    using var gatewayResponse = await gatewayClient.GetAsync("/api/models/local/");
-                    var body = await gatewayResponse.Content.ReadAsStringAsync();
+                    using var gatewayResponse = await gatewayClient.GetAsync("/api/models/local/").ConfigureAwait(false);
+                    var body = await gatewayResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                     gatewayResponse.StatusCode.Should().Be(HttpStatusCode.OK, body);
                     JsonDocument.Parse(body).RootElement.ValueKind.Should().Be(JsonValueKind.Array);
                 }
                 finally
                 {
-                    await gateway.StopAsync();
+                    await gateway.StopAsync().ConfigureAwait(false);
                 }
-            });
+            }).ConfigureAwait(false);
     }
 
     [Test]
@@ -904,12 +919,12 @@ public sealed class RuntimeHostCompositionTests
                 };
                 using var response = await client.PostAsJsonAsync(
                     "/chat",
-                    new { message = "restart me" });
-                var body = await response.Content.ReadAsStringAsync();
+                    new { message = "restart me" }).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
                 response.StatusCode.Should().Be(HttpStatusCode.OK, body);
                 body.Should().Contain("test harness response");
-            });
+            }).ConfigureAwait(false);
 
         await RunProductionHostAsync(
             workspace,
@@ -917,9 +932,9 @@ public sealed class RuntimeHostCompositionTests
             databaseOptions,
             async app =>
             {
-                await Task.CompletedTask;
+                await Task.CompletedTask.ConfigureAwait(false);
                 app.Services.GetService<IConversationStore>().Should().BeNull();
-            });
+            }).ConfigureAwait(false);
     }
 
     [Test]
@@ -944,7 +959,8 @@ public sealed class RuntimeHostCompositionTests
             PersistenceOptions(workspace.DatabaseDirectory),
             registrationSet.Services);
 
-        await using var provider = services.BuildServiceProvider();
+        var provider = services.BuildServiceProvider();
+        await using var providerAsyncDisposal = provider.ConfigureAwait(false);
         var adapter = provider.GetRequiredService<RuntimeKernelAdapter>();
         await adapter.StartAsync("unconfigured-host-setup").ConfigureAwait(false);
         try
@@ -1045,7 +1061,7 @@ public sealed class RuntimeHostCompositionTests
         HttpClient client,
         string subject,
         string idempotencyKey)
-        => await SendAuthenticatedAsync(client, "/chat", subject, idempotencyKey);
+        => await SendAuthenticatedAsync(client, "/chat", subject, idempotencyKey).ConfigureAwait(false);
 
     private static async Task<(HttpStatusCode StatusCode, string Body, string? ContentType)> SendAuthenticatedAsync(
         HttpClient client,
@@ -1059,10 +1075,10 @@ public sealed class RuntimeHostCompositionTests
         };
         request.Headers.Add("X-Test-Subject", subject);
         request.Headers.Add("Idempotency-Key", idempotencyKey);
-        using var response = await client.SendAsync(request);
+        using var response = await client.SendAsync(request).ConfigureAwait(false);
         return (
             response.StatusCode,
-            await response.Content.ReadAsStringAsync(),
+            await response.Content.ReadAsStringAsync().ConfigureAwait(false),
             response.Content.Headers.ContentType?.MediaType);
     }
 
@@ -1114,24 +1130,25 @@ public sealed class RuntimeHostCompositionTests
             databaseOptions,
             registrationSet.Services);
 
-        await using var app = builder.Build();
+        var app = builder.Build();
+        await using var appAsyncDisposal____ = app.ConfigureAwait(false);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
-        await adapter.StartAsync("test-host");
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
+        await adapter.StartAsync("test-host").ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
 
         try
         {
-            await app.StartAsync();
-            await operation(app);
+            await app.StartAsync().ConfigureAwait(false);
+            await operation(app).ConfigureAwait(false);
         }
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync();
-            await app.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
+            await app.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -1173,26 +1190,27 @@ public sealed class RuntimeHostCompositionTests
             databaseOptions,
             registrationSet.Services);
 
-        await using var app = builder.Build();
+        var app = builder.Build();
+        await using var appAsyncDisposal_____ = app.ConfigureAwait(false);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
-        await registrationSet.ConnectCapabilitiesAsync(app.Services);
-        await adapter.StartAsync("normal-provider-restart-test");
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
+        await registrationSet.ConnectCapabilitiesAsync(app.Services).ConfigureAwait(false);
+        await adapter.StartAsync("normal-provider-restart-test").ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
         registrationSet.Application.MapEndpoints(app, adapter);
 
         try
         {
-            await app.StartAsync();
-            await operation(app, registrationSet.Services);
+            await app.StartAsync().ConfigureAwait(false);
+            await operation(app, registrationSet.Services).ConfigureAwait(false);
         }
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync();
-            await app.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
+            await app.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -1210,9 +1228,9 @@ public sealed class RuntimeHostCompositionTests
             throw new InvalidOperationException("The LlamaSharp LocalModelStore was not registered.");
         await adapter.Graph.RunInServiceScopeAsync(async serviceProvider =>
         {
-            await operation(serviceProvider.GetRequiredService(storeType));
+            await operation(serviceProvider.GetRequiredService(storeType)).ConfigureAwait(false);
             return true;
-        });
+        }).ConfigureAwait(false);
     }
 
     private static async Task InvokeLlamaPlaceholderAsync(object store, Guid modelId)
@@ -1229,7 +1247,7 @@ public sealed class RuntimeHostCompositionTests
         var task = (Task)method.Invoke(
             store,
             [modelId, resolvedFile, "https://example.invalid/model.gguf", "model.gguf", CancellationToken.None])!;
-        await task;
+        await task.ConfigureAwait(false);
     }
 
     private static async Task<object?> InvokeLlamaGetByModelIdAsync(object store, Guid modelId)
@@ -1237,7 +1255,7 @@ public sealed class RuntimeHostCompositionTests
         var method = store.GetType().GetMethod("GetByModelIdAsync")
             ?? throw new InvalidOperationException("The LlamaSharp LocalModelStore read method was not loaded.");
         var task = (Task)method.Invoke(store, [modelId, CancellationToken.None])!;
-        await task;
+        await task.ConfigureAwait(false);
         return task.GetType().GetProperty("Result")!.GetValue(task);
     }
 
@@ -1293,8 +1311,8 @@ public sealed class RuntimeHostCompositionTests
             probe.Record(context);
             if (probe.ShouldFail(context.Caller.SubjectId))
                 throw new ApplicationException("request context probe failure");
-            await probe.Release.Task.WaitAsync(cancellationToken);
-            return await control.ProceedAsync(cancellationToken);
+            await probe.Release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -1575,7 +1593,7 @@ public sealed class RuntimeHostCompositionTests
                         completion_tokens = 1,
                     },
                 }));
-            await app.StartAsync();
+            await app.StartAsync().ConfigureAwait(false);
             return new FakeOpenAiServer(app);
         }
 

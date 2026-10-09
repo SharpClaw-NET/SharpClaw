@@ -7,7 +7,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 /// Tracks processing durations over the last hour so clients can
 /// estimate wait times during high-load periods.
 /// </summary>
-public sealed class QueueMetrics
+internal sealed class QueueMetrics
 {
     private readonly ConcurrentQueue<(long CompletedTicks, double DurationMs)> _completions = new();
     private long _totalEnqueued;

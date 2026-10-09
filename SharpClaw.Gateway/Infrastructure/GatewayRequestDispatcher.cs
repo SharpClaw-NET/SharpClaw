@@ -13,7 +13,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 ///     queue is enabled; otherwise they fall through to direct calls.</item>
 /// </list>
 /// </summary>
-public sealed class GatewayRequestDispatcher(
+internal sealed class GatewayRequestDispatcher(
     InternalApiClient coreApi,
     RequestQueueService queue,
     IHttpContextAccessor httpContextAccessor,
@@ -60,7 +60,7 @@ public sealed class GatewayRequestDispatcher(
         var jsonBody = body is not null ? JsonSerializer.Serialize(body, JsonOptions) : null;
 
         if (!queue.Enabled)
-            return await DirectForwardAsync(method, path, jsonBody, ct);
+            return await DirectForwardAsync(method, path, jsonBody, ct).ConfigureAwait(false);
 
         var request = new QueuedRequest
         {
@@ -82,9 +82,10 @@ public sealed class GatewayRequestDispatcher(
 
         // Register cancellation so if the HTTP request is aborted the
         // queued item's TCS is cancelled as well.
-        await using var reg = ct.Register(() => request.Completion.TrySetCanceled(ct));
+        var reg = ct.Register(() => request.Completion.TrySetCanceled(ct));
+        await using var regAsyncDisposal = reg.ConfigureAwait(false);
 
-        var response = await request.Completion.Task;
+        var response = await request.Completion.Task.ConfigureAwait(false);
 
         if (response.Meta is not null)
             httpContextAccessor.HttpContext?.Items["QueueMeta"] = response.Meta;
@@ -105,8 +106,8 @@ public sealed class GatewayRequestDispatcher(
                     new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
             }
 
-            using var response = await coreApi.SendRawAsync(httpRequest, ct);
-            var responseBody = await response.Content.ReadAsStringAsync(ct);
+            using var response = await coreApi.SendRawAsync(httpRequest, ct).ConfigureAwait(false);
+            var responseBody = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
             return new QueuedResponse
             {

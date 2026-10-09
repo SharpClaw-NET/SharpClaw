@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 namespace SharpClaw.Runtime.Host.Api;
 
-public sealed class ExceptionHandlingMiddleware(
+internal sealed class ExceptionHandlingMiddleware(
     RequestDelegate next,
     ILogger<ExceptionHandlingMiddleware> logger)
 {
@@ -20,7 +20,7 @@ public sealed class ExceptionHandlingMiddleware(
     {
         try
         {
-            await next(context);
+            await next(context).ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (context.RequestAborted.IsCancellationRequested)
         {
@@ -40,7 +40,7 @@ public sealed class ExceptionHandlingMiddleware(
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(JsonSerializer.Serialize(
                 new { error = GenericServerError },
-                JsonOptions));
+                JsonOptions)).ConfigureAwait(false);
         }
     }
 }

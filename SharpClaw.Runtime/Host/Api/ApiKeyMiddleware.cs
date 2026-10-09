@@ -9,7 +9,7 @@ using SharpClaw.Runtime.Host;
 
 namespace SharpClaw.Runtime.Host.Api;
 
-public sealed class ApiKeyMiddleware(
+internal sealed class ApiKeyMiddleware(
     RequestDelegate next,
     ApiKeyProvider keyProvider,
     IConfiguration configuration,
@@ -33,7 +33,7 @@ public sealed class ApiKeyMiddleware(
                     || HasValidApiKey(context, keyProvider.ApiKey);
                 return ValueTask.FromResult(baseAllowed);
             },
-            context.RequestAborted);
+            context.RequestAborted).ConfigureAwait(false);
 
         if (!allowed)
         {
@@ -44,12 +44,12 @@ public sealed class ApiKeyMiddleware(
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(
                 $$"""{"error":"{{AuthErrorCodes.InvalidApiKey}}","message":"The X-Api-Key header is missing or invalid. Obtain the current session key from the local key file."}""",
-                context.RequestAborted);
+                context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
         // The protected pipeline is outside the repeatable security decision.
-        await next(context);
+        await next(context).ConfigureAwait(false);
     }
 
     private static bool HasValidApiKey(HttpContext context, string expectedKey)

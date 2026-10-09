@@ -10,8 +10,10 @@ namespace SharpClaw.Tests.Architecture;
 /// ship Runtime.Host and Gateway payloads, but those payloads must not become
 /// project or assembly references in the client or gateway compile graph.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeClientBoundaryGuardrailTests
+internal sealed class RuntimeClientBoundaryGuardrailTests
 {
     [Test]
     public void Gateway_project_must_not_reference_runtime_or_client_projects()

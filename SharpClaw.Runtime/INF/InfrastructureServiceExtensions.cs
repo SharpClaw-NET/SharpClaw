@@ -69,10 +69,11 @@ public static class InfrastructureServiceExtensions
 
     public static async Task InitializeInfrastructureAsync(this IServiceProvider services)
     {
-        await using var scope = services.CreateAsyncScope();
+        var scope = services.CreateAsyncScope();
+        await using var scopeAsyncDisposal = scope.ConfigureAwait(false);
         var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var provider = scope.ServiceProvider.GetRequiredService<PersistenceProviderSelection>().Provider;
-        await provider.InitializeAsync(dbContext, CancellationToken.None);
+        await provider.InitializeAsync(dbContext, CancellationToken.None).ConfigureAwait(false);
     }
 
     public static Task ShutdownInfrastructureAsync(this IServiceProvider services)

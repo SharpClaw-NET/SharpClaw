@@ -182,7 +182,7 @@ public sealed class TestHarnessToolHandler(TestHarnessState state) : IToolHandle
 
         behavior = ApplyOverrides(behavior, invocation.Arguments);
         if (behavior.LatencyMs > 0)
-            await Task.Delay(behavior.LatencyMs, ct);
+            await Task.Delay(behavior.LatencyMs, ct).ConfigureAwait(false);
         if (behavior.ThrowFailure)
             return ToolResult.Error("test harness tool failure");
 

@@ -1,6 +1,6 @@
 namespace SharpClaw.Gateway.Configuration;
 
-public sealed class GatewayEndpointOptions
+internal sealed class GatewayEndpointOptions
 {
     public const string SectionName = "Gateway:Endpoints";
 

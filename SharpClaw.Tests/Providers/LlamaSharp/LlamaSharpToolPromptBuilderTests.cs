@@ -3,8 +3,10 @@ using LlamaSharp.ToolCallEnvelopes;
 
 namespace SharpClaw.Tests.Providers.LlamaSharp;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public class LlamaSharpToolPromptBuilderTests
+internal class LlamaSharpToolPromptBuilderTests
 {
     // ── System prompt ─────────────────────────────────────────────
 

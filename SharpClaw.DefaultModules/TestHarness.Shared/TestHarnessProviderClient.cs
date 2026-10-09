@@ -44,7 +44,7 @@ internal sealed class TestHarnessProviderClient(
             providerParameters,
             completionParameters);
 
-        return await RunTurnAsync(sequence, "chat", ct);
+        return await RunTurnAsync(sequence, "chat", ct).ConfigureAwait(false);
     }
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
@@ -69,7 +69,7 @@ internal sealed class TestHarnessProviderClient(
             providerParameters,
             completionParameters);
 
-        return await RunTurnAsync(sequence, "chat-tools", ct);
+        return await RunTurnAsync(sequence, "chat-tools", ct).ConfigureAwait(false);
     }
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
@@ -120,13 +120,13 @@ internal sealed class TestHarnessProviderClient(
             var chunks = turn.StreamingChunks ?? SplitForStreaming(BuildContent(turn), 3);
 
             if (chunks.Count > 0 && turn.FirstTokenDelayMs > 0)
-                await Task.Delay(turn.FirstTokenDelayMs, ct);
+                await Task.Delay(turn.FirstTokenDelayMs, ct).ConfigureAwait(false);
 
             for (var i = 0; i < chunks.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
                 if (i > 0 && turn.PerChunkDelayMs > 0)
-                    await Task.Delay(turn.PerChunkDelayMs, ct);
+                    await Task.Delay(turn.PerChunkDelayMs, ct).ConfigureAwait(false);
 
                 yield return ChatStreamChunk.Text(chunks[i]);
 
@@ -138,7 +138,7 @@ internal sealed class TestHarnessProviderClient(
             }
 
             if (turn.CompletionDelayMs > 0)
-                await Task.Delay(turn.CompletionDelayMs, ct);
+                await Task.Delay(turn.CompletionDelayMs, ct).ConfigureAwait(false);
 
             yield return ChatStreamChunk.Final(BuildResult(turn));
         }
@@ -181,7 +181,7 @@ internal sealed class TestHarnessProviderClient(
 
             var delay = turn.FirstTokenDelayMs + turn.CompletionDelayMs;
             if (delay > 0)
-                await Task.Delay(delay, ct);
+                await Task.Delay(delay, ct).ConfigureAwait(false);
 
             return BuildResult(turn);
         }
@@ -295,7 +295,7 @@ internal sealed class TestHarnessCostFeed(string providerKey, TestHarnessState s
         {
             var behavior = state.CostBehavior;
             if (behavior.LatencyMs > 0)
-                await Task.Delay(behavior.LatencyMs, ct);
+                await Task.Delay(behavior.LatencyMs, ct).ConfigureAwait(false);
 
             return behavior.PermissionDenied ? null : behavior.Result;
         }

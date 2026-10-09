@@ -24,13 +24,13 @@ public sealed partial class MainPage
             return;
 
         e.Handled = true;
-        await SendMessageAsync();
+        await SendMessageAsync().ConfigureAwait(true);
     }
 
     private async void OnSendClick(object sender, RoutedEventArgs e)
     {
         if (_canChat && !_isSending && !string.IsNullOrWhiteSpace(MessageInput.Text))
-            await SendMessageAsync();
+            await SendMessageAsync().ConfigureAwait(true);
     }
 
     private async void OnCancelClick(object sender, RoutedEventArgs e)
@@ -46,7 +46,7 @@ public sealed partial class MainPage
                 {
                     _streamCts?.Cancel();
                     return ValueTask.CompletedTask;
-                });
+                }).ConfigureAwait(true);
         }
         catch
         {
@@ -58,7 +58,7 @@ public sealed partial class MainPage
     {
         // One owner covers the model check as well as the stream; repeated clicks do not queue sends.
         if (!_sendGate.Wait(0)) return;
-        try { await SendMessageCoreAsync(); }
+        try { await SendMessageCoreAsync().ConfigureAwait(true); }
         catch (Exception)
         {
             // Action rejection/cancellation must not crash an async UI event handler.
@@ -76,7 +76,7 @@ public sealed partial class MainPage
         // Recheck immediately before transport; a previously ready view is not authority.
         try
         {
-            if (!await RefreshChatAvailabilityAsync(lifetime.Token)) return;
+            if (!await RefreshChatAvailabilityAsync(lifetime.Token).ConfigureAwait(true)) return;
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { return; }
 
@@ -103,7 +103,7 @@ public sealed partial class MainPage
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "streaming");
             ScrollToBottom();
             return ValueTask.CompletedTask;
-        });
+        }).ConfigureAwait(true);
 
         if (!accepted)
             return;
@@ -132,14 +132,14 @@ public sealed partial class MainPage
                                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
                                 return ValueTask.CompletedTask;
                             },
-                            CancellationToken.None);
+                            CancellationToken.None).ConfigureAwait(true);
                         return;
                     }
 
                     var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
                     if (!contentType.Contains("event-stream", StringComparison.OrdinalIgnoreCase))
                     {
-                        var fallback = await response.Content.ReadAsStringAsync(streamToken);
+                        var fallback = await response.Content.ReadAsStringAsync(streamToken).ConfigureAwait(true);
                         await CommitStreamStateAsync(
                             _ =>
                             {
@@ -148,13 +148,14 @@ public sealed partial class MainPage
                                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
                                 return ValueTask.CompletedTask;
                             },
-                            CancellationToken.None);
+                            CancellationToken.None).ConfigureAwait(true);
                         return;
                     }
 
-                    await using var stream =
-                        await response.Content.ReadAsStreamAsync(streamToken);
-                    await ReadSseStreamAsync(stream, streamState, assistant, streamToken);
+                    var stream =
+                        await response.Content.ReadAsStreamAsync(streamToken).ConfigureAwait(true);
+                    await using var streamAsyncDisposal = stream.ConfigureAwait(true);
+                    await ReadSseStreamAsync(stream, streamState, assistant, streamToken).ConfigureAwait(true);
                     if (!streamState.DoneReceived && !streamState.ErrorReceived)
                         throw new InvalidDataException("The response stream ended before completion.");
                     await CommitStreamStateAsync(_ =>
@@ -162,9 +163,9 @@ public sealed partial class MainPage
                         Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content,
                             streamState.ErrorReceived ? "failed" : "complete");
                         return ValueTask.CompletedTask;
-                    }, CancellationToken.None);
+                    }, CancellationToken.None).ConfigureAwait(true);
                 },
-                cts.Token);
+                cts.Token).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
@@ -177,7 +178,7 @@ public sealed partial class MainPage
                     Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "cancelled");
                     return ValueTask.CompletedTask;
                 },
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
@@ -191,7 +192,7 @@ public sealed partial class MainPage
                     Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
                     return ValueTask.CompletedTask;
                 },
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(true);
         }
         finally
         {
@@ -206,7 +207,7 @@ public sealed partial class MainPage
                 MessageInput.Focus(FocusState.Programmatic);
                 ScrollToBottom();
                 return ValueTask.CompletedTask;
-            });
+            }).ConfigureAwait(true);
         }
     }
 
@@ -225,12 +226,12 @@ public sealed partial class MainPage
 
         string? eventType = null;
         string? eventData = null;
-        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(true) is { } line)
         {
             if (line.Length == 0)
             {
                 if (eventData is not null &&
-                    await ApplySseEventAsync(state, eventType ?? string.Empty, eventData, assistant, cancellationToken))
+                    await ApplySseEventAsync(state, eventType ?? string.Empty, eventData, assistant, cancellationToken).ConfigureAwait(true))
                     return;
 
                 eventType = null;
@@ -245,7 +246,7 @@ public sealed partial class MainPage
         }
 
         if (eventData is not null)
-            await ApplySseEventAsync(state, eventType ?? string.Empty, eventData, assistant, cancellationToken);
+            await ApplySseEventAsync(state, eventType ?? string.Empty, eventData, assistant, cancellationToken).ConfigureAwait(true);
 
         await CommitStreamStateAsync(
             _ =>
@@ -254,7 +255,7 @@ public sealed partial class MainPage
                     assistant.Content.Text = state.Text.Length == 0 ? "(no response)" : state.Text;
                 return ValueTask.CompletedTask;
             },
-            CancellationToken.None);
+            CancellationToken.None).ConfigureAwait(true);
     }
 
     private async Task<bool> ApplySseEventAsync(
@@ -277,7 +278,7 @@ public sealed partial class MainPage
                 ScrollToBottom();
                 return ValueTask.CompletedTask;
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(true);
         return shouldEnd;
     }
 
@@ -292,6 +293,6 @@ public sealed partial class MainPage
             stateKey,
             actions.GetStateVersion(stateKey),
             ct => visitToken.IsCancellationRequested ? ValueTask.CompletedTask : mutation(ct),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(true);
     }
 }

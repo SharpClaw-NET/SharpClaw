@@ -13,8 +13,10 @@ using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Tests.Persistence;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class ExternalPersistencePackageTests
+internal sealed class ExternalPersistencePackageTests
 {
     private const string FixturePackageId = "SharpClaw.TestFixtures.ExternalPersistence";
     private const string FixturePackageVersion = "1.0.0-test";
@@ -28,7 +30,7 @@ public sealed class ExternalPersistencePackageTests
         try
         {
             foreach (var directory in _temporaryDirectories)
-                await DeleteModuleDirectoryAsync(directory);
+                await DeleteModuleDirectoryAsync(directory).ConfigureAwait(false);
         }
         finally
         {
@@ -63,7 +65,7 @@ public sealed class ExternalPersistencePackageTests
         var roots = PackagedRegistrationRootResolver.Resolve(bundledRoot, configuration);
         roots.Should().Equal(Path.GetFullPath(bundledRoot), Path.GetFullPath(externalRoot));
 
-        await VerifyPackagedProviderAsync(roots, configuration);
+        await VerifyPackagedProviderAsync(roots, configuration).ConfigureAwait(false);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -73,7 +75,7 @@ public sealed class ExternalPersistencePackageTests
     {
         var registrations = await PackagedDotNetRegistrationSet.LoadProductionAsync(
             roots,
-            configuration);
+            configuration).ConfigureAwait(false);
         try
         {
             IServiceCollection services = new ServiceCollection();
@@ -97,7 +99,7 @@ public sealed class ExternalPersistencePackageTests
         }
         finally
         {
-            await registrations.DisposeAsync();
+            await registrations.DisposeAsync().ConfigureAwait(false);
         }
 
         registrations.Services.Should().BeEmpty(
@@ -212,11 +214,11 @@ public sealed class ExternalPersistencePackageTests
             }
             catch (UnauthorizedAccessException) when (attempt < 19)
             {
-                await Task.Delay(50);
+                await Task.Delay(50).ConfigureAwait(false);
             }
             catch (IOException) when (attempt < 19)
             {
-                await Task.Delay(50);
+                await Task.Delay(50).ConfigureAwait(false);
             }
             catch (UnauthorizedAccessException exception) when (OperatingSystem.IsWindows())
             {

@@ -18,7 +18,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 /// by controllers via <see cref="InternalApiClient"/>.
 /// </para>
 /// </summary>
-public sealed class RequestQueueService : IDisposable
+internal sealed class RequestQueueService : IDisposable
 {
     private readonly PriorityQueue<QueuedRequest, (int Priority, long Sequence)> _queue = new();
     private readonly SemaphoreSlim _signal;
@@ -88,7 +88,7 @@ public sealed class RequestQueueService : IDisposable
     /// </summary>
     public async Task<QueuedRequest> DequeueAsync(CancellationToken ct)
     {
-        await _signal.WaitAsync(ct);
+        await _signal.WaitAsync(ct).ConfigureAwait(false);
 
         lock (_lock)
         {
@@ -110,7 +110,7 @@ public sealed class RequestQueueService : IDisposable
 /// and forwards requests to the core API via <see cref="InternalApiClient"/>,
 /// honouring concurrency, timeout, and retry settings.
 /// </summary>
-public sealed class RequestQueueProcessor(
+internal sealed class RequestQueueProcessor(
     RequestQueueService queue,
     InternalApiClient coreApi,
     IOptions<RequestQueueOptions> options,
@@ -124,7 +124,7 @@ public sealed class RequestQueueProcessor(
         Exception? failure = null;
         try
         {
-            await backgroundActions.StartAsync(serviceInvocation, stoppingToken);
+            await backgroundActions.StartAsync(serviceInvocation, stoppingToken).ConfigureAwait(false);
 
             if (!queue.Enabled)
             {
@@ -142,8 +142,8 @@ public sealed class RequestQueueProcessor(
             {
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    var request = await queue.DequeueAsync(stoppingToken);
-                    await RunTickAsync(request, opts, stoppingToken);
+                    var request = await queue.DequeueAsync(stoppingToken).ConfigureAwait(false);
+                    await RunTickAsync(request, opts, stoppingToken).ConfigureAwait(false);
                 }
             }
             else
@@ -153,14 +153,14 @@ public sealed class RequestQueueProcessor(
 
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    var request = await queue.DequeueAsync(stoppingToken);
-                    await semaphore.WaitAsync(stoppingToken);
+                    var request = await queue.DequeueAsync(stoppingToken).ConfigureAwait(false);
+                    await semaphore.WaitAsync(stoppingToken).ConfigureAwait(false);
 
                     tasks.Add(Task.Run(async () =>
                     {
                         try
                         {
-                            await RunTickAsync(request, opts, stoppingToken);
+                            await RunTickAsync(request, opts, stoppingToken).ConfigureAwait(false);
                         }
                         finally
                         {
@@ -171,7 +171,7 @@ public sealed class RequestQueueProcessor(
                     tasks.RemoveAll(t => t.IsCompleted);
                 }
 
-                await Task.WhenAll(tasks);
+                await Task.WhenAll(tasks).ConfigureAwait(false);
             }
         }
         catch (Exception exception)
@@ -182,7 +182,7 @@ public sealed class RequestQueueProcessor(
         {
             try
             {
-                await backgroundActions.StopAsync(serviceInvocation, CancellationToken.None);
+                await backgroundActions.StopAsync(serviceInvocation, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception stopFailure)
             {
@@ -205,7 +205,7 @@ public sealed class RequestQueueProcessor(
                 "gateway.request-queue",
                 "request.forward",
                 request.Id),
-            async ct => await ProcessRequestAsync(request, opts, ct),
+            async ct => await ProcessRequestAsync(request, opts, ct).ConfigureAwait(false),
             cancellationToken);
 
     private async Task ProcessRequestAsync(
@@ -223,7 +223,7 @@ public sealed class RequestQueueProcessor(
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(TimeSpan.FromSeconds(opts.TimeoutSeconds));
 
-                var response = await ForwardToCoreAsync(request, cts.Token);
+                var response = await ForwardToCoreAsync(request, cts.Token).ConfigureAwait(false);
                 sw.Stop();
 
                 response.Meta = new QueueResponseMeta(
@@ -281,7 +281,7 @@ public sealed class RequestQueueProcessor(
                     "Transient failure on {Method} {Path} ({Id}), attempt {Attempt}/{MaxRetries}. Retrying in {Delay}ms.",
                     request.Method, request.Path, request.Id, attempt, opts.MaxRetries, delay);
 
-                await Task.Delay(delay, ct);
+                await Task.Delay(delay, ct).ConfigureAwait(false);
                 delay = Math.Min(delay * 2, 10_000); // exponential backoff, cap at 10s
             }
         }
@@ -298,8 +298,8 @@ public sealed class RequestQueueProcessor(
         }
 
         // Use the InternalApiClient's underlying HttpClient with API key
-        var response = await coreApi.SendRawAsync(httpRequest, ct);
-        var body = await response.Content.ReadAsStringAsync(ct);
+        var response = await coreApi.SendRawAsync(httpRequest, ct).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
         return new QueuedResponse
         {

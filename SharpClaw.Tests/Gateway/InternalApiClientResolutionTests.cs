@@ -9,9 +9,11 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Gateway;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
 [NonParallelizable]
-public class InternalApiClientResolutionTests
+internal class InternalApiClientResolutionTests
 {
     private string? _previousInstanceRoot;
     private string? _previousSharedRoot;
@@ -59,7 +61,7 @@ public class InternalApiClientResolutionTests
                 new HttpContextAccessor(),
                 NullLogger<InternalApiClient>.Instance);
 
-            _ = await client.GetAsync<object>("/ping");
+            _ = await client.GetAsync<object>("/ping").ConfigureAwait(false);
 
             handler.LastRequest.Should().NotBeNull();
             handler.LastRequest!.Headers.GetValues("X-Api-Key").Single().Should().Be("explicit-api-key");
@@ -111,7 +113,7 @@ public class InternalApiClientResolutionTests
                 new HttpContextAccessor(),
                 NullLogger<InternalApiClient>.Instance);
 
-            _ = await client.GetAsync<object>("/ping");
+            _ = await client.GetAsync<object>("/ping").ConfigureAwait(false);
 
             handler.LastRequest.Should().NotBeNull();
             handler.LastRequest!.Headers.GetValues("X-Api-Key").Single().Should().Be("discovered-api-key");

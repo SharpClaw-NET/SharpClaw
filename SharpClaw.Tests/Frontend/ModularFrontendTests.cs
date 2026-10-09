@@ -6,8 +6,10 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Frontend;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class ModularFrontendTests
+internal sealed class ModularFrontendTests
 {
     [Test]
     public void MissingUnknownDuplicateAndIncompleteProviderSelectionFailClosed()
@@ -44,17 +46,19 @@ public sealed class ModularFrontendTests
             path.Should().Be("/setup/models");
             return failCatalog ? new(HttpStatusCode.ServiceUnavailable) : new(HttpStatusCode.OK)
             { Content = new StringContent("""{"providerKey":"arbitrary","models":["model"]}""") };
-        })) { BaseAddress = new Uri("https://runtime.example") };
-        await using var api = new SharpClawApiClient(http, NullLogger<SharpClawApiClient>.Instance,
-            new ClientActionDispatcher(), fixedApiKey: "test-key");
-        (await StatelessChatReadiness.CheckAsync(api)).Should().BeTrue();
+        }))
+        { BaseAddress = new Uri("https://runtime.example") };
+        var api = new SharpClawApiClient(http, NullLogger<SharpClawApiClient>.Instance,
+          new ClientActionDispatcher(), fixedApiKey: "test-key");
+        await using var apiAsyncDisposal = api.ConfigureAwait(false);
+        (await StatelessChatReadiness.CheckAsync(api).ConfigureAwait(false)).Should().BeTrue();
         failCatalog = true;
-        (await StatelessChatReadiness.CheckAsync(api)).Should().BeFalse();
+        (await StatelessChatReadiness.CheckAsync(api).ConfigureAwait(false)).Should().BeFalse();
         requests.Should().Equal("/setup/provider", "/setup/models", "/setup/provider", "/setup/models");
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         Func<Task> canceled = () => StatelessChatReadiness.CheckAsync(api, cancellation.Token);
-        await canceled.Should().ThrowAsync<OperationCanceledException>();
+        await canceled.Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
     }
 
     [Test]
@@ -81,8 +85,14 @@ public sealed class ModularFrontendTests
     [TestCase("/fixture/{id}")]
     public void ModuleSettingsCannotDeclareAuthorityOrTemplatedTargets(string path)
     {
-        var json = JsonSerializer.Serialize(new { frontend = new { schemaVersion = 1,
-            settings = new[] { new { id = "test", title = "Test", readPath = path, savePath = "/fixture/settings" } } } });
+        var json = JsonSerializer.Serialize(new
+        {
+            frontend = new
+            {
+                schemaVersion = 1,
+                settings = new[] { new { id = "test", title = "Test", readPath = path, savePath = "/fixture/settings" } }
+            }
+        });
         Assert.Throws<InvalidDataException>(() => SharpClawModuleSettings.ReadManifest(json, "module", "Module"));
     }
 

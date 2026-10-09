@@ -4,8 +4,10 @@ using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Tests.Providers;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class ProviderCredentialBindingTests
+internal sealed class ProviderCredentialBindingTests
 {
     [Test]
     public void CreateClient_WhenCredentialIsRequiredAndMissing_ThrowsLocalConfigurationError()

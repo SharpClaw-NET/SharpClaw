@@ -11,10 +11,14 @@ namespace SharpClaw.Tests.Architecture;
 /// from packages, but module assemblies must not become compiler references in
 /// the host pipeline.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public class RegistrationDependencyGuardrailTests
+internal class RegistrationDependencyGuardrailTests
 {
-    public sealed record ProjectLocation(string Directory, string ProjectFile);
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+        Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
+    internal sealed record ProjectLocation(string Directory, string ProjectFile);
 
     private static readonly ProjectLocation[] ProjectLocations =
     [

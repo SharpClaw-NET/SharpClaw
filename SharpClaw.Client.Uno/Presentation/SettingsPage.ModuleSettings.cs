@@ -15,7 +15,7 @@ public sealed partial class SettingsPage
         _modulePages.Clear();
         try
         {
-            var pages = await ModuleSettingsClient.ReadPagesAsync(Api, token);
+            var pages = await ModuleSettingsClient.ReadPagesAsync(Api, token).ConfigureAwait(true);
             token.ThrowIfCancellationRequested();
             foreach (var group in pages.GroupBy(page => page.SourceId).OrderBy(group => group.Key, StringComparer.Ordinal))
             {
@@ -40,10 +40,10 @@ public sealed partial class SettingsPage
     {
         try
         {
-            if (_modulePages.TryGetValue(tab, out var page)) await LoadModuleSettingsAsync(page, token);
-            else if (tab == "Runtime") await LoadRuntimeAsync(token);
+            if (_modulePages.TryGetValue(tab, out var page)) await LoadModuleSettingsAsync(page, token).ConfigureAwait(true);
+            else if (tab == "Runtime") await LoadRuntimeAsync(token).ConfigureAwait(true);
             else if (tab == "Modules") LoadInstalledModules(token);
-            else if (tab == "About") await LoadAboutAsync(token);
+            else if (tab == "About") await LoadAboutAsync(token).ConfigureAwait(true);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch
@@ -56,7 +56,7 @@ public sealed partial class SettingsPage
     {
         H(page.Title);
         Lbl(page.ModuleName, 0x808080);
-        var document = await ModuleSettingsClient.ReadDocumentAsync(Api, page, token);
+        var document = await ModuleSettingsClient.ReadDocumentAsync(Api, page, token).ConfigureAwait(true);
         token.ThrowIfCancellationRequested();
         var readers = new Dictionary<string, Func<object?>>(StringComparer.Ordinal);
         foreach (var field in document.Fields)
@@ -68,7 +68,8 @@ public sealed partial class SettingsPage
                 case "boolean":
                     var toggle = new ToggleSwitch
                     {
-                        FontFamily = Mono, FontSize = 11,
+                        FontFamily = Mono,
+                        FontSize = 11,
                         IsOn = hasValue && value.ValueKind == System.Text.Json.JsonValueKind.True,
                     };
                     ContentPanel.Children.Add(toggle);
@@ -77,7 +78,8 @@ public sealed partial class SettingsPage
                 case "choice":
                     var choice = new ComboBox
                     {
-                        ItemsSource = field.Choices, MinWidth = 320,
+                        ItemsSource = field.Choices,
+                        MinWidth = 320,
                         SelectedItem = hasValue && value.ValueKind == System.Text.Json.JsonValueKind.String
                             ? value.GetString() : null,
                     };
@@ -115,7 +117,7 @@ public sealed partial class SettingsPage
             save.IsEnabled = false;
             try
             {
-                await ModuleSettingsClient.SaveAsync(Api, page, values, token);
+                await ModuleSettingsClient.SaveAsync(Api, page, values, token).ConfigureAwait(true);
                 if (!token.IsCancellationRequested) status.Text = "Saved. The module owns validation and application of its settings.";
             }
             catch
@@ -153,10 +155,10 @@ public sealed partial class SettingsPage
                 {
                     await Actions.RunCommandAsync("client.module.enablement", async token =>
                     {
-                        await BundledModuleSetup.StopAsync(backend, Gateway, token);
-                        await BundledModuleSetup.ConfigureAsync(frontend, store.ActiveRoot, [module], !enabled, token);
-                    }, pageToken);
-                    await services.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Boot");
+                        await BundledModuleSetup.StopAsync(backend, Gateway, token).ConfigureAwait(true);
+                        await BundledModuleSetup.ConfigureAsync(frontend, store.ActiveRoot, [module], !enabled, token).ConfigureAwait(true);
+                    }, pageToken).ConfigureAwait(true);
+                    await services.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Boot").ConfigureAwait(true);
                 }
                 catch { status.Text = "Enablement update failed or the selected Runtime is not owned by this frontend."; }
                 finally { toggle.IsEnabled = true; }
@@ -181,7 +183,7 @@ public sealed partial class SettingsPage
                     if (!Directory.Exists(directory)) throw new DirectoryNotFoundException("Packaged legal notices are unavailable.");
                     if (!await Windows.System.Launcher.LaunchUriAsync(new Uri(directory)))
                         throw new InvalidOperationException("The platform did not open the notices directory.");
-                }, token);
+                }, token).ConfigureAwait(true);
             }
             catch { if (!token.IsCancellationRequested) Lbl("Notices are in the packaged legal folder; this platform could not open it.", 0x808080); }
         };

@@ -39,7 +39,7 @@ public sealed partial class BootPage
     {
         if (_moduleInstalling) return;
         _retryCts?.Cancel();
-        try { await App.Services!.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Settings"); }
+        try { await App.Services!.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Settings").ConfigureAwait(true); }
         catch (Exception) { ModuleInstallStatus.Text = "Navigation was not accepted. Please retry."; }
     }
 
@@ -47,7 +47,7 @@ public sealed partial class BootPage
     {
         if (_moduleInstalling) return;
         _retryCts?.Cancel();
-        try { await App.Services!.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Main"); }
+        try { await App.Services!.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Main").ConfigureAwait(true); }
         catch (Exception) { ModuleInstallStatus.Text = "Navigation was not accepted. Please retry."; }
     }
 
@@ -90,14 +90,14 @@ public sealed partial class BootPage
         {
             var assets = await Actions.RunCommandAsync("client.module.resolve",
                 ct => new ValueTask<IReadOnlyList<ModulePackageSource>>(ModuleStore.ResolveAsync(
-                    sourceText, credential, ct)), token);
+                    sourceText, credential, ct)), token).ConfigureAwait(true);
             token.ThrowIfCancellationRequested();
             _settingAssets = true;
             ModuleAssetPicker.ItemsSource = assets;
             ModuleAssetPicker.SelectedItem = null;
             ModuleAssetPicker.Visibility = assets.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
             _settingAssets = false;
-            if (assets.Count == 1) await PrepareModuleAsync(assets[0], token);
+            if (assets.Count == 1) await PrepareModuleAsync(assets[0], token).ConfigureAwait(true);
             else ModuleInstallStatus.Text = "Select the exact release asset or package version to inspect.";
         }
         catch (Exception)
@@ -115,7 +115,7 @@ public sealed partial class BootPage
         _moduleInspection?.Dispose();
         _moduleInspection = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         var token = _moduleInspection.Token;
-        try { await PrepareModuleAsync(source, token); }
+        try { await PrepareModuleAsync(source, token).ConfigureAwait(true); }
         catch (Exception)
         {
             if (!token.IsCancellationRequested) ModuleInstallStatus.Text = "The selected asset is not a compatible module payload or could not be read. Nothing was activated.";
@@ -134,8 +134,8 @@ public sealed partial class BootPage
         {
             await Actions.RunCommandAsync("client.module.inspect", async ct =>
             {
-                prepared = await ModuleStore.PrepareAsync(source, ModuleGitHubToken.Password, ct);
-            }, token);
+                prepared = await ModuleStore.PrepareAsync(source, ModuleGitHubToken.Password, ct).ConfigureAwait(true);
+            }, token).ConfigureAwait(true);
             token.ThrowIfCancellationRequested();
             _moduleCandidate = prepared;
             prepared = null;
@@ -163,7 +163,7 @@ public sealed partial class BootPage
         try
         {
             // Drain the canceled boot probe before stopping/committing; it cannot restart behind this operation.
-            await _connectionGate.WaitAsync(deadline.Token);
+            await _connectionGate.WaitAsync(deadline.Token).ConfigureAwait(true);
             connectionClaimed = true;
             BundledModuleSetup.RequireOwnedTarget(backend);
             var invoked = 0;
@@ -174,9 +174,9 @@ public sealed partial class BootPage
                 await ModuleStore.CommitAsync(candidate,
                     Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"),
                     ct => BundledModuleSetup.StopAsync(backend, services.GetService<GatewayProcessManager>(), ct),
-                    (root, modules, ct) => BundledModuleSetup.ConfigureAsync(frontend, root, modules, true, ct), token);
+                    (root, modules, ct) => BundledModuleSetup.ConfigureAsync(frontend, root, modules, true, ct), token).ConfigureAwait(true);
                 committed = true;
-            }, deadline.Token);
+            }, deadline.Token).ConfigureAwait(true);
             if (!committed) throw new InvalidOperationException("Installation was suppressed.");
             _connectionGate.Release();
             connectionClaimed = false;
@@ -187,7 +187,7 @@ public sealed partial class BootPage
             ModuleInstallStatus.Text = "Installed. Starting a new Runtime graph through the normal module loader.";
             _retryCts?.Dispose();
             _retryCts = new CancellationTokenSource();
-            await RunConnectionFlowAsync(null, _retryCts.Token);
+            await RunConnectionFlowAsync(null, _retryCts.Token).ConfigureAwait(true);
         }
         catch (Exception)
         {

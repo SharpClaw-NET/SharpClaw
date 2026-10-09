@@ -31,13 +31,13 @@ internal static class KernelHostEndpoints
             Results.Ok(await adapter.RunRequestAsync(
                 CreateExecutionContext(context), "/setup/provider",
                 (_, _) => ValueTask.FromResult(RuntimeProviderSetup.Describe(configuration, adapter)),
-                cancellationToken)));
+                cancellationToken).ConfigureAwait(false)));
         app.MapGet("/setup/models", async (HttpContext context, IConfiguration configuration,
             RuntimeKernelAdapter adapter, IRuntimeProviderClientFactory factory, CancellationToken cancellationToken) =>
             Results.Ok(await adapter.RunRequestAsync(
                 CreateExecutionContext(context), "/setup/models",
                 (_, token) => RuntimeProviderModelCatalog.ReadAsync(CreateExecutionContext(context),
-                    configuration, adapter, factory, token), cancellationToken)));
+                    configuration, adapter, factory, token), cancellationToken).ConfigureAwait(false)));
         app.MapGet("/env/core", ReadEnvironmentAsync);
         app.MapPost("/chat", RunChatAsync);
         app.MapPost("/chat/stream", StreamChatAsync);
@@ -47,7 +47,7 @@ internal static class KernelHostEndpoints
         app.MapGet("/setup/modules", async (HttpContext context, RuntimeKernelAdapter adapter,
             CancellationToken cancellationToken) => Results.Ok(await adapter.RunRequestAsync(
                 CreateExecutionContext(context), "/setup/modules",
-                (_, _) => ValueTask.FromResult(registrations.FrontendSettings), cancellationToken)));
+                (_, _) => ValueTask.FromResult(registrations.FrontendSettings), cancellationToken).ConfigureAwait(false)));
 
     private static async Task<IResult> RunChatAsync(
         HttpContext context,
@@ -65,7 +65,7 @@ internal static class KernelHostEndpoints
                 CreateExecutionContext(context), request,
                 (effectiveRequest, ct) => kernel.RunAsync(
                     new ChatTurnInput(effectiveRequest.Message, effectiveRequest.ConversationId), ct),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
             return Results.Ok(result);
         }
         catch (KernelActionFailedException error) when (error.Message == RuntimeProviderSetup.RequiredErrorMessage)
@@ -85,7 +85,7 @@ internal static class KernelHostEndpoints
             new SharpClawActionKey("security.secret.read"),
             new RuntimeSecurityActionInvocation("read", "/env/core"),
             static (_, _) => ValueTask.FromResult(true),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         if (!allowed)
             return Results.StatusCode(StatusCodes.Status403Forbidden);
 
@@ -107,7 +107,7 @@ internal static class KernelHostEndpoints
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsJsonAsync(
                 new { error = "Message is required." },
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -122,17 +122,17 @@ internal static class KernelHostEndpoints
                                    effectiveRequest.Message,
                                    effectiveRequest.ConversationId),
                                ct),
-                           cancellationToken))
+                           cancellationToken).ConfigureAwait(false))
             {
                 var payload = JsonSerializer.Serialize(chunk);
-                await context.Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
-                await context.Response.Body.FlushAsync(cancellationToken);
+                await context.Response.WriteAsync($"data: {payload}\n\n", cancellationToken).ConfigureAwait(false);
+                await context.Response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         catch (KernelActionFailedException error) when (!context.Response.HasStarted &&
             error.Message == RuntimeProviderSetup.RequiredErrorMessage)
         {
-            await ProviderSetupRequired().ExecuteAsync(context);
+            await ProviderSetupRequired().ExecuteAsync(context).ConfigureAwait(false);
         }
     }
 
@@ -203,4 +203,4 @@ internal static class KernelHostEndpoints
     }
 }
 
-public sealed record DirectChatRequest(string Message, Guid? ConversationId = null);
+internal sealed record DirectChatRequest(string Message, Guid? ConversationId = null);

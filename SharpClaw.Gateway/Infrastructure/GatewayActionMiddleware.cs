@@ -7,7 +7,7 @@ using SharpClaw.Core.Kernel;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
-public sealed class GatewayActionMiddleware(
+internal sealed class GatewayActionMiddleware(
     RequestDelegate next,
     GatewayBackgroundActionBoundary actions,
     ILogger<GatewayActionMiddleware> logger)
@@ -30,7 +30,7 @@ public sealed class GatewayActionMiddleware(
                     cancellationToken,
                     executionContext),
                 context.RequestAborted,
-                executionContext);
+                executionContext).ConfigureAwait(false);
         }
         catch (KernelActionCancelledException exception)
         {
@@ -39,7 +39,7 @@ public sealed class GatewayActionMiddleware(
                 new SharpClawActionKey("gateway.request.cancel"),
                 invocation with { Operation = "cancel" },
                 exception,
-                executionContext);
+                executionContext).ConfigureAwait(false);
             throw;
         }
         catch (OperationCanceledException exception)
@@ -49,7 +49,7 @@ public sealed class GatewayActionMiddleware(
                 new SharpClawActionKey("gateway.request.cancel"),
                 invocation with { Operation = "cancel" },
                 exception,
-                executionContext);
+                executionContext).ConfigureAwait(false);
             throw;
         }
         catch (Exception exception)
@@ -64,7 +64,7 @@ public sealed class GatewayActionMiddleware(
                 new SharpClawActionKey("gateway.request.fail"),
                 invocation with { Operation = "fail" },
                 exception,
-                executionContext);
+                executionContext).ConfigureAwait(false);
             throw;
         }
     }
@@ -81,7 +81,7 @@ public sealed class GatewayActionMiddleware(
             invocation with { Operation = "authenticate" },
             static (_, _) => ValueTask.FromResult(true),
             cancellationToken,
-            executionContext),
+            executionContext).ConfigureAwait(false),
             "gateway.request.authenticate");
         RequireAllowed(await RunActionAsync(
             context,
@@ -89,7 +89,7 @@ public sealed class GatewayActionMiddleware(
             invocation with { Operation = "authorize" },
             static (_, _) => ValueTask.FromResult(true),
             cancellationToken,
-            executionContext),
+            executionContext).ConfigureAwait(false),
             "gateway.request.authorize");
         RequireAllowed(await RunActionAsync(
             context,
@@ -97,7 +97,7 @@ public sealed class GatewayActionMiddleware(
             invocation with { Operation = "route" },
             static (_, _) => ValueTask.FromResult(true),
             cancellationToken,
-            executionContext),
+            executionContext).ConfigureAwait(false),
             "gateway.request.route");
 
         var isStream = invocation.IsStream;
@@ -111,14 +111,14 @@ public sealed class GatewayActionMiddleware(
                     invocation with { Operation = "stream.open" },
                     (_, ct) => RunForwardAsync(context, invocation, ct, executionContext),
                     cancellationToken,
-                    executionContext);
+                    executionContext).ConfigureAwait(false);
                 await RunActionAsync(
                     context,
                     new SharpClawActionKey("gateway.stream.close"),
                     invocation with { Operation = "stream.close" },
                     static (_, _) => ValueTask.FromResult(true),
                     cancellationToken,
-                    executionContext);
+                    executionContext).ConfigureAwait(false);
             }
             catch (KernelActionCancelledException exception)
             {
@@ -127,7 +127,7 @@ public sealed class GatewayActionMiddleware(
                     new SharpClawActionKey("gateway.stream.cancel"),
                     invocation with { Operation = "stream.cancel" },
                     exception,
-                    executionContext);
+                    executionContext).ConfigureAwait(false);
                 throw;
             }
             catch (OperationCanceledException exception)
@@ -137,7 +137,7 @@ public sealed class GatewayActionMiddleware(
                     new SharpClawActionKey("gateway.stream.cancel"),
                     invocation with { Operation = "stream.cancel" },
                     exception,
-                    executionContext);
+                    executionContext).ConfigureAwait(false);
                 throw;
             }
             catch (Exception exception)
@@ -147,22 +147,22 @@ public sealed class GatewayActionMiddleware(
                     new SharpClawActionKey("gateway.stream.fail"),
                     invocation with { Operation = "stream.fail" },
                     exception,
-                    executionContext);
+                    executionContext).ConfigureAwait(false);
                 throw;
             }
         }
         else
         {
-            await RunForwardAsync(context, invocation, cancellationToken, executionContext);
+            await RunForwardAsync(context, invocation, cancellationToken, executionContext).ConfigureAwait(false);
         }
 
-            await RunActionAsync(
-                context,
-                new SharpClawActionKey("gateway.request.response"),
-            invocation with { Operation = "response" },
-            static (_, _) => ValueTask.FromResult(true),
-            cancellationToken,
-            executionContext);
+        await RunActionAsync(
+            context,
+            new SharpClawActionKey("gateway.request.response"),
+        invocation with { Operation = "response" },
+        static (_, _) => ValueTask.FromResult(true),
+        cancellationToken,
+        executionContext).ConfigureAwait(false);
         return true;
     }
 
@@ -181,21 +181,22 @@ public sealed class GatewayActionMiddleware(
                 invocation with { Operation = actionKey.Value },
                 async (_, ct) =>
                 {
-                    await next(context);
+                    await next(context).ConfigureAwait(false);
                     return true;
                 },
                 cancellationToken,
-                executionContext);
+                executionContext).ConfigureAwait(false);
             return true;
         }
 
         var originalBody = context.Response.Body;
-        await using var actionBody = new GatewayActionResponseStream(
-            originalBody,
-            actions,
-            invocation,
-            logger,
-            executionContext);
+        var actionBody = new GatewayActionResponseStream(
+          originalBody,
+          actions,
+          invocation,
+          logger,
+          executionContext);
+        await using var actionBodyAsyncDisposal = actionBody.ConfigureAwait(false);
         context.Response.Body = actionBody;
         try
         {
@@ -205,11 +206,11 @@ public sealed class GatewayActionMiddleware(
                 invocation with { Operation = actionKey.Value },
                 async (_, ct) =>
                 {
-                    await next(context);
+                    await next(context).ConfigureAwait(false);
                     return true;
                 },
                 cancellationToken,
-                executionContext);
+                executionContext).ConfigureAwait(false);
         }
         finally
         {
@@ -331,7 +332,7 @@ public sealed class GatewayActionMiddleware(
                 invocation,
                 static (_, _) => ValueTask.FromResult(true),
                 CancellationToken.None,
-                executionContext);
+                executionContext).ConfigureAwait(false);
         }
         catch (Exception signalFailure)
         {
@@ -387,17 +388,17 @@ internal sealed class GatewayActionResponseStream(
             invocation,
             static (_, _) => ValueTask.FromResult(true),
             cancellationToken,
-            executionContext);
+            executionContext).ConfigureAwait(false);
         await actions.RunActionAsync(
             new SharpClawActionKey("gateway.stream.chunk.forward"),
             invocation with { Operation = $"stream.chunk.forward:{Interlocked.Increment(ref _chunk)}" },
             async (_, ct) =>
             {
-                await inner.WriteAsync(buffer, ct);
+                await inner.WriteAsync(buffer, ct).ConfigureAwait(false);
                 return true;
             },
             cancellationToken,
-            executionContext);
+            executionContext).ConfigureAwait(false);
     }
 
     protected override void Dispose(bool disposing)

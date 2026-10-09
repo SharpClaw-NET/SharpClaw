@@ -12,9 +12,11 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Frontend;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
 [NonParallelizable]
-public sealed class ClientActionBoundaryTests
+internal sealed class ClientActionBoundaryTests
 {
     private static readonly string[] ExpectedActions =
     [
@@ -53,7 +55,7 @@ public sealed class ClientActionBoundaryTests
             {
                 Interlocked.Increment(ref probe.TerminalCalls);
                 return ValueTask.FromResult("ok");
-            });
+            }).ConfigureAwait(false);
 
         result.Should().Be("ok");
         probe.Actions().Should().Equal(ExpectedActions[..4]);
@@ -75,7 +77,7 @@ public sealed class ClientActionBoundaryTests
             {
                 Interlocked.Increment(ref probe.TerminalCalls);
                 return ValueTask.FromResult("ok");
-            });
+            }).ConfigureAwait(false);
 
         result.Should().Be("ok");
         probe.Attempts(ClientActionCatalog.CommandReceive.Value).Should().Be(2);
@@ -106,7 +108,7 @@ public sealed class ClientActionBoundaryTests
             {
                 effective = invocation;
                 return ValueTask.FromResult("ok");
-            });
+            }).ConfigureAwait(false);
 
         effective.Should().Be(probe.Replacement);
     }
@@ -127,7 +129,7 @@ public sealed class ClientActionBoundaryTests
             {
                 Interlocked.Increment(ref probe.TerminalCalls);
                 return ValueTask.FromResult("terminal-result");
-            });
+            }).ConfigureAwait(false);
 
         result.Should().Be("hook-result");
         probe.TerminalCalls.Should().Be(0);
@@ -146,9 +148,9 @@ public sealed class ClientActionBoundaryTests
 
         var action = async () => await dispatcher.RunCommandAsync(
             new ClientCommandInvocation("cancel", "GET", "/cancel", Guid.NewGuid()),
-            static (_, _) => ValueTask.FromResult("late"));
+            static (_, _) => ValueTask.FromResult("late")).ConfigureAwait(false);
 
-        await FluentActions.Invoking(action).Should().ThrowAsync<KernelActionCancelledException>();
+        await FluentActions.Invoking(action).Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         probe.Actions().Should().Equal(
             "client.command.receive",
             "client.command.validate",
@@ -172,16 +174,16 @@ public sealed class ClientActionBoundaryTests
             async (_, token) =>
             {
                 terminalStarted.SetResult(true);
-                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
                 return "late";
             },
             cancellation.Token);
 
-        await terminalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await terminalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         cancellation.Cancel();
 
-        await FluentActions.Invoking(async () => await command)
-            .Should().ThrowAsync<OperationCanceledException>();
+        await FluentActions.Invoking(async () => await command.ConfigureAwait(false))
+            .Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
         probe.TerminalCalls.Should().Be(0);
         probe.Actions().Should().Contain("client.command.cancel");
         probe.Actions().Should().NotContain("client.command.complete");
@@ -196,9 +198,9 @@ public sealed class ClientActionBoundaryTests
 
         var action = async () => await dispatcher.RunCommandAsync(
             new ClientCommandInvocation("failure", "GET", "/failure", Guid.NewGuid()),
-            static (_, _) => ValueTask.FromResult("late"));
+            static (_, _) => ValueTask.FromResult("late")).ConfigureAwait(false);
 
-        await FluentActions.Invoking(action).Should().ThrowAsync<KernelActionFailedException>();
+        await FluentActions.Invoking(action).Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
         probe.Actions().Should().Equal(
             "client.command.receive",
             "client.command.validate",
@@ -219,7 +221,7 @@ public sealed class ClientActionBoundaryTests
                 static (_, _) => ValueTask.FromResult("one")).AsTask(),
             dispatcher.RunCommandAsync(
                 new ClientCommandInvocation("two", "GET", "/two", Guid.NewGuid()),
-                static (_, _) => ValueTask.FromResult("two")).AsTask());
+                static (_, _) => ValueTask.FromResult("two")).AsTask()).ConfigureAwait(false);
 
         probe.Observations.Select(static item => item.TraceId).Distinct().Should().HaveCount(2);
         probe.Observations.Select(static item => item.IdempotencyKey).Distinct().Should().HaveCount(2);
@@ -235,23 +237,23 @@ public sealed class ClientActionBoundaryTests
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
 
-        await dispatcher.RunCommandAsync("completed", static _ => ValueTask.FromResult(true));
+        await dispatcher.RunCommandAsync("completed", static _ => ValueTask.FromResult(true)).ConfigureAwait(false);
 
         probe.CancelAction = ClientActionCatalog.CommandDispatch.Value;
         await FluentActions.Invoking(async () => await dispatcher.RunCommandAsync(
                 "cancelled",
-                static _ => ValueTask.FromResult(true)))
-            .Should().ThrowAsync<KernelActionCancelledException>();
+                static _ => ValueTask.FromResult(true)).ConfigureAwait(false))
+            .Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
 
         probe.CancelAction = null;
         probe.FailureAction = ClientActionCatalog.CommandDispatch.Value;
         await FluentActions.Invoking(async () => await dispatcher.RunCommandAsync(
                 "failed",
-                static _ => ValueTask.FromResult(true)))
-            .Should().ThrowAsync<KernelActionFailedException>();
+                static _ => ValueTask.FromResult(true)).ConfigureAwait(false))
+            .Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
 
         probe.FailureAction = null;
-        await dispatcher.RunCommandAsync("after-failure", static _ => ValueTask.FromResult(true));
+        await dispatcher.RunCommandAsync("after-failure", static _ => ValueTask.FromResult(true)).ConfigureAwait(false);
 
         var groups = probe.Observations.GroupBy(static item => item.TraceId).ToArray();
         groups.Should().HaveCount(4);
@@ -274,16 +276,16 @@ public sealed class ClientActionBoundaryTests
             async (_, _) =>
             {
                 firstStarted.SetResult(true);
-                await releaseFirst.Task;
+                await releaseFirst.Task.ConfigureAwait(false);
             });
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
         var second = dispatcher.NavigateAsync("second", null, static (_, _) => ValueTask.CompletedTask);
         releaseFirst.SetResult(true);
-        await first;
+        await first.ConfigureAwait(false);
 
-        await FluentActions.Invoking(async () => await second)
-            .Should().ThrowAsync<ClientActionConflictException>();
+        await FluentActions.Invoking(async () => await second.ConfigureAwait(false))
+            .Should().ThrowAsync<ClientActionConflictException>().ConfigureAwait(false);
         dispatcher.GetNavigationVersionForTest().Should().Be(version + 1);
     }
 
@@ -306,7 +308,7 @@ public sealed class ClientActionBoundaryTests
             {
                 Interlocked.Increment(ref terminalCalls);
                 return ValueTask.CompletedTask;
-            });
+            }).ConfigureAwait(false);
 
         terminalCalls.Should().Be(1);
         probe.Attempts(ClientActionCatalog.NavigationCommit.Value).Should().Be(2);
@@ -331,8 +333,8 @@ public sealed class ClientActionBoundaryTests
                 {
                     Interlocked.Increment(ref terminalCalls);
                     return ValueTask.CompletedTask;
-                }))
-            .Should().ThrowAsync<KernelActionExecutionException>();
+                }).ConfigureAwait(false))
+            .Should().ThrowAsync<KernelActionExecutionException>().ConfigureAwait(false);
 
         terminalCalls.Should().Be(0);
         dispatcher.GetNavigationVersionForTest().Should().Be(0);
@@ -353,15 +355,15 @@ public sealed class ClientActionBoundaryTests
             async _ =>
             {
                 firstStarted.SetResult(true);
-                await releaseFirst.Task;
+                await releaseFirst.Task.ConfigureAwait(false);
             });
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
         var second = dispatcher.CommitStateAsync("settings", version, static _ => ValueTask.CompletedTask);
         releaseFirst.SetResult(true);
-        (await first).Should().Be(version + 1);
-        await FluentActions.Invoking(async () => await second)
-            .Should().ThrowAsync<ClientActionConflictException>();
+        (await first.ConfigureAwait(false)).Should().Be(version + 1);
+        await FluentActions.Invoking(async () => await second.ConfigureAwait(false))
+            .Should().ThrowAsync<ClientActionConflictException>().ConfigureAwait(false);
         dispatcher.GetStateVersion("settings").Should().Be(version + 1);
     }
 
@@ -385,7 +387,7 @@ public sealed class ClientActionBoundaryTests
             {
                 Interlocked.Increment(ref terminalCalls);
                 return ValueTask.CompletedTask;
-            });
+            }).ConfigureAwait(false);
 
         terminalCalls.Should().Be(1);
         probe.Attempts(ClientActionCatalog.StateCommit.Value).Should().Be(2);
@@ -411,8 +413,8 @@ public sealed class ClientActionBoundaryTests
                 {
                     Interlocked.Increment(ref terminalCalls);
                     return ValueTask.CompletedTask;
-                }))
-            .Should().ThrowAsync<KernelActionExecutionException>();
+                }).ConfigureAwait(false))
+            .Should().ThrowAsync<KernelActionExecutionException>().ConfigureAwait(false);
 
         terminalCalls.Should().Be(0);
         dispatcher.GetStateVersion("replaced-state").Should().Be(version);
@@ -436,8 +438,8 @@ public sealed class ClientActionBoundaryTests
                 {
                     Interlocked.Increment(ref terminalCalls);
                     return ValueTask.CompletedTask;
-                }))
-            .Should().ThrowAsync<KernelActionFailedException>();
+                }).ConfigureAwait(false))
+            .Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
 
         terminalCalls.Should().Be(0);
         dispatcher.GetStateVersion("unauthorized-repeat").Should().Be(version);
@@ -454,7 +456,7 @@ public sealed class ClientActionBoundaryTests
 
         var result = await dispatcher.RunCommandAsync(
             new ClientCommandInvocation("production", "CLIENT", "production", Guid.NewGuid()),
-            static (_, _) => ValueTask.FromResult("composed"));
+            static (_, _) => ValueTask.FromResult("composed")).ConfigureAwait(false);
 
         result.Should().Be("composed");
     }
@@ -758,7 +760,7 @@ public sealed class ClientActionBoundaryTests
                     new RequestPrincipal("user-b", "B", new HashSet<string>(), true),
                     ExtensionFeatureSet.Empty),
                 new ClientCommandInvocation("b", "CLIENT", "b", Guid.NewGuid()),
-                static (_, _) => ValueTask.FromResult(true)).AsTask());
+                static (_, _) => ValueTask.FromResult(true)).AsTask()).ConfigureAwait(false);
 
         sink.Observations
             .Where(static observation => observation.Action == ClientActionCatalog.CommandReceive.Value)
@@ -796,7 +798,7 @@ public sealed class ClientActionBoundaryTests
             dispatcher,
             "test-api-key");
 
-        using var response = await api.GetAsync("/original");
+        using var response = await api.GetAsync("/original").ConfigureAwait(false);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         handler.Request.Should().NotBeNull();
@@ -849,12 +851,14 @@ public sealed class ClientActionBoundaryTests
         {
             "normal" => async () =>
             {
-                using var response = await api.GetAsync(requestTarget);
-            },
+                using var response = await api.GetAsync(requestTarget).ConfigureAwait(false);
+            }
+            ,
             "supplied" => async () =>
             {
-                using var response = await api.SendAsync(suppliedRequest);
-            },
+                using var response = await api.SendAsync(suppliedRequest).ConfigureAwait(false);
+            }
+            ,
             "stream" => () => api.ConsumeStreamAsync(
                 "GET",
                 requestTarget,
@@ -864,7 +868,7 @@ public sealed class ClientActionBoundaryTests
         };
 
         await FluentActions.Invoking(send)
-            .Should().ThrowAsync<KernelActionFailedException>();
+            .Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
 
         handler.Requests.Should().BeEmpty();
         handler.Request.Should().BeNull();
@@ -890,11 +894,11 @@ public sealed class ClientActionBoundaryTests
 
         Func<Task> send = async () =>
         {
-            using var response = await api.GetAsync(hostileTarget);
+            using var response = await api.GetAsync(hostileTarget).ConfigureAwait(false);
         };
 
         await FluentActions.Invoking(send)
-            .Should().ThrowAsync<KernelActionFailedException>();
+            .Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
         handler.Requests.Should().BeEmpty();
         handler.Request.Should().BeNull();
     }
@@ -933,21 +937,21 @@ public sealed class ClientActionBoundaryTests
                 frontendInstance: frontend);
 
             var requestA = api.GetAsync("/turn-a");
-            await probe.PauseReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await probe.PauseReached.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             try
             {
-                await api.UpdateBaseUrlAsync(targetB);
+                await api.UpdateBaseUrlAsync(targetB).ConfigureAwait(false);
             }
             finally
             {
                 probe.ReleasePause.TrySetResult(true);
             }
 
-            using var responseA = await requestA;
+            using var responseA = await requestA.ConfigureAwait(false);
             api.CachedApiKey.Should().BeNull();
             ReadManifest(frontend.Paths.ManifestPath).SelectedBackendBaseUrl.Should().Be(targetB);
 
-            using var responseB = await api.GetAsync("/turn-b");
+            using var responseB = await api.GetAsync("/turn-b").ConfigureAwait(false);
 
             handler.Requests.Should().HaveCount(2);
             handler.Requests.ElementAt(0).Should().Be(("GET", $"{targetA}turn-a", keyA));
@@ -986,15 +990,15 @@ public sealed class ClientActionBoundaryTests
             targetA,
             NullLogger<GatewayProcessManager>.Instance);
 
-        using var initialResponse = await api.GetAsync("/readyz");
+        using var initialResponse = await api.GetAsync("/readyz").ConfigureAwait(false);
         await SettingsPage.ApplyRuntimeTargetAsync(
             api,
             dispatcher,
             backend,
             gateway,
             targetB,
-            TimeSpan.FromSeconds(1));
-        using var retargetedResponse = await api.GetAsync("/readyz");
+            TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        using var retargetedResponse = await api.GetAsync("/readyz").ConfigureAwait(false);
 
         handler.Requests.Select(static request => request.Uri).Should().Equal(
             "http://runtime-a.test:48923/readyz",
@@ -1040,12 +1044,12 @@ public sealed class ClientActionBoundaryTests
             NullLogger<GatewayProcessManager>.Instance);
         var boot = new BootModel(backend, gateway, api, null, dispatcher);
 
-        (await boot.RunBackendStepAsync(CancellationToken.None)).Ok.Should().BeTrue();
-        using var failedResponse = await api.GetAsync("/echo");
+        (await boot.RunBackendStepAsync(CancellationToken.None).ConfigureAwait(false)).Ok.Should().BeTrue();
+        using var failedResponse = await api.GetAsync("/echo").ConfigureAwait(false);
         failedResponse.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
 
-        await boot.ApplyCustomUrlAsync(targetB);
-        var retry = await boot.RunEchoStepAsync(CancellationToken.None);
+        await boot.ApplyCustomUrlAsync(targetB).ConfigureAwait(false);
+        var retry = await boot.RunEchoStepAsync(CancellationToken.None).ConfigureAwait(false);
 
         retry.Ok.Should().BeTrue();
         handler.Requests.Select(static request => request.Uri).Should().Equal(
@@ -1082,16 +1086,17 @@ public sealed class ClientActionBoundaryTests
             null,
             async (response, token) =>
             {
-                await using var stream = await response.Content.ReadAsStreamAsync(token);
-                await stream.ReadExactlyAsync(new byte[1], token);
+                var stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
+                await using var streamAsyncDisposal = stream.ConfigureAwait(false);
+                await stream.ReadExactlyAsync(new byte[1], token).ConfigureAwait(false);
             },
             cancellation.Token);
 
-        await Task.Delay(50);
+        await Task.Delay(50).ConfigureAwait(false);
         cancellation.Cancel();
 
-        await FluentActions.Invoking(async () => await operation)
-            .Should().ThrowAsync<OperationCanceledException>();
+        await FluentActions.Invoking(async () => await operation.ConfigureAwait(false))
+            .Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
         probe.Actions().Should().Contain("client.command.cancel");
         probe.Actions().Should().NotContain("client.command.complete");
     }
@@ -1113,8 +1118,8 @@ public sealed class ClientActionBoundaryTests
                 "GET",
                 "/stream",
                 null,
-                static (_, _) => throw new InvalidOperationException("stream failure")))
-            .Should().ThrowAsync<KernelActionFailedException>();
+                static (_, _) => throw new InvalidOperationException("stream failure")).ConfigureAwait(false))
+            .Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
 
         probe.Actions().Should().Contain("client.command.fail");
         probe.Actions().Should().NotContain("client.command.complete");
@@ -1466,7 +1471,8 @@ public sealed class ClientActionBoundaryTests
                 SetSynchronizationContext(this);
                 foreach (var work in _queue.GetConsumingEnumerable())
                     work.Callback(work.State);
-            }) { IsBackground = true, Name = "Client action UI regression" };
+            })
+            { IsBackground = true, Name = "Client action UI regression" };
             _thread.Start();
         }
 
@@ -1629,7 +1635,7 @@ public sealed class ClientActionBoundaryTests
             Memory<byte> buffer,
             CancellationToken cancellationToken = default)
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
             return 0;
         }
     }
@@ -1647,7 +1653,7 @@ public sealed class ClientActionBoundaryTests
             if (probe.TryClaimPause(context.ActionKey.Value))
             {
                 probe.PauseReached.TrySetResult(true);
-                await probe.ReleasePause.Task.WaitAsync(cancellationToken);
+                await probe.ReleasePause.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
             if (probe.CancelAction == context.ActionKey.Value)
@@ -1662,7 +1668,7 @@ public sealed class ClientActionBoundaryTests
                         context.Action,
                         "K05 repeat boundary test",
                         null),
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
 
             if (probe.ReplaceResultAction == context.ActionKey.Value)
                 return control.ReplaceResult(probe.ReplacementResult!, "K05 result boundary test");
@@ -1672,9 +1678,9 @@ public sealed class ClientActionBoundaryTests
                     new ActionReplacement<KernelActionEnvelope>(
                         context.Action with { Payload = replacement },
                         "K05 input boundary test"),
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
 
-            return await control.ProceedAsync(cancellationToken);
+            return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

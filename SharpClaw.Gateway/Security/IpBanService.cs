@@ -6,7 +6,7 @@ namespace SharpClaw.Gateway.Security;
 /// Tracks per-IP violations and bans IPs that exceed the threshold.
 /// All state is in-memory and resets on restart.
 /// </summary>
-public sealed class IpBanService
+internal sealed class IpBanService
 {
     private readonly ConcurrentDictionary<string, IpRecord> _records = new();
 

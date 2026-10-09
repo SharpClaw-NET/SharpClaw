@@ -10,8 +10,10 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeKernelAdapterTests
+internal sealed class RuntimeKernelAdapterTests
 {
     [Test]
     public async Task ProviderModelCatalogUsesTheRegisteredProviderWithoutInference()
@@ -24,7 +26,7 @@ public sealed class RuntimeKernelAdapterTests
         var adapter = RuntimeKernelAdapterTestFactory.Create(configuration, [new ProviderModule(provider)],
             workspace.CreateInstancePaths(), factory);
         var models = await RuntimeProviderModelCatalog.ReadAsync(new(RequestPrincipal.Anonymous,
-            ExtensionFeatureSet.Empty, Guid.NewGuid(), Guid.NewGuid()), configuration, adapter, factory, default);
+            ExtensionFeatureSet.Empty, Guid.NewGuid(), Guid.NewGuid()), configuration, adapter, factory, default).ConfigureAwait(false);
         models.ProviderKey.Should().Be("test");
         models.Models.Should().Equal("test-model");
         provider.Messages.Should().BeEmpty();
@@ -57,9 +59,9 @@ public sealed class RuntimeKernelAdapterTests
             .Should().NotBeNull();
         providerFactory.Plugins.Should().BeNull("no provider client is created before a chat turn");
 
-        await adapter.StartAsync("test-host");
-        var result = await adapter.Kernel.RunAsync(new ChatTurnInput("hello"));
-        await adapter.StopAsync();
+        await adapter.StartAsync("test-host").ConfigureAwait(false);
+        var result = await adapter.Kernel.RunAsync(new ChatTurnInput("hello")).ConfigureAwait(false);
+        await adapter.StopAsync().ConfigureAwait(false);
 
         result.Completion.Content.Should().Be("reply");
         providerFactory.Plugins.Should().ContainSingle()
@@ -144,10 +146,10 @@ public sealed class RuntimeKernelAdapterTests
 
         RuntimeProviderSetup.Describe(configuration, adapter).SetupRequired.Should().BeFalse();
 
-        await adapter.Kernel.RunAsync(new ChatTurnInput("primary"));
-        await adapter.Kernel.RunAsync(new ChatTurnInput("alternate"));
+        await adapter.Kernel.RunAsync(new ChatTurnInput("primary")).ConfigureAwait(false);
+        await adapter.Kernel.RunAsync(new ChatTurnInput("alternate")).ConfigureAwait(false);
         var streamed = new List<ChatStreamChunk>();
-        await foreach (var chunk in adapter.Kernel.StreamAsync(new ChatTurnInput("alternate")))
+        await foreach (var chunk in adapter.Kernel.StreamAsync(new ChatTurnInput("alternate")).ConfigureAwait(false))
             streamed.Add(chunk);
 
         primary.SystemPrompts.Should().Equal("profile instructions\n\nmodule instructions");
@@ -194,7 +196,7 @@ public sealed class RuntimeKernelAdapterTests
         var result = await adapter.RunRequestAsync(
             executionContext,
             "request-payload",
-            static (payload, _) => ValueTask.FromResult(payload.Length));
+            static (payload, _) => ValueTask.FromResult(payload.Length)).ConfigureAwait(false);
 
         result.Should().Be("request-payload".Length);
     }
@@ -399,7 +401,8 @@ public sealed class RuntimeKernelAdapterTests
         return new KernelGraphCompileOptions
         {
             ActionRegistrationCapabilityGrants = new Dictionary<string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>> { [moduleId] = grants },
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+            { [moduleId] = grants },
             SensitiveActionApprovals = approvals,
         };
     }
@@ -447,7 +450,7 @@ public sealed class RuntimeKernelAdapterTests
                     Result = new JobResultReference("test", 1, "read"),
                 });
             },
-            context);
+            context).ConfigureAwait(false);
 
         result.Result!.ArtifactKey.Should().Be("read");
         terminalCalls.Should().Be(1);
@@ -485,9 +488,9 @@ public sealed class RuntimeKernelAdapterTests
                     Guid.NewGuid(),
                     Guid.NewGuid()),
                 0,
-                cancellation.Token);
+                cancellation.Token).ConfigureAwait(false);
 
-        await run.Should().ThrowAsync<OperationCanceledException>();
+        await run.Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
         terminalCalls.Should().Be(0);
     }
 
@@ -576,7 +579,7 @@ public sealed class RuntimeKernelAdapterTests
                                "stream-request",
                                (_, ct) => adapter.Kernel.StreamAsync(
                                    new ChatTurnInput("must-not-run", conversationId),
-                                   ct)))
+                                   ct)).ConfigureAwait(false))
             {
                 chunks.Add(chunk);
             }
@@ -584,14 +587,14 @@ public sealed class RuntimeKernelAdapterTests
 
         await consume.Should()
             .ThrowAsync<KernelActionExecutionException>()
-            .WithMessage("*without running its terminal*");
+            .WithMessage("*without running its terminal*").ConfigureAwait(false);
 
         chunks.Should().BeEmpty();
         provider.Messages.Should().BeEmpty();
         (await conversationStore.LoadHistoryAsync(
             conversationId,
             TestOperationContext(),
-            CancellationToken.None)).Should().BeEmpty();
+            CancellationToken.None).ConfigureAwait(false)).Should().BeEmpty();
     }
 
     [Test]
@@ -614,9 +617,9 @@ public sealed class RuntimeKernelAdapterTests
             instancePaths,
             new RecordingProviderClientFactory(firstRegistration.Provider));
 
-        await firstAdapter.StartAsync("test-host");
-        var firstResult = await firstAdapter.Kernel.RunAsync(new ChatTurnInput("first"));
-        await firstAdapter.StopAsync();
+        await firstAdapter.StartAsync("test-host").ConfigureAwait(false);
+        var firstResult = await firstAdapter.Kernel.RunAsync(new ChatTurnInput("first")).ConfigureAwait(false);
+        await firstAdapter.StopAsync().ConfigureAwait(false);
 
         var secondRegistration = new ProviderModule(new RecordingProviderClient());
         var secondAdapter = RuntimeKernelAdapterTestFactory.Create(
@@ -629,20 +632,20 @@ public sealed class RuntimeKernelAdapterTests
                 instancePaths.InstallAnchor),
             new RecordingProviderClientFactory(secondRegistration.Provider));
 
-        await secondAdapter.StartAsync("test-host");
-        var secondResult = await secondAdapter.Kernel.RunAsync(new ChatTurnInput("second"));
-        await secondAdapter.StopAsync();
+        await secondAdapter.StartAsync("test-host").ConfigureAwait(false);
+        var secondResult = await secondAdapter.Kernel.RunAsync(new ChatTurnInput("second")).ConfigureAwait(false);
+        await secondAdapter.StopAsync().ConfigureAwait(false);
 
         secondResult.ConversationId.Should().NotBe(firstResult.ConversationId);
         (await firstStore.LoadHistoryAsync(
             firstResult.ConversationId,
             TestOperationContext(),
-            CancellationToken.None))
+            CancellationToken.None).ConfigureAwait(false))
             .Should().BeEmpty();
         (await firstStore.LoadHistoryAsync(
             secondResult.ConversationId,
             TestOperationContext(),
-            CancellationToken.None))
+            CancellationToken.None).ConfigureAwait(false))
             .Should().BeEmpty();
     }
 

@@ -30,8 +30,9 @@ public sealed class DirectChatKernel
         _graph.RunInServiceScopeAsync(
             async _ =>
             {
-                await using var run = _conversationResolver.BeginRun();
-                return await _runner.RunAsync(input, cancellationToken);
+                var run = _conversationResolver.BeginRun();
+                await using var runAsyncDisposal = run.ConfigureAwait(false);
+                return await _runner.RunAsync(input, cancellationToken).ConfigureAwait(false);
             });
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamAsync(
@@ -51,7 +52,8 @@ public sealed class DirectChatKernel
         [System.Runtime.CompilerServices.EnumeratorCancellation]
         CancellationToken cancellationToken)
     {
-        await using var run = _conversationResolver.BeginRun();
+        var run = _conversationResolver.BeginRun();
+        await using var runAsyncDisposal_ = run.ConfigureAwait(false);
         await foreach (var chunk in _runner.StreamAsync(input, cancellationToken)
                            .WithCancellation(cancellationToken))
             yield return chunk;
@@ -249,7 +251,7 @@ internal sealed class ProviderKernelTransport : IKernelProviderTransport
                                    tool.Description,
                                    tool.ParametersSchema)).ToArray(),
                                completionParameters: request.Profile.ProviderParameters,
-                               ct: cancellationToken))
+                               ct: cancellationToken).ConfigureAwait(false))
                 yield return chunk;
 
             yield break;
@@ -260,7 +262,7 @@ internal sealed class ProviderKernelTransport : IKernelProviderTransport
             systemPrompt,
             normalizedMessages.Select(ToCompletionMessage).ToArray(),
             completionParameters: request.Profile.ProviderParameters,
-            ct: cancellationToken);
+            ct: cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrEmpty(result.Content))
             yield return ChatStreamChunk.Text(result.Content);
         yield return ChatStreamChunk.Final(result);

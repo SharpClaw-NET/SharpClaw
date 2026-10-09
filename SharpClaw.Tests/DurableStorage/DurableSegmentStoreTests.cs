@@ -6,8 +6,10 @@ using SharpClaw.Shared.DurableStorage;
 
 namespace SharpClaw.Tests.DurableStorage;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class DurableSegmentStoreTests
+internal sealed class DurableSegmentStoreTests
 {
     private static readonly byte[] TestEncryptionKey =
         SHA256.HashData("SharpClaw durable segment tests"u8);
@@ -28,11 +30,12 @@ public sealed class DurableSegmentStoreTests
     public async Task ReadAsync_EnforcesRecordAndByteCaps()
     {
         var root = CreateRoot();
-        await using var store = CreateStore(root);
+        var store = CreateStore(root);
+        await using var storeAsyncDisposal = store.ConfigureAwait(false);
         var key = DurableStreamKey.Job(Guid.NewGuid());
 
         for (var index = 0; index < 8; index++)
-            await store.AppendAsync(key, Record($"message-{index}-{new string('x', 80)}"));
+            await store.AppendAsync(key, Record($"message-{index}-{new string('x', 80)}")).ConfigureAwait(false);
 
         var page = await store.ReadAsync(
             key,
@@ -40,7 +43,7 @@ public sealed class DurableSegmentStoreTests
             new DurableReadOptions(
                 Take: 3,
                 MaxBytes: 900,
-                MaxScanBytes: 4096));
+                MaxScanBytes: 4096)).ConfigureAwait(false);
 
         page.Records.Should().NotBeEmpty();
         page.Records.Count.Should().BeLessThanOrEqualTo(3);
@@ -53,9 +56,10 @@ public sealed class DurableSegmentStoreTests
     public async Task ReadAsync_RejectsCallerScanBudgetsAboveTheStoreCeiling()
     {
         var root = CreateRoot();
-        await using var store = CreateStore(root);
+        var store = CreateStore(root);
+        await using var storeAsyncDisposal_ = store.ConfigureAwait(false);
         var key = DurableStreamKey.Job(Guid.NewGuid());
-        await store.AppendAsync(key, Record("bounded"));
+        await store.AppendAsync(key, Record("bounded")).ConfigureAwait(false);
 
         Func<Task> read = async () =>
             _ = await store.ReadAsync(
@@ -63,29 +67,30 @@ public sealed class DurableSegmentStoreTests
                 1,
                 new DurableReadOptions(
                     MaxBytes: 1024,
-                    MaxScanBytes: 16L * 1024 * 1024 + 1));
+                    MaxScanBytes: 16L * 1024 * 1024 + 1)).ConfigureAwait(false);
 
         await read.Should().ThrowAsync<ArgumentOutOfRangeException>()
-            .WithParameterName("MaxScanBytes");
+            .WithParameterName("MaxScanBytes").ConfigureAwait(false);
     }
 
     [Test]
     public async Task SealAsync_EvictsIdleStateAndReadsDoNotRetainIt()
     {
         var root = CreateRoot();
-        await using var store = CreateStore(root);
+        var store = CreateStore(root);
+        await using var storeAsyncDisposal__ = store.ConfigureAwait(false);
         var key = DurableStreamKey.Job(Guid.NewGuid());
 
-        await store.AppendAsync(key, Record("terminal"));
+        await store.AppendAsync(key, Record("terminal")).ConfigureAwait(false);
         store.GetSnapshot().ResidentStreams.Should().Be(1);
 
-        await store.SealAsync(key);
+        await store.SealAsync(key).ConfigureAwait(false);
         store.GetSnapshot().ResidentStreams.Should().Be(0);
 
         var page = await store.ReadAsync(
             key,
             1,
-            new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+            new DurableReadOptions(MaxScanBytes: 1024 * 1024)).ConfigureAwait(false);
         page.Records.Should().ContainSingle();
         store.GetSnapshot().ResidentStreams.Should().Be(0);
     }
@@ -114,15 +119,16 @@ public sealed class DurableSegmentStoreTests
     public async Task ReadAsync_EvaluatesTheRecordThatCrossesTheScanBudget()
     {
         var root = CreateRoot();
-        await using var store = CreateStore(root);
+        var store = CreateStore(root);
+        await using var storeAsyncDisposal___ = store.ConfigureAwait(false);
         var key = DurableStreamKey.Job(Guid.NewGuid());
 
         for (var index = 0; index < 5; index++)
-            await store.AppendAsync(key, Record(RandomMessage("skip")));
+            await store.AppendAsync(key, Record(RandomMessage("skip"))).ConfigureAwait(false);
         var matching = Record(RandomMessage("needle"));
-        await store.AppendAsync(key, matching);
-        await store.AppendAsync(key, Record(RandomMessage("tail")));
-        await store.FlushAsync(key);
+        await store.AppendAsync(key, matching).ConfigureAwait(false);
+        await store.AppendAsync(key, Record(RandomMessage("tail"))).ConfigureAwait(false);
+        await store.FlushAsync(key).ConfigureAwait(false);
 
         var openPath = Directory.GetFiles(root, "*.open", SearchOption.AllDirectories)
             .Single();
@@ -148,7 +154,7 @@ public sealed class DurableSegmentStoreTests
                 Take: 10,
                 MaxBytes: matchingJsonBytes + 32,
                 Contains: "needle",
-                MaxScanBytes: scanBudget));
+                MaxScanBytes: scanBudget)).ConfigureAwait(false);
 
         page.Records.Should().ContainSingle();
         page.Records[0].RecordId.Should().Be(matching.RecordId);
@@ -161,10 +167,13 @@ public sealed class DurableSegmentStoreTests
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());
-        await using (var first = CreateStore(root))
         {
-            await first.AppendAsync(key, Record("before-crash"));
-            await first.SealAsync(key);
+            var first = CreateStore(root);
+            await using (first.ConfigureAwait(false))
+            {
+                await first.AppendAsync(key, Record("before-crash")).ConfigureAwait(false);
+                await first.SealAsync(key).ConfigureAwait(false);
+            }
         }
 
         var sealedPath = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
@@ -172,16 +181,19 @@ public sealed class DurableSegmentStoreTests
         var openPath = Path.ChangeExtension(sealedPath, ".open");
         File.Move(sealedPath, openPath);
 
-        await using (var recovered = CreateStore(root))
         {
-            var receipt = await recovered.AppendAsync(key, Record("after-crash"));
-            receipt.Sequence.Should().Be(2);
-            var page = await recovered.ReadAsync(
-                key,
-                1,
-                new DurableReadOptions(MaxScanBytes: 1024 * 1024));
-            page.Records.Select(record => record.Message)
-                .Should().Equal("before-crash", "after-crash");
+            var recovered = CreateStore(root);
+            await using (recovered.ConfigureAwait(false))
+            {
+                var receipt = await recovered.AppendAsync(key, Record("after-crash")).ConfigureAwait(false);
+                receipt.Sequence.Should().Be(2);
+                var page = await recovered.ReadAsync(
+                    key,
+                    1,
+                    new DurableReadOptions(MaxScanBytes: 1024 * 1024)).ConfigureAwait(false);
+                page.Records.Select(record => record.Message)
+                    .Should().Equal("before-crash", "after-crash");
+            }
         }
     }
 
@@ -192,21 +204,27 @@ public sealed class DurableSegmentStoreTests
         var key = DurableStreamKey.Job(Guid.NewGuid());
         var record = Record("exactly-once") with { Idempotent = true };
 
-        await using (var first = CreateStore(root))
         {
-            var receipt = await first.AppendAsync(key, record);
-            receipt.Sequence.Should().Be(1);
+            var first = CreateStore(root);
+            await using (first.ConfigureAwait(false))
+            {
+                var receipt = await first.AppendAsync(key, record).ConfigureAwait(false);
+                receipt.Sequence.Should().Be(1);
+            }
         }
 
-        await using (var second = CreateStore(root))
         {
-            var receipt = await second.AppendAsync(key, record);
-            receipt.Sequence.Should().Be(1);
-            var page = await second.ReadAsync(
-                key,
-                1,
-                new DurableReadOptions(MaxScanBytes: 1024 * 1024));
-            page.Records.Should().ContainSingle();
+            var second = CreateStore(root);
+            await using (second.ConfigureAwait(false))
+            {
+                var receipt = await second.AppendAsync(key, record).ConfigureAwait(false);
+                receipt.Sequence.Should().Be(1);
+                var page = await second.ReadAsync(
+                    key,
+                    1,
+                    new DurableReadOptions(MaxScanBytes: 1024 * 1024)).ConfigureAwait(false);
+                page.Records.Should().ContainSingle();
+            }
         }
     }
 
@@ -214,14 +232,15 @@ public sealed class DurableSegmentStoreTests
     public async Task AppendModesExposeBufferedAndDurableFlushSemantics()
     {
         var root = CreateRoot();
-        await using var store = CreateStore(root);
+        var store = CreateStore(root);
+        await using var storeAsyncDisposal____ = store.ConfigureAwait(false);
         var key = DurableStreamKey.Process("runtime", Guid.NewGuid());
 
         store.GetSnapshot().LastSuccessfulFlush.Should().BeNull();
-        await store.AppendAsync(key, Record("buffered"), DurableWriteMode.Buffered);
+        await store.AppendAsync(key, Record("buffered"), DurableWriteMode.Buffered).ConfigureAwait(false);
         store.GetSnapshot().LastSuccessfulFlush.Should().BeNull();
 
-        await store.AppendAsync(key, Record("durable"), DurableWriteMode.Durable);
+        await store.AppendAsync(key, Record("durable"), DurableWriteMode.Durable).ConfigureAwait(false);
         store.GetSnapshot().LastSuccessfulFlush.Should().NotBeNull();
     }
 
@@ -231,21 +250,25 @@ public sealed class DurableSegmentStoreTests
         var root = CreateRoot();
         var key = DurableStreamKey.Process("runtime", Guid.NewGuid());
         var record = Record("legacy-body");
-        await using (var writer = CreateUnencryptedStore(root))
         {
-            await writer.AppendAsync(key, record);
-            await writer.SealAsync(key);
+            var writer = CreateUnencryptedStore(root);
+            await using (writer.ConfigureAwait(false))
+            {
+                await writer.AppendAsync(key, record).ConfigureAwait(false);
+                await writer.SealAsync(key).ConfigureAwait(false);
+            }
         }
 
         var segment = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
             .Should().ContainSingle().Subject;
         RewriteFirstFrameAsLegacyBody(segment);
 
-        await using var recovered = CreateUnencryptedStore(root);
+        var recovered = CreateUnencryptedStore(root);
+        await using var recoveredAsyncDisposal = recovered.ConfigureAwait(false);
         var page = await recovered.ReadAsync(
             key,
             1,
-            new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+            new DurableReadOptions(MaxScanBytes: 1024 * 1024)).ConfigureAwait(false);
 
         var decoded = page.Records.Should().ContainSingle().Subject;
         decoded.Message.Should().Be("legacy-body");
@@ -262,13 +285,16 @@ public sealed class DurableSegmentStoreTests
         var key = DurableStreamKey.Job(Guid.NewGuid());
         var record = Record("terminal") with { Idempotent = true };
 
-        await using (var first = CreateStore(root))
         {
-            await first.AppendAsync(
-                key,
-                record,
-                DurableWriteMode.Buffered);
-            await first.SealAsync(key);
+            var first = CreateStore(root);
+            await using (first.ConfigureAwait(false))
+            {
+                await first.AppendAsync(
+                    key,
+                    record,
+                    DurableWriteMode.Buffered).ConfigureAwait(false);
+                await first.SealAsync(key).ConfigureAwait(false);
+            }
         }
 
         var index = Directory.GetFiles(
@@ -278,13 +304,14 @@ public sealed class DurableSegmentStoreTests
             .Single();
         File.Delete(index);
 
-        await using var recovered = CreateStore(root);
-        var receipt = await recovered.AppendAsync(key, record);
+        var recovered = CreateStore(root);
+        await using var recoveredAsyncDisposal_ = recovered.ConfigureAwait(false);
+        var receipt = await recovered.AppendAsync(key, record).ConfigureAwait(false);
         receipt.Sequence.Should().Be(1);
         var page = await recovered.ReadAsync(
             key,
             1,
-            new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+            new DurableReadOptions(MaxScanBytes: 1024 * 1024)).ConfigureAwait(false);
         page.Records.Should().ContainSingle();
     }
 
@@ -294,36 +321,43 @@ public sealed class DurableSegmentStoreTests
         var root = CreateRoot();
         var key = DurableStreamKey.Process("runtime", Guid.NewGuid());
         var encryptionKey = RandomNumberGenerator.GetBytes(32);
-        await using (var writer = CreateStore(root, encryptionKey))
         {
-            await writer.AppendAsync(key, Record("protected"));
+            var writer = CreateStore(root, encryptionKey);
+            await using (writer.ConfigureAwait(false))
+            {
+                await writer.AppendAsync(key, Record("protected")).ConfigureAwait(false);
+            }
         }
 
-        await using (var wrongKeyStore = CreateStore(
-                         root,
-                         RandomNumberGenerator.GetBytes(32)))
         {
-            Func<Task> readWithWrongKey = async () =>
-                _ = await wrongKeyStore.ReadAsync(
-                    key,
-                    1,
-                    new DurableReadOptions(MaxScanBytes: 1024 * 1024));
-            await readWithWrongKey.Should().ThrowAsync<CryptographicException>();
+            var wrongKeyStore = CreateStore(
+                         root,
+                         RandomNumberGenerator.GetBytes(32));
+            await using (wrongKeyStore.ConfigureAwait(false))
+            {
+                Func<Task> readWithWrongKey = async () =>
+                    _ = await wrongKeyStore.ReadAsync(
+                        key,
+                        1,
+                        new DurableReadOptions(MaxScanBytes: 1024 * 1024)).ConfigureAwait(false);
+                await readWithWrongKey.Should().ThrowAsync<CryptographicException>().ConfigureAwait(false);
+            }
         }
 
         var segment = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
             .Single();
-        var bytes = await File.ReadAllBytesAsync(segment);
+        var bytes = await File.ReadAllBytesAsync(segment).ConfigureAwait(false);
         bytes[48] ^= 0x40;
-        await File.WriteAllBytesAsync(segment, bytes);
+        await File.WriteAllBytesAsync(segment, bytes).ConfigureAwait(false);
 
-        await using var corruptStore = CreateStore(root, encryptionKey);
+        var corruptStore = CreateStore(root, encryptionKey);
+        await using var corruptStoreAsyncDisposal = corruptStore.ConfigureAwait(false);
         Func<Task> readCorrupt = async () =>
             _ = await corruptStore.ReadAsync(
                 key,
                 1,
-                new DurableReadOptions(MaxScanBytes: 1024 * 1024));
-        await readCorrupt.Should().ThrowAsync<InvalidDataException>();
+                new DurableReadOptions(MaxScanBytes: 1024 * 1024)).ConfigureAwait(false);
+        await readCorrupt.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
     }
 
     [Test]
@@ -336,77 +370,81 @@ public sealed class DurableSegmentStoreTests
         var registrationKey = DurableStreamKey.Registration("Source/One", registrationBoot);
         try
         {
-            await using (var store = CreateStore(root))
             {
-                await store.AppendAsync(processKey, Record("process"));
-                await store.SealAsync(processKey);
-                await store.AppendAsync(registrationKey, Record("module"));
-
-                var processDirectory = new DurableStreamPathEncoder(root)
-                    .GetStreamDirectory(processKey);
-                var processSegment = Directory.GetFiles(
-                        processDirectory,
-                        "*.scseg")
-                    .Should().ContainSingle().Subject;
-                using (var corrupt = new FileStream(
-                           processSegment,
-                           FileMode.Open,
-                           FileAccess.ReadWrite,
-                           FileShare.ReadWrite))
-                using (var reader = new BinaryReader(
-                           corrupt,
-                           System.Text.Encoding.UTF8,
-                           leaveOpen: true))
+                var store = CreateStore(root);
+                await using (store.ConfigureAwait(false))
                 {
-                    corrupt.Position = 40;
-                    var frameLength = reader.ReadInt32();
-                    frameLength.Should().BeGreaterThan(0);
-                    var payloadPosition = corrupt.Position;
-                    var payload = corrupt.ReadByte();
-                    payload.Should().BeGreaterThanOrEqualTo(0);
-                    corrupt.Position = payloadPosition;
-                    corrupt.WriteByte((byte)(payload ^ 0xFF));
-                    corrupt.Flush(flushToDisk: true);
-                }
+                    await store.AppendAsync(processKey, Record("process")).ConfigureAwait(false);
+                    await store.SealAsync(processKey).ConfigureAwait(false);
+                    await store.AppendAsync(registrationKey, Record("module")).ConfigureAwait(false);
 
-                var catalog = await store.EnumerateOperationalStreamsAsync(
-                    new DurableOperationalStreamEnumerationOptions
+                    var processDirectory = new DurableStreamPathEncoder(root)
+                        .GetStreamDirectory(processKey);
+                    var processSegment = Directory.GetFiles(
+                            processDirectory,
+                            "*.scseg")
+                        .Should().ContainSingle().Subject;
+                    using (var corrupt = new FileStream(
+                               processSegment,
+                               FileMode.Open,
+                               FileAccess.ReadWrite,
+                               FileShare.ReadWrite))
+                    using (var reader = new BinaryReader(
+                               corrupt,
+                               System.Text.Encoding.UTF8,
+                               leaveOpen: true))
                     {
-                        MaxEntries = 10,
-                        MaxScanBytes = 1024 * 1024,
-                        MaxDuration = TimeSpan.FromSeconds(2),
-                    });
+                        corrupt.Position = 40;
+                        var frameLength = reader.ReadInt32();
+                        frameLength.Should().BeGreaterThan(0);
+                        var payloadPosition = corrupt.Position;
+                        var payload = corrupt.ReadByte();
+                        payload.Should().BeGreaterThanOrEqualTo(0);
+                        corrupt.Position = payloadPosition;
+                        corrupt.WriteByte((byte)(payload ^ 0xFF));
+                        corrupt.Flush(flushToDisk: true);
+                    }
 
-                catalog.IdentityGaps.Should().BeEmpty();
-                catalog.Streams.Should().HaveCount(2);
-                var process = catalog.Streams.Single(summary =>
-                    summary.Stream.Kind == DurableStreamKind.ProcessLog);
-                process.AppName.Should().Be("runtime/host");
-                process.SourceId.Should().BeNull();
-                process.BootId.Should().Be(Guid.Empty);
-                process.HasActiveSegment.Should().BeFalse();
-                process.HasSealedSegments.Should().BeTrue();
-                process.RecordCount.Should().Be(1);
-                process.FirstAvailableSequence.Should().Be(1);
+                    var catalog = await store.EnumerateOperationalStreamsAsync(
+                        new DurableOperationalStreamEnumerationOptions
+                        {
+                            MaxEntries = 10,
+                            MaxScanBytes = 1024 * 1024,
+                            MaxDuration = TimeSpan.FromSeconds(2),
+                        }).ConfigureAwait(false);
 
-                var module = catalog.Streams.Single(summary =>
-                    summary.Stream.Kind == DurableStreamKind.RegistrationLog);
-                module.AppName.Should().BeNull();
-                module.SourceId.Should().Be("source/one");
-                module.BootId.Should().Be(registrationBoot);
-                module.HasActiveSegment.Should().BeTrue();
-                module.HasSealedSegments.Should().BeFalse();
-                module.RecordCount.Should().Be(1);
+                    catalog.IdentityGaps.Should().BeEmpty();
+                    catalog.Streams.Should().HaveCount(2);
+                    var process = catalog.Streams.Single(summary =>
+                        summary.Stream.Kind == DurableStreamKind.ProcessLog);
+                    process.AppName.Should().Be("runtime/host");
+                    process.SourceId.Should().BeNull();
+                    process.BootId.Should().Be(Guid.Empty);
+                    process.HasActiveSegment.Should().BeFalse();
+                    process.HasSealedSegments.Should().BeTrue();
+                    process.RecordCount.Should().Be(1);
+                    process.FirstAvailableSequence.Should().Be(1);
+
+                    var module = catalog.Streams.Single(summary =>
+                        summary.Stream.Kind == DurableStreamKind.RegistrationLog);
+                    module.AppName.Should().BeNull();
+                    module.SourceId.Should().Be("source/one");
+                    module.BootId.Should().Be(registrationBoot);
+                    module.HasActiveSegment.Should().BeTrue();
+                    module.HasSealedSegments.Should().BeFalse();
+                    module.RecordCount.Should().Be(1);
+                }
             }
 
-            await using var restarted = CreateStore(root);
+            var restarted = CreateStore(root);
+            await using var restartedAsyncDisposal = restarted.ConfigureAwait(false);
             var afterRestart = await restarted.EnumerateOperationalStreamsAsync(
                 new DurableOperationalStreamEnumerationOptions
                 {
                     MaxEntries = 10,
                     MaxScanBytes = 1024 * 1024,
                     MaxDuration = TimeSpan.FromSeconds(2),
-                });
+                }).ConfigureAwait(false);
             afterRestart.IdentityGaps.Should().BeEmpty();
             afterRestart.Streams.Select(summary => summary.Stream)
                 .Should().Contain(processKey);
@@ -427,12 +465,15 @@ public sealed class DurableSegmentStoreTests
         var validKey = DurableStreamKey.Process("valid", Guid.NewGuid());
         try
         {
-            await using (var store = CreateStore(root))
             {
-                await store.AppendAsync(invalidKey, Record("invalid"));
-                await store.SealAsync(invalidKey);
-                await store.AppendAsync(validKey, Record("valid"));
-                await store.SealAsync(validKey);
+                var store = CreateStore(root);
+                await using (store.ConfigureAwait(false))
+                {
+                    await store.AppendAsync(invalidKey, Record("invalid")).ConfigureAwait(false);
+                    await store.SealAsync(invalidKey).ConfigureAwait(false);
+                    await store.AppendAsync(validKey, Record("valid")).ConfigureAwait(false);
+                    await store.SealAsync(validKey).ConfigureAwait(false);
+                }
             }
 
             var invalidDirectory = new DurableStreamPathEncoder(root)
@@ -441,14 +482,15 @@ public sealed class DurableSegmentStoreTests
                 Path.Combine(invalidDirectory, ".stream.manifest"),
                 "{");
 
-            await using var reader = CreateStore(root);
+            var reader = CreateStore(root);
+            await using var readerAsyncDisposal = reader.ConfigureAwait(false);
             var catalog = await reader.EnumerateOperationalStreamsAsync(
                 new DurableOperationalStreamEnumerationOptions
                 {
                     MaxEntries = 10,
                     MaxScanBytes = 1024 * 1024,
                     MaxDuration = TimeSpan.FromSeconds(2),
-                });
+                }).ConfigureAwait(false);
 
             catalog.Streams.Select(summary => summary.Stream)
                 .Should().Contain(validKey);
@@ -470,26 +512,30 @@ public sealed class DurableSegmentStoreTests
         var key = DurableStreamKey.Process("legacy", Guid.NewGuid());
         try
         {
-            await using (var store = CreateStore(root))
             {
-                await store.AppendAsync(
-                    key,
-                    Record("legacy body"));
-                await store.SealAsync(key);
+                var store = CreateStore(root);
+                await using (store.ConfigureAwait(false))
+                {
+                    await store.AppendAsync(
+                        key,
+                        Record("legacy body")).ConfigureAwait(false);
+                    await store.SealAsync(key).ConfigureAwait(false);
+                }
             }
 
             var directory = new DurableStreamPathEncoder(root)
                 .GetStreamDirectory(key);
             File.Delete(Path.Combine(directory, ".stream.identity"));
 
-            await using var reader = CreateStore(root);
+            var reader = CreateStore(root);
+            await using var readerAsyncDisposal_ = reader.ConfigureAwait(false);
             var catalog = await reader.EnumerateOperationalStreamsAsync(
                 new DurableOperationalStreamEnumerationOptions
                 {
                     MaxEntries = 10,
                     MaxScanBytes = 1024 * 1024,
                     MaxDuration = TimeSpan.FromSeconds(2),
-                });
+                }).ConfigureAwait(false);
 
             catalog.Streams.Should().BeEmpty();
             catalog.IdentityGaps.Should().ContainSingle();
@@ -509,24 +555,28 @@ public sealed class DurableSegmentStoreTests
         var root = CreateRoot();
         try
         {
-            await using (var store = CreateStore(root))
             {
-                foreach (var app in new[] { "first", "second" })
+                var store = CreateStore(root);
+                await using (store.ConfigureAwait(false))
                 {
-                    var key = DurableStreamKey.Process(app, Guid.NewGuid());
-                    await store.AppendAsync(key, Record(app));
-                    await store.SealAsync(key);
+                    foreach (var app in new[] { "first", "second" })
+                    {
+                        var key = DurableStreamKey.Process(app, Guid.NewGuid());
+                        await store.AppendAsync(key, Record(app)).ConfigureAwait(false);
+                        await store.SealAsync(key).ConfigureAwait(false);
+                    }
                 }
             }
 
-            await using var reader = CreateStore(root);
+            var reader = CreateStore(root);
+            await using var readerAsyncDisposal__ = reader.ConfigureAwait(false);
             var entryBound = await reader.EnumerateOperationalStreamsAsync(
                 new DurableOperationalStreamEnumerationOptions
                 {
                     MaxEntries = 1,
                     MaxScanBytes = 1024 * 1024,
                     MaxDuration = TimeSpan.FromSeconds(2),
-                });
+                }).ConfigureAwait(false);
             (entryBound.Streams.Count + entryBound.IdentityGaps.Count)
                 .Should().BeLessThanOrEqualTo(1);
             entryBound.HasMore.Should().BeTrue();
@@ -537,7 +587,7 @@ public sealed class DurableSegmentStoreTests
                     MaxEntries = 10,
                     MaxScanBytes = 1,
                     MaxDuration = TimeSpan.FromSeconds(2),
-                });
+                }).ConfigureAwait(false);
             scanBound.Streams.Should().BeEmpty();
             scanBound.HasMore.Should().BeTrue();
             scanBound.ScannedBytes.Should().BeLessThanOrEqualTo(1);
@@ -572,11 +622,12 @@ public sealed class DurableSegmentStoreTests
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());
-        await using var store = CreateStore(root);
+        var store = CreateStore(root);
+        await using var storeAsyncDisposal_____ = store.ConfigureAwait(false);
         for (var index = 1; index <= 3; index++)
         {
-            await store.AppendAsync(key, Record($"record-{index}"));
-            await store.SealAsync(key);
+            await store.AppendAsync(key, Record($"record-{index}")).ConfigureAwait(false);
+            await store.SealAsync(key).ConfigureAwait(false);
         }
 
         var segments = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
@@ -592,16 +643,16 @@ public sealed class DurableSegmentStoreTests
             RegistrationLogAge = TimeSpan.FromDays(30),
             MaximumEncodedBytes = long.MaxValue,
             MinimumFreeBytes = 0,
-        });
+        }).ConfigureAwait(false);
 
         result.DeletedSegments.Should().Be(2);
-        var summary = await store.GetSummaryAsync(key);
+        var summary = await store.GetSummaryAsync(key).ConfigureAwait(false);
         summary.FirstAvailableSequence.Should().Be(3);
         summary.ExpiredRecordCount.Should().Be(2);
         var page = await store.ReadAsync(
             key,
             1,
-            new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+            new DurableReadOptions(MaxScanBytes: 1024 * 1024)).ConfigureAwait(false);
         page.Records.Select(record => record.Sequence).Should().Equal(3);
         page.FirstAvailableSequence.Should().Be(3);
         page.ExpiredRecordCount.Should().Be(2);
@@ -613,7 +664,8 @@ public sealed class DurableSegmentStoreTests
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());
         var artifactId = Guid.NewGuid();
-        await using var store = CreateStore(root);
+        var store = CreateStore(root);
+        await using var storeAsyncDisposal______ = store.ConfigureAwait(false);
         await store.AppendAsync(
             key,
             Record("externalized") with
@@ -623,10 +675,10 @@ public sealed class DurableSegmentStoreTests
                     "text/plain",
                     12,
                     new string('a', 64)),
-            });
-        await store.SealAsync(key);
+            }).ConfigureAwait(false);
+        await store.SealAsync(key).ConfigureAwait(false);
 
-        (await store.ReadArtifactReferencesAsync()).Should().Contain(artifactId);
+        (await store.ReadArtifactReferencesAsync().ConfigureAwait(false)).Should().Contain(artifactId);
         var segment = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
             .Single();
         File.SetLastWriteTimeUtc(segment, DateTime.UtcNow.AddDays(-10));
@@ -638,9 +690,9 @@ public sealed class DurableSegmentStoreTests
             RegistrationLogAge = TimeSpan.FromDays(30),
             MaximumEncodedBytes = long.MaxValue,
             MinimumFreeBytes = 0,
-        });
+        }).ConfigureAwait(false);
 
-        (await store.ReadArtifactReferencesAsync()).Should().NotContain(artifactId);
+        (await store.ReadArtifactReferencesAsync().ConfigureAwait(false)).Should().NotContain(artifactId);
     }
 
     [Test]
@@ -648,15 +700,19 @@ public sealed class DurableSegmentStoreTests
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());
-        await using (var writer = CreateStore(root))
-            await writer.AppendAsync(key, Record("crash tail"));
+        {
+            var writer = CreateStore(root);
+            await using (writer.ConfigureAwait(false))
+                await writer.AppendAsync(key, Record("crash tail")).ConfigureAwait(false);
+        }
         var sealedPath = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
             .Single();
         var openPath = Path.ChangeExtension(sealedPath, ".open");
         File.Move(sealedPath, openPath);
         File.SetLastWriteTimeUtc(openPath, DateTime.UtcNow.AddDays(-10));
 
-        await using var recovered = CreateStore(root);
+        var recovered = CreateStore(root);
+        await using var recoveredAsyncDisposal__ = recovered.ConfigureAwait(false);
         var result = await recovered.ApplyRetentionAsync(new DurableRetentionOptions
         {
             JobLogAge = TimeSpan.FromDays(1),
@@ -664,12 +720,12 @@ public sealed class DurableSegmentStoreTests
             RegistrationLogAge = TimeSpan.FromDays(30),
             MaximumEncodedBytes = long.MaxValue,
             MinimumFreeBytes = 0,
-        });
+        }).ConfigureAwait(false);
 
         result.DeletedSegments.Should().Be(1);
         Directory.GetFiles(root, "*.open", SearchOption.AllDirectories)
             .Should().BeEmpty();
-        var summary = await recovered.GetSummaryAsync(key);
+        var summary = await recovered.GetSummaryAsync(key).ConfigureAwait(false);
         summary.ExpiredRecordCount.Should().Be(1);
     }
 

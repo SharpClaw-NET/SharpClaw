@@ -23,7 +23,7 @@ public sealed class MigrationGate : IDisposable
     /// </summary>
     public async ValueTask<IDisposable> EnterRequestAsync(CancellationToken ct = default)
     {
-        await _gate.Task.WaitAsync(ct);
+        await _gate.Task.WaitAsync(ct).ConfigureAwait(false);
         Interlocked.Increment(ref _inflightRequests);
         return new RequestHandle(this);
     }
@@ -35,7 +35,7 @@ public sealed class MigrationGate : IDisposable
     /// </summary>
     public async Task<IDisposable> EnterMigrationAsync(CancellationToken ct = default)
     {
-        await _migrationLock.WaitAsync(ct);
+        await _migrationLock.WaitAsync(ct).ConfigureAwait(false);
 
         // Close gate — new requests will await.
         _gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -48,7 +48,7 @@ public sealed class MigrationGate : IDisposable
         _currentDrain = drain;
         if (Volatile.Read(ref _inflightRequests) == 0)
             drain.TrySetResult();
-        await drain.Task.WaitAsync(ct);
+        await drain.Task.WaitAsync(ct).ConfigureAwait(false);
 
         State = MigrationState.Migrating;
         return new MigrationHandle(this);

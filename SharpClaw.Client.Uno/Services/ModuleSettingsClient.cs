@@ -50,7 +50,8 @@ internal static class ModuleSettingsClient
         await api.ConsumeStreamAsync("GET", path, null, async (response, ct) =>
         {
             response.EnsureSuccessStatusCode();
-            await using var input = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            var input = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            await using var inputAsyncDisposal = input.ConfigureAwait(true);
             using var output = new MemoryStream();
             await ModulePackageSources.CopyBoundedAsync(input, output, SharpClawModuleSettings.MaximumDocumentBytes, ct).ConfigureAwait(false);
             result = Encoding.UTF8.GetString(output.ToArray());

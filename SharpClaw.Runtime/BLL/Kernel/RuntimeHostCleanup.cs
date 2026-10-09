@@ -26,7 +26,7 @@ internal sealed class RuntimeHostCleanup(
 
         try
         {
-            await stopListener();
+            await stopListener().ConfigureAwait(false);
         }
         catch (Exception exception)
         {

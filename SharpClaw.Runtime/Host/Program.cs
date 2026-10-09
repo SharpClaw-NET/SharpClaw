@@ -12,8 +12,8 @@ Console.CancelKeyPress += cancelKeyPress;
 AssemblyLoadContext.Default.Unloading += unloading;
 try
 {
-    if (!await RuntimeLauncher.TryRunEarlyAsync(args, processCancellation.Token))
-        await LocalRuntimeHost.RunAsync(args, processCancellation.Token);
+    if (!await RuntimeLauncher.TryRunEarlyAsync(args, processCancellation.Token).ConfigureAwait(false))
+        await LocalRuntimeHost.RunAsync(args, processCancellation.Token).ConfigureAwait(false);
 }
 finally
 {

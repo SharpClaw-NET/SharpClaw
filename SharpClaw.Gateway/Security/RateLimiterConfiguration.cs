@@ -4,7 +4,7 @@ using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Gateway.Security;
 
-public static class RateLimiterConfiguration
+internal static class RateLimiterConfiguration
 {
     public const string GlobalPolicy = "global";
     public const string ChatPolicy = "chat";
@@ -37,7 +37,7 @@ public static class RateLimiterConfiguration
                     context.HttpContext,
                     StatusCodes.Status429TooManyRequests,
                     "Too many requests. Slow down.",
-                    GatewayErrors.TooManyRequests);
+                    GatewayErrors.TooManyRequests).ConfigureAwait(false);
             };
 
             options.AddPolicy(GlobalPolicy, context =>

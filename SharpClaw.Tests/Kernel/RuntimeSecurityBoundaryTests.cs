@@ -12,8 +12,10 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeSecurityBoundaryTests
+internal sealed class RuntimeSecurityBoundaryTests
 {
     [Test]
     public void Security_manifest_matches_the_published_catalog_without_defining_local_actions()
@@ -46,7 +48,7 @@ public sealed class RuntimeSecurityBoundaryTests
                 static (_, _) => ValueTask.FromResult(true)))
             .ToArray();
 
-        (await Task.WhenAll(requests.Select(static request => request.AsTask())))
+        (await Task.WhenAll(requests.Select(static request => request.AsTask())).ConfigureAwait(false))
             .Should()
             .OnlyContain(static allowed => allowed);
 
@@ -89,7 +91,7 @@ public sealed class RuntimeSecurityBoundaryTests
             configuration,
             adapter);
 
-        await allowedMiddleware.InvokeAsync(allowed);
+        await allowedMiddleware.InvokeAsync(allowed).ConfigureAwait(false);
 
         allowedNext.Should().BeTrue();
         allowed.Response.StatusCode.Should().Be(StatusCodes.Status204NoContent);
@@ -103,7 +105,7 @@ public sealed class RuntimeSecurityBoundaryTests
             configuration,
             adapter);
 
-        await deniedMiddleware.InvokeAsync(denied);
+        await deniedMiddleware.InvokeAsync(denied).ConfigureAwait(false);
 
         denied.Response.StatusCode.Should().Be(StatusCodes.Status423Locked);
         probe.Observations.Count(observation => observation.Action == "security.api_key.resolve")
@@ -137,7 +139,7 @@ public sealed class RuntimeSecurityBoundaryTests
             configuration,
             adapter);
 
-        await middleware.InvokeAsync(context);
+        await middleware.InvokeAsync(context).ConfigureAwait(false);
 
         nextCalls.Should().Be(1);
         probe.Observations.Count(observation => observation.Action == "security.api_key.resolve")
@@ -170,7 +172,7 @@ public sealed class RuntimeSecurityBoundaryTests
             configuration,
             adapter);
 
-        await middleware.InvokeAsync(context);
+        await middleware.InvokeAsync(context).ConfigureAwait(false);
 
         nextCalls.Should().Be(0);
         context.Response.StatusCode.Should().Be(StatusCodes.Status423Locked);
@@ -200,7 +202,7 @@ public sealed class RuntimeSecurityBoundaryTests
                 return ValueTask.FromResult(
                     invocation.Operation == "authorize"
                     && invocation.Resource == "/allowed");
-            });
+            }).ConfigureAwait(false);
 
         allowed.Should().BeFalse();
         baseInvocation.Should().Be(
@@ -221,7 +223,7 @@ public sealed class RuntimeSecurityBoundaryTests
             ExecutionContext("security-admin"),
             Action("security.secret.delete"),
             new RuntimeSecurityActionInvocation("revoke", "/revoke"),
-            static (_, _) => ValueTask.FromResult(true));
+            static (_, _) => ValueTask.FromResult(true)).ConfigureAwait(false);
         restricted.Should().BeFalse();
 
         using var secondWorkspace = new TemporaryWorkspace();
@@ -235,7 +237,7 @@ public sealed class RuntimeSecurityBoundaryTests
             ExecutionContext("security-admin"),
             Action("security.secret.delete"),
             new RuntimeSecurityActionInvocation("revoke", "/revoke"),
-            static (_, _) => ValueTask.FromResult(false));
+            static (_, _) => ValueTask.FromResult(false)).ConfigureAwait(false);
         granted.Should().BeFalse();
     }
 
@@ -266,9 +268,9 @@ public sealed class RuntimeSecurityBoundaryTests
                 {
                     terminalCalled = true;
                     return ValueTask.FromResult(true);
-                });
+                }).ConfigureAwait(false);
 
-            await action.Should().ThrowAsync<Exception>();
+            await action.Should().ThrowAsync<Exception>().ConfigureAwait(false);
             terminalCalled.Should().BeFalse();
             probe.Observations.Should().ContainSingle(observation =>
                 observation.Action == actionName
@@ -294,9 +296,9 @@ public sealed class RuntimeSecurityBoundaryTests
                 terminalCalled = true;
                 return ValueTask.FromResult(true);
             },
-            cancellation.Token);
+            cancellation.Token).ConfigureAwait(false);
 
-        await action.Should().ThrowAsync<Exception>();
+        await action.Should().ThrowAsync<Exception>().ConfigureAwait(false);
         terminalCalled.Should().BeFalse();
     }
 
@@ -316,9 +318,9 @@ public sealed class RuntimeSecurityBoundaryTests
             {
                 terminalCalled = true;
                 return ValueTask.FromResult(true);
-            });
+            }).ConfigureAwait(false);
 
-        await action.Should().ThrowAsync<Exception>();
+        await action.Should().ThrowAsync<Exception>().ConfigureAwait(false);
         terminalCalled.Should().BeFalse();
     }
 
@@ -551,7 +553,7 @@ public sealed class RuntimeSecurityBoundaryTests
                         new RuntimeSecurityActionInvocation("nested-read", "/env/core")),
                     static (_, _) => ValueTask.FromResult<object>(true),
                     snapshot,
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(
@@ -573,7 +575,7 @@ public sealed class RuntimeSecurityBoundaryTests
                         context.Action,
                         "K03 repeat boundary test",
                         null),
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(
@@ -596,10 +598,10 @@ public sealed class RuntimeSecurityBoundaryTests
                     new ActionReplacement<KernelActionEnvelope>(
                         context.Action with { Payload = replacement },
                         "K03 input boundary test"),
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
 
-            return await control.ProceedAsync(cancellationToken);
+            return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

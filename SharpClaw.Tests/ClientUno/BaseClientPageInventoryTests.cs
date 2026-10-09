@@ -2,8 +2,10 @@ using System.Xml.Linq;
 
 namespace SharpClaw.Tests.ClientUno;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class BaseClientPageInventoryTests
+internal sealed class BaseClientPageInventoryTests
 {
     [Test]
     public void OnlyThreeDefaultPagesRetainTheExistingBlackTerminalTheme()

@@ -11,9 +11,11 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
 [NonParallelizable]
-public sealed class RuntimeCliBoundaryTests
+internal sealed class RuntimeCliBoundaryTests
 {
     private static readonly string[] ExpectedActions =
     [
@@ -46,7 +48,7 @@ public sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test");
+        await adapter.StartAsync("k04-test").ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -58,7 +60,7 @@ public sealed class RuntimeCliBoundaryTests
                 PackagedApplicationRegistry.Empty,
                 output,
                 error,
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
 
             exitCode.Should().Be(0);
             output.ToString().Should().Contain("--cli chat");
@@ -68,7 +70,7 @@ public sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -79,7 +81,7 @@ public sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test");
+        await adapter.StartAsync("k04-test").ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -91,7 +93,7 @@ public sealed class RuntimeCliBoundaryTests
                 PackagedApplicationRegistry.Empty,
                 output,
                 error,
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
 
             exitCode.Should().Be(1);
             output.ToString().Should().BeEmpty();
@@ -107,7 +109,7 @@ public sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -118,7 +120,7 @@ public sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test");
+        await adapter.StartAsync("k04-test").ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -130,7 +132,7 @@ public sealed class RuntimeCliBoundaryTests
                 PackagedApplicationRegistry.Empty,
                 output,
                 error,
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
 
             exitCode.Should().Be(1);
             error.ToString().Should().Be("The Runtime CLI command failed." + Environment.NewLine);
@@ -142,7 +144,7 @@ public sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -153,7 +155,7 @@ public sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test");
+        await adapter.StartAsync("k04-test").ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -168,7 +170,7 @@ public sealed class RuntimeCliBoundaryTests
                 PackagedApplicationRegistry.Empty,
                 output,
                 error,
-                cancellation.Token);
+                cancellation.Token).ConfigureAwait(false);
 
             exitCode.Should().Be(130);
             error.ToString().Should().Be("The Runtime CLI command was cancelled." + Environment.NewLine);
@@ -179,7 +181,7 @@ public sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -193,7 +195,7 @@ public sealed class RuntimeCliBoundaryTests
         };
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test");
+        await adapter.StartAsync("k04-test").ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -205,7 +207,7 @@ public sealed class RuntimeCliBoundaryTests
                 PackagedApplicationRegistry.Empty,
                 output,
                 error,
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
 
             exitCode.Should().Be(130);
             error.ToString().Should().Be(
@@ -221,7 +223,7 @@ public sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -237,7 +239,7 @@ public sealed class RuntimeCliBoundaryTests
         };
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test");
+        await adapter.StartAsync("k04-test").ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -251,11 +253,11 @@ public sealed class RuntimeCliBoundaryTests
                 error,
                 CancellationToken.None).AsTask();
 
-            await probe.ChatStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await probe.ChatStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             actionCancellation.Cancel();
 
-            var exitCode = await session.WaitAsync(TimeSpan.FromSeconds(5));
-            await probe.ChatCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var exitCode = await session.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await probe.ChatCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
             exitCode.Should().Be(130);
             error.ToString().Should().Be(
@@ -271,7 +273,7 @@ public sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -282,7 +284,7 @@ public sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test");
+        await adapter.StartAsync("k04-test").ConfigureAwait(false);
         try
         {
             static async Task<int> RunHelpAsync(
@@ -296,7 +298,7 @@ public sealed class RuntimeCliBoundaryTests
                     PackagedApplicationRegistry.Empty,
                     output,
                     error,
-                    CancellationToken.None);
+                    CancellationToken.None).ConfigureAwait(false);
 
             using var firstOutput = new StringWriter();
             using var firstError = new StringWriter();
@@ -304,7 +306,7 @@ public sealed class RuntimeCliBoundaryTests
             using var secondError = new StringWriter();
             var results = await Task.WhenAll(
                 RunHelpAsync(adapter, firstOutput, firstError),
-                RunHelpAsync(adapter, secondOutput, secondError));
+                RunHelpAsync(adapter, secondOutput, secondError)).ConfigureAwait(false);
 
             results.Should().Equal(0, 0);
             probe.Observations.Should().HaveCount(10);
@@ -327,7 +329,7 @@ public sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -646,7 +648,7 @@ public sealed class RuntimeCliBoundaryTests
             {
                 try
                 {
-                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

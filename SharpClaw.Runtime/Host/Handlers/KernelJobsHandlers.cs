@@ -6,7 +6,7 @@ using SharpClaw.Runtime.Host.Routing;
 namespace SharpClaw.Runtime.Host.Handlers;
 
 [RouteGroup("/jobs")]
-public static class KernelJobsHandlers
+internal static class KernelJobsHandlers
 {
     [MapPost]
     public static async Task<IResult> Submit(
@@ -28,7 +28,7 @@ public static class KernelJobsHandlers
                 request.ConversationId,
                 request.Holds),
             executionContext,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return Results.Ok(job);
     }
 
@@ -40,7 +40,7 @@ public static class KernelJobsHandlers
     {
         var jobs = await coordinator.ListAsync(
             KernelHostEndpoints.CreateExecutionContext(context),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return Results.Ok(jobs);
     }
 
@@ -54,7 +54,7 @@ public static class KernelJobsHandlers
         var job = await coordinator.GetAsync(
             jobId,
             KernelHostEndpoints.CreateExecutionContext(context),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return job is null ? Results.NotFound() : Results.Ok(job);
     }
 
@@ -68,7 +68,7 @@ public static class KernelJobsHandlers
         var result = await coordinator.DispatchAsync(
             jobId,
             KernelHostEndpoints.CreateExecutionContext(context),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return Results.Ok(result);
     }
 
@@ -154,7 +154,7 @@ public static class KernelJobsHandlers
         var job = await coordinator.RetryAsync<JobPayloadEnvelope>(
             jobId,
             KernelHostEndpoints.CreateExecutionContext(context),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return Results.Ok(job);
     }
 
@@ -168,7 +168,7 @@ public static class KernelJobsHandlers
         var deleted = await coordinator.DeleteAsync(
             jobId,
             KernelHostEndpoints.CreateExecutionContext(context),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return deleted ? Results.NoContent() : Results.NotFound();
     }
 
@@ -181,7 +181,7 @@ public static class KernelJobsHandlers
         Results.Ok(await coordinator.ReadProgressAsync(
             jobId,
             KernelHostEndpoints.CreateExecutionContext(context),
-            cancellationToken));
+            cancellationToken).ConfigureAwait(false));
 
     [MapGet("/{jobId:guid}/attempts")]
     public static async Task<IResult> Attempts(
@@ -192,7 +192,7 @@ public static class KernelJobsHandlers
         Results.Ok(await coordinator.ReadAttemptsAsync(
             jobId,
             KernelHostEndpoints.CreateExecutionContext(context),
-            cancellationToken));
+            cancellationToken).ConfigureAwait(false));
 
     [MapGet("/{jobId:guid}/artifact")]
     public static async Task<IResult> Artifact(
@@ -203,7 +203,7 @@ public static class KernelJobsHandlers
         Results.Ok(await coordinator.ReadArtifactAsync(
             jobId,
             KernelHostEndpoints.CreateExecutionContext(context),
-            cancellationToken));
+            cancellationToken).ConfigureAwait(false));
 
     private static async Task<IResult> RunTransitionAsync(
         Guid jobId,
@@ -214,12 +214,12 @@ public static class KernelJobsHandlers
         var job = await transition(
             jobId,
             KernelHostEndpoints.CreateExecutionContext(context),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return Results.Ok(job);
     }
 }
 
-public sealed record KernelJobSubmissionRequest(
+internal sealed record KernelJobSubmissionRequest(
     string ActionKey,
     JobPayloadEnvelope Input,
     Guid? ConversationId = null,

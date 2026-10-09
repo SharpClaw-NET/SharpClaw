@@ -8,8 +8,10 @@ using Supprocom.Secrets;
 
 namespace SharpClaw.Tests.Frontend;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class ModulePackageStoreTests
+internal sealed class ModulePackageStoreTests
 {
     [TestCase("../escape.dll")]
     [TestCase("/escape.dll")]
@@ -29,7 +31,7 @@ public sealed class ModulePackageStoreTests
         using var workspace = new Workspace();
         using var store = workspace.Store();
         var source = workspace.CreatePayload();
-        using var inspected = await store.PrepareAsync(new("local", LocalPath: source), null, default);
+        using var inspected = await store.PrepareAsync(new("local", LocalPath: source), null, default).ConfigureAwait(false);
         inspected.Modules.Single().Id.Should().Be("frontend_fixture");
         store.ReadInstalled().Should().BeEmpty();
         var stopped = false;
@@ -41,7 +43,7 @@ public sealed class ModulePackageStoreTests
             configured = root;
             modules.Should().Equal(inspected.Modules);
             return Task.CompletedTask;
-        }, default);
+        }, default).ConfigureAwait(false);
         configured.Should().Be(store.ActiveRoot);
         store.ReadInstalled().Should().Equal(inspected.Modules);
         File.ReadAllText(Directory.GetFiles(store.ActiveRoot, "LICENSE.md", SearchOption.AllDirectories).Single())
@@ -53,12 +55,12 @@ public sealed class ModulePackageStoreTests
     {
         using var workspace = new Workspace();
         using var store = workspace.Store();
-        using var inspected = await store.PrepareAsync(new("local", LocalPath: workspace.CreatePayload()), null, default);
-        await File.AppendAllTextAsync(System.IO.Path.Combine(inspected.Root, "payload", "LICENSE.md"), "changed");
+        using var inspected = await store.PrepareAsync(new("local", LocalPath: workspace.CreatePayload()), null, default).ConfigureAwait(false);
+        await File.AppendAllTextAsync(System.IO.Path.Combine(inspected.Root, "payload", "LICENSE.md"), "changed").ConfigureAwait(false);
         var stopped = false;
         Func<Task> install = () => store.CommitAsync(inspected, workspace.Path("bundled"), _ =>
         { stopped = true; return Task.CompletedTask; }, (_, _, _) => Task.CompletedTask, default);
-        await install.Should().ThrowAsync<InvalidDataException>();
+        await install.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
         stopped.Should().BeFalse();
         store.ReadInstalled().Should().BeEmpty();
     }
@@ -69,13 +71,13 @@ public sealed class ModulePackageStoreTests
         using var workspace = new Workspace();
         using var store = workspace.Store();
         var source = workspace.CreatePayload();
-        using var first = await store.PrepareAsync(new("local", LocalPath: source), null, default);
+        using var first = await store.PrepareAsync(new("local", LocalPath: source), null, default).ConfigureAwait(false);
         await store.CommitAsync(first, workspace.Path("bundled"), _ => Task.CompletedTask,
-            (_, _, _) => Task.CompletedTask, default);
-        using var second = await store.PrepareAsync(new("local", LocalPath: source), null, default);
+            (_, _, _) => Task.CompletedTask, default).ConfigureAwait(false);
+        using var second = await store.PrepareAsync(new("local", LocalPath: source), null, default).ConfigureAwait(false);
         Func<Task> install = () => store.CommitAsync(second, workspace.Path("bundled"), _ => Task.CompletedTask,
             (_, _, _) => Task.CompletedTask, default);
-        await install.Should().ThrowAsync<InvalidDataException>();
+        await install.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
         store.ReadInstalled().Should().HaveCount(1);
     }
 
@@ -84,10 +86,10 @@ public sealed class ModulePackageStoreTests
     {
         using var workspace = new Workspace();
         using var store = workspace.Store();
-        using var inspected = await store.PrepareAsync(new("local", LocalPath: workspace.CreatePayload()), null, default);
+        using var inspected = await store.PrepareAsync(new("local", LocalPath: workspace.CreatePayload()), null, default).ConfigureAwait(false);
         Func<Task> install = () => store.CommitAsync(inspected, workspace.Path("bundled"), _ => Task.CompletedTask,
             (_, _, _) => throw new InvalidOperationException("test failure"), default);
-        await install.Should().ThrowAsync<InvalidOperationException>();
+        await install.Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
         Directory.GetDirectories(store.ActiveRoot).Should().BeEmpty();
         File.Exists(System.IO.Path.Combine(inspected.Root, "payload", "package.json")).Should().BeFalse();
     }
@@ -106,8 +108,8 @@ public sealed class ModulePackageStoreTests
                 if (shape == "link") entry.ExternalAttributes = unchecked((int)0xA1FF0000);
                 if (shape == "collision") archive.CreateEntry("ENTRY.dll");
             }
-            Func<Task> inspect = async () => { using var candidate = await store.PrepareAsync(new(shape, LocalPath: path), null, default); };
-            await inspect.Should().ThrowAsync<InvalidDataException>();
+            Func<Task> inspect = async () => { using var candidate = await store.PrepareAsync(new(shape, LocalPath: path), null, default).ConfigureAwait(false); };
+            await inspect.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
             Directory.GetDirectories(workspace.Path("store"), "inspection-*").Should().BeEmpty();
         }
     }
@@ -126,12 +128,12 @@ public sealed class ModulePackageStoreTests
             foreach (var argument in new[] { "/c", "mklink", "/J", System.IO.Path.Combine(source, "linked"), target })
                 start.ArgumentList.Add(argument);
             using var process = Process.Start(start)!;
-            await process.WaitForExitAsync();
+            await process.WaitForExitAsync().ConfigureAwait(false);
             process.ExitCode.Should().Be(0, "directory junction creation needs no developer-mode privilege");
         }
         else File.CreateSymbolicLink(System.IO.Path.Combine(source, "linked.txt"), System.IO.Path.Combine(source, "LICENSE.md"));
-        Func<Task> inspect = async () => { using var candidate = await store.PrepareAsync(new("local", LocalPath: source), null, default); };
-        await inspect.Should().ThrowAsync<InvalidDataException>();
+        Func<Task> inspect = async () => { using var candidate = await store.PrepareAsync(new("local", LocalPath: source), null, default).ConfigureAwait(false); };
+        await inspect.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
     }
 
     [Test]
@@ -148,12 +150,12 @@ public sealed class ModulePackageStoreTests
         foreach (var link in new[] { "https://www.nuget.org/packages/Example.Module/1.0.0",
             "https://www.nuget.org/api/v2/package/Example.Module/1.0.0" })
         {
-            var choice = (await sources.ResolveAsync(link, "not-a-nuget-credential", default)).Single();
+            var choice = (await sources.ResolveAsync(link, "not-a-nuget-credential", default).ConfigureAwait(false)).Single();
             choice.PackageId.Should().Be("Example.Module");
             choice.Version.Should().Be("1.0.0");
             choice.Download.Should().Be(new Uri("https://api.nuget.org/v3-flatcontainer/example.module/1.0.0/example.module.1.0.0.nupkg"));
         }
-        var versions = await sources.ResolveAsync("https://www.nuget.org/packages/Example.Module", null, default);
+        var versions = await sources.ResolveAsync("https://www.nuget.org/packages/Example.Module", null, default).ConfigureAwait(false);
         versions.Select(item => item.Version).Should().Equal("2.0.0", "1.0.0", "2.0.0-beta.1");
     }
 
@@ -170,19 +172,22 @@ public sealed class ModulePackageStoreTests
             if (path.EndsWith("/42", StringComparison.Ordinal))
                 return new(HttpStatusCode.OK) { Content = new StringContent("""{"name":"1.0.0"}""") };
             if (path.EndsWith("/index.json", StringComparison.Ordinal))
-                return new(HttpStatusCode.OK) { Content = new StringContent(path == "/owner/index.json"
+                return new(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(path == "/owner/index.json"
                     ? """{"resources":[{"@type":"PackageBaseAddress/3.0.0","@id":"https://nuget.pkg.github.com/owner/flat/"}]}"""
-                    : """{"versions":["1.0.0"]}""") };
+                    : """{"versions":["1.0.0"]}""")
+                };
             if (request.RequestUri.Host == "nuget.pkg.github.com" && path.EndsWith(".nupkg", StringComparison.Ordinal))
                 return new(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://objects.githubusercontent.com/asset.zip") } };
             if (request.RequestUri.Host == "objects.githubusercontent.com")
                 return new(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://nuget.pkg.github.com/owner/final.zip") } };
             return new(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) };
         })));
-        var choice = (await sources.ResolveAsync("https://github.com/owner/repo/pkgs/nuget/Example.Module/42", "explicit-token", default)).Single();
+        var choice = (await sources.ResolveAsync("https://github.com/owner/repo/pkgs/nuget/Example.Module/42", "explicit-token", default).ConfigureAwait(false)).Single();
         using var output = new MemoryStream();
         choice.GitHubUsername.Should().Be("token-holder", "the feed namespace is not the credential owner");
-        await sources.DownloadAsync(choice, output, "explicit-token", default);
+        await sources.DownloadAsync(choice, output, "explicit-token", default).ConfigureAwait(false);
         requests[0].Should().Be(("api.github.com", "Bearer"));
         requests[1].Should().Be(("api.github.com", "Bearer"));
         requests[2].Should().Be(("nuget.pkg.github.com", "Basic"));
@@ -199,15 +204,18 @@ public sealed class ModulePackageStoreTests
         var source = workspace.CreatePayload();
         var noSpec = workspace.Path("missing.nupkg");
         ZipFile.CreateFromDirectory(source, noSpec);
-        Func<Task> missing = async () => { using var _ = await store.PrepareAsync(new("missing.nupkg", LocalPath: noSpec), null, default); };
-        await missing.Should().ThrowAsync<InvalidDataException>();
+        Func<Task> missing = async () => { using var _ = await store.PrepareAsync(new("missing.nupkg", LocalPath: noSpec), null, default).ConfigureAwait(false); };
+        await missing.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
         File.WriteAllText(System.IO.Path.Combine(source, "Fixture.nuspec"),
             """<package><metadata><id>Wrong.Package</id><version>1.0.0</version></metadata></package>""");
         var wrong = workspace.Path("wrong.nupkg");
         ZipFile.CreateFromDirectory(source, wrong);
-        Func<Task> mismatch = async () => { using var _ = await store.PrepareAsync(
-            new("wrong.nupkg", LocalPath: wrong, PackageId: "Selected.Package", Version: "1.0.0"), null, default); };
-        await mismatch.Should().ThrowAsync<InvalidDataException>();
+        Func<Task> mismatch = async () =>
+        {
+            using var _ = await store.PrepareAsync(
+            new("wrong.nupkg", LocalPath: wrong, PackageId: "Selected.Package", Version: "1.0.0"), null, default).ConfigureAwait(false);
+        };
+        await mismatch.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
         store.ReadInstalled().Should().BeEmpty();
         Directory.GetDirectories(workspace.Path("store"), "inspection-*").Should().BeEmpty();
     }
@@ -241,11 +249,11 @@ public sealed class ModulePackageStoreTests
                     """) }
                 : new HttpResponseMessage(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://attacker.invalid/module.zip") } };
         })));
-        var choices = await sources.ResolveAsync("https://github.com/owner/repo/releases/tag/v1", "not-forwarded", default);
+        var choices = await sources.ResolveAsync("https://github.com/owner/repo/releases/tag/v1", "not-forwarded", default).ConfigureAwait(false);
         choices.Select(choice => choice.Name).Should().Equal("module.zip", "module.nupkg");
         using var output = new MemoryStream();
         Func<Task> download = () => sources.DownloadAsync(choices[0], output, "not-forwarded", default);
-        await download.Should().ThrowAsync<InvalidDataException>();
+        await download.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
         requests.Should().OnlyContain(request => request.Authorization == null);
         requests.Should().NotContain(request => request.Host == "attacker.invalid");
     }
@@ -278,8 +286,14 @@ public sealed class ModulePackageStoreTests
             File.Copy(assembly, System.IO.Path.Combine(source, "Fixture.dll"));
             File.WriteAllText(System.IO.Path.Combine(source, "package.json"), JsonSerializer.Serialize(new
             {
-                id = "frontend_fixture", displayName = "Frontend fixture", version = "0.5.0", toolPrefix = "ff",
-                entryAssembly = "Fixture.dll", minHostVersion = "0.1.0", runtime = "dotnet", hostMode = "in-process",
+                id = "frontend_fixture",
+                displayName = "Frontend fixture",
+                version = "0.5.0",
+                toolPrefix = "ff",
+                entryAssembly = "Fixture.dll",
+                minHostVersion = "0.1.0",
+                runtime = "dotnet",
+                hostMode = "in-process",
             }));
             File.WriteAllText(System.IO.Path.Combine(source, "LICENSE.md"), "fixture legal notice");
             return source;

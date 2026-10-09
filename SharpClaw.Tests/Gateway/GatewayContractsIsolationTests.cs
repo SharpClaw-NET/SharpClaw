@@ -9,8 +9,10 @@ namespace SharpClaw.Tests.Gateway;
 /// Enforces the safety rail that the gateway contracts assembly
 /// stays free of any reference to the gateway implementation.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class GatewayContractsIsolationTests
+internal sealed class GatewayContractsIsolationTests
 {
     [Test]
     public void ContractsAssembly_DoesNotReferenceGatewayImplementation()

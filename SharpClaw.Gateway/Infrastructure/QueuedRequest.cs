@@ -5,7 +5,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 /// <summary>
 /// Represents a request queued for sequential forwarding to the core API.
 /// </summary>
-public sealed class QueuedRequest
+internal sealed class QueuedRequest
 {
     /// <summary>Unique correlation id for logging.</summary>
     public Guid Id { get; } = Guid.NewGuid();

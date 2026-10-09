@@ -21,7 +21,7 @@ using SharpClaw.Shared.Security;
 namespace SharpClaw.Runtime.Host;
 
 /// <summary>Builds and runs the authoritative local Runtime composition.</summary>
-public static class LocalRuntimeHost
+internal static class LocalRuntimeHost
 {
     public static async Task RunAsync(
         string[] args,
@@ -41,10 +41,11 @@ public static class LocalRuntimeHost
         var registrationRoots = PackagedRegistrationRootResolver.Resolve(
             Path.Combine(AppContext.BaseDirectory, "contributions"),
             earlyConfiguration);
-        await using var registrationSet = await PackagedDotNetRegistrationSet.LoadProductionAsync(
+        var registrationSet = await PackagedDotNetRegistrationSet.LoadProductionAsync(
             registrationRoots,
             earlyConfiguration,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
+        await using var registrationSetAsyncDisposal = registrationSet.ConfigureAwait(false);
 
         var builder = WebApplication.CreateBuilder(args);
         builder.Configuration.Sources.Clear();
@@ -76,7 +77,8 @@ public static class LocalRuntimeHost
                 Path.Combine(instancePaths.DataDirectory, "database")),
             registrationSet.Services);
 
-        await using var app = builder.Build();
+        var app = builder.Build();
+        await using var appAsyncDisposal = app.ConfigureAwait(false);
         var apiKeyProvider = app.Services.GetRequiredService<ApiKeyProvider>();
         var kernel = app.Services.GetRequiredService<RuntimeKernelAdapter>();
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
@@ -98,11 +100,11 @@ public static class LocalRuntimeHost
                 RuntimeLifecycleActionCatalog.StartPrepare,
                 null,
                 ct => new ValueTask(databaseReadiness.ValidateAsync(ct)),
-                cancellationToken);
-            await registrationSet.ConnectCapabilitiesAsync(app.Services, cancellationToken);
+                cancellationToken).ConfigureAwait(false);
+            await registrationSet.ConnectCapabilitiesAsync(app.Services, cancellationToken).ConfigureAwait(false);
             await kernel.StartAsync(
                 typeof(LocalRuntimeHost).Assembly.GetName().Version?.ToString() ?? "0.5.0.0",
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             runtimeStarted = true;
 
             if (RuntimeCliCommandLine.IsRequested(args))
@@ -114,7 +116,7 @@ public static class LocalRuntimeHost
                     registrationSet.Application,
                     Console.Out,
                     Console.Error,
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -131,12 +133,12 @@ public static class LocalRuntimeHost
                 async ct =>
                 {
                     appStartAttempted = true;
-                    await app.StartAsync(ct);
+                    await app.StartAsync(ct).ConfigureAwait(false);
                     readiness.MarkReady();
                     instancePaths.PublishDiscoveryEntry(runtimeBaseUrl);
-                }, cancellationToken);
+                }, cancellationToken).ConfigureAwait(false);
 
-            await app.WaitForShutdownAsync();
+            await app.WaitForShutdownAsync().ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -151,7 +153,7 @@ public static class LocalRuntimeHost
                     await kernel.StopAsync(
                         CancellationToken.None,
                         _ => cleanup.BeginAsync(),
-                        _ => cleanup.CompleteAsync());
+                        _ => cleanup.CompleteAsync()).ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
@@ -163,7 +165,7 @@ public static class LocalRuntimeHost
             {
                 try
                 {
-                    await cleanup.BeginAsync();
+                    await cleanup.BeginAsync().ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
@@ -175,7 +177,7 @@ public static class LocalRuntimeHost
             {
                 try
                 {
-                    await cleanup.CompleteAsync();
+                    await cleanup.CompleteAsync().ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {

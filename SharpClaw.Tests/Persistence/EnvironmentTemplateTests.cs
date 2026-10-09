@@ -8,8 +8,10 @@ using Supprocom.Secrets;
 
 namespace SharpClaw.Tests.Persistence;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class EnvironmentTemplateTests
+internal sealed class EnvironmentTemplateTests
 {
     [Test]
     public async Task MissingActiveEnvironment_IsCreatedFromDotenvTemplateAndProtected()
@@ -23,7 +25,7 @@ public sealed class EnvironmentTemplateTests
 
         configuration["Admin:Username"].Should().Be("TemplateAdmin");
         File.ReadAllText(workspace.Path(".env.template")).Should().Be(template);
-        (await GetStateAsync(workspace)).Should().Be(SecretFileProtectionState.Protected);
+        (await GetStateAsync(workspace).ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
         workspace.Files(".unreadable-*").Should().BeEmpty();
     }
 
@@ -39,8 +41,8 @@ public sealed class EnvironmentTemplateTests
 
         configuration["Admin:Username"].Should().Be("ActiveAdmin");
         File.ReadAllText(workspace.Path(".env.template")).Should().Be(template);
-        (await GetStateAsync(workspace)).Should().Be(SecretFileProtectionState.Protected);
-        (await ReadDocumentAsync(workspace)).Should().Contain("Admin__Username=ActiveAdmin");
+        (await GetStateAsync(workspace).ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
+        (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().Contain("Admin__Username=ActiveAdmin");
     }
 
     [Test]
@@ -51,14 +53,14 @@ public sealed class EnvironmentTemplateTests
 
         var foreignKeyPath = Path.Combine(workspace.Root, "foreign.key");
         var foreignStore = CreateStore(workspace, foreignKeyPath);
-        await foreignStore.ReplaceDocumentAsync("Admin__Username=ForeignSecretAdmin\n");
+        await foreignStore.ReplaceDocumentAsync("Admin__Username=ForeignSecretAdmin\n").ConfigureAwait(false);
 
         var configuration = BuildLocal(workspace, isDevelopment: false);
 
         configuration["Admin:Username"].Should().Be("RecoveredAdmin");
         workspace.Files(".unreadable-*").Should().ContainSingle();
-        (await ReadDocumentAsync(workspace)).Should().Contain("RecoveredAdmin");
-        (await ReadDocumentAsync(workspace)).Should().NotContain("ForeignSecretAdmin");
+        (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().Contain("RecoveredAdmin");
+        (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().NotContain("ForeignSecretAdmin");
     }
 
     [Test]
@@ -77,7 +79,7 @@ public sealed class EnvironmentTemplateTests
 
         configuration["Admin:Username"].Should().Be("RecoveredAdmin");
         workspace.Files(".unreadable-*").Should().ContainSingle();
-        (await ReadDocumentAsync(workspace)).Should().Contain("RecoveredAdmin");
+        (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().Contain("RecoveredAdmin");
     }
 
     [Test]
@@ -105,7 +107,7 @@ public sealed class EnvironmentTemplateTests
 
         configuration["Admin:Username"].Should().Be("ActiveAdmin");
         File.ReadAllText(workspace.Path(".env.template")).Should().Be("Admin__Username=TemplateAdmin\n");
-        (await ReadDocumentAsync(workspace)).Should().Contain("ActiveAdmin");
+        (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().Contain("ActiveAdmin");
     }
 
     [Test]
@@ -140,8 +142,8 @@ public sealed class EnvironmentTemplateTests
 
         configuration["Admin:Username"].Should().Be("ImportedAdmin");
         workspace.Files(".pre-supprocom-import-*").Should().ContainSingle();
-        (await GetStateAsync(workspace)).Should().Be(SecretFileProtectionState.Protected);
-        (await ReadDocumentAsync(workspace)).Should().Contain("Admin__Username=\"ImportedAdmin\"");
+        (await GetStateAsync(workspace).ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
+        (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().Contain("Admin__Username=\"ImportedAdmin\"");
     }
 
     [Test]
@@ -167,8 +169,8 @@ public sealed class EnvironmentTemplateTests
         workspace.Files(".pre-supprocom-import-*").Should().ContainSingle();
         workspace.Files(".unreadable-*").Should().BeEmpty();
         File.ReadAllBytes(workspace.KeyPath).Should().HaveCount(32);
-        (await GetStateAsync(workspace)).Should().Be(SecretFileProtectionState.Protected);
-        (await ReadDocumentAsync(workspace)).Should().Contain("Admin__Username=\"EncryptedImportedAdmin\"");
+        (await GetStateAsync(workspace).ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
+        (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().Contain("Admin__Username=\"EncryptedImportedAdmin\"");
     }
 
     [Test]
@@ -268,14 +270,14 @@ public sealed class EnvironmentTemplateTests
 
         var store = CreateStore(workspace);
         await store.ReplaceDocumentAsync(
-            "Api__Url=http://127.0.0.1:48924\nFeature__Enabled=true\n");
+            "Api__Url=http://127.0.0.1:48924\nFeature__Enabled=true\n").ConfigureAwait(false);
 
-        (await store.ReadDocumentAsync()).Should().Contain("Api__Url=http://127.0.0.1:48924");
-        (await store.GetStateAsync()).Should().Be(SecretFileProtectionState.Protected);
+        (await store.ReadDocumentAsync().ConfigureAwait(false)).Should().Contain("Api__Url=http://127.0.0.1:48924");
+        (await store.GetStateAsync().ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
 
         var restarted = CreateStore(workspace);
-        (await restarted.ReadDocumentAsync()).Should().Contain("Feature__Enabled=true");
-        (await restarted.GetStateAsync()).Should().Be(SecretFileProtectionState.Protected);
+        (await restarted.ReadDocumentAsync().ConfigureAwait(false)).Should().Contain("Feature__Enabled=true");
+        (await restarted.GetStateAsync().ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
     }
 
     [Test]
@@ -284,16 +286,16 @@ public sealed class EnvironmentTemplateTests
         using var workspace = TempWorkspace.Create();
         workspace.Write(".env.template", "Admin__Username=TemplateAdmin\n");
         var store = CreateStore(workspace);
-        await store.ReplaceDocumentAsync("Admin__Username=ProtectedAdmin\n");
+        await store.ReplaceDocumentAsync("Admin__Username=ProtectedAdmin\n").ConfigureAwait(false);
         ISecretFileProtectionManager manager = store;
 
-        (await manager.GetStateAsync()).Should().Be(SecretFileProtectionState.Protected);
-        await manager.UnprotectAsync();
-        (await manager.GetStateAsync()).Should().Be(SecretFileProtectionState.Plaintext);
+        (await manager.GetStateAsync().ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
+        await manager.UnprotectAsync().ConfigureAwait(false);
+        (await manager.GetStateAsync().ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Plaintext);
 
         var restarted = CreateStore(workspace);
-        (await restarted.ReadDocumentAsync()).Should().Contain("ProtectedAdmin");
-        (await restarted.GetStateAsync()).Should().Be(SecretFileProtectionState.Protected);
+        (await restarted.ReadDocumentAsync().ConfigureAwait(false)).Should().Contain("ProtectedAdmin");
+        (await restarted.GetStateAsync().ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
     }
 
     private static IConfiguration BuildLocal(TempWorkspace workspace, bool isDevelopment) =>
@@ -340,10 +342,10 @@ public sealed class EnvironmentTemplateTests
         };
 
     private static async Task<SecretFileProtectionState> GetStateAsync(TempWorkspace workspace) =>
-        await CreateStore(workspace).GetStateAsync();
+        await CreateStore(workspace).GetStateAsync().ConfigureAwait(false);
 
     private static async Task<string> ReadDocumentAsync(TempWorkspace workspace) =>
-        await CreateStore(workspace).ReadDocumentAsync();
+        await CreateStore(workspace).ReadDocumentAsync().ConfigureAwait(false);
 
     private sealed class TempWorkspace : IDisposable
     {

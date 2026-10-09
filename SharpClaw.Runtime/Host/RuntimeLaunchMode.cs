@@ -1,11 +1,11 @@
 namespace SharpClaw.Runtime.Host;
 
-public enum RuntimeLaunchMode
+internal enum RuntimeLaunchMode
 {
     Local,
 }
 
-public sealed record RuntimeLaunchPlan(RuntimeLaunchMode Mode)
+internal sealed record RuntimeLaunchPlan(RuntimeLaunchMode Mode)
 {
     public static RuntimeLaunchPlan From(IReadOnlyList<string> args)
     {

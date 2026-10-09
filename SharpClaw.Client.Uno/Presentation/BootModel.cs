@@ -68,10 +68,10 @@ public sealed class BootModel
                 {
                     _backend.UpdateApiUrl(url);
                     _gateway.UpdateBackendBaseUrl(url);
-                    await _api.UpdateBaseUrlAsync(url, token);
+                    await _api.UpdateBaseUrlAsync(url, token).ConfigureAwait(true);
                     return true;
                 },
-                cancellationToken);
+                cancellationToken).ConfigureAwait(true);
         }
     }
 
@@ -83,7 +83,7 @@ public sealed class BootModel
             await _actions.RunCommandAsync(
                 "client.backend.start",
                 token => new ValueTask(_backend.EnsureStartedAsync(token)),
-                ct);
+                ct).ConfigureAwait(true);
 
             var mode = _backend.IsExternal ? "external" : "bundled";
             var running = _backend.IsRunning ? "running" : (_backend.IsExternal ? "detected" : "started");
@@ -129,7 +129,7 @@ public sealed class BootModel
 
             try
             {
-                using var response = await _api.GetAsync("/echo", ct);
+                using var response = await _api.GetAsync("/echo", ct).ConfigureAwait(true);
 
                 if (response.IsSuccessStatusCode)
                     return new(true, new("Echo", $"{(int)response.StatusCode} OK", false));
@@ -140,7 +140,7 @@ public sealed class BootModel
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { lastEx = ex; }
 
-            try { await Task.Delay(500, ct); }
+            try { await Task.Delay(500, ct).ConfigureAwait(true); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         }
 
@@ -175,11 +175,11 @@ public sealed class BootModel
             apiKeyLine = new("API Key", "file present", false);
         }
 
-        await _api.InvalidateApiKeyAsync(ct);
+        await _api.InvalidateApiKeyAsync(ct).ConfigureAwait(true);
         try
         {
             await _api.WaitForReadyAsync(
-                TimeSpan.FromSeconds(_backend.IsExternal ? 5 : 15), ct);
+                TimeSpan.FromSeconds(_backend.IsExternal ? 5 : 15), ct).ConfigureAwait(true);
 
             return (new(true, new("Ping", "authenticated OK", false)), apiKeyLine);
         }
@@ -218,7 +218,7 @@ public sealed class BootModel
                     _gateway.ApiKey = _api.CachedApiKey;
                     return new ValueTask(_gateway.EnsureStartedAsync(token));
                 },
-                ct);
+                ct).ConfigureAwait(true);
 
             var mode = _gateway.IsExternal ? "external" : "bundled";
             var running = _gateway.IsRunning ? "running" : (_gateway.IsExternal ? "detected" : "started");

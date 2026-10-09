@@ -13,7 +13,7 @@ public sealed class EfPersistenceEntityResolver : IPersistenceEntityResolver
 {
     public async Task<T?> FindAsync<T>(SharpClawDbContext db, Guid id, CancellationToken ct = default)
         where T : BaseEntity
-        => await db.Set<T>().FindAsync([id], ct);
+        => await db.Set<T>().FindAsync([id], ct).ConfigureAwait(false);
 
     public async Task<IReadOnlyList<T>> QueryAsync<T>(
         SharpClawDbContext db,
@@ -21,7 +21,7 @@ public sealed class EfPersistenceEntityResolver : IPersistenceEntityResolver
         PersistenceQueryHint? hint = null,
         CancellationToken ct = default)
         where T : BaseEntity
-        => await db.Set<T>().Where(predicate).OrderBy(e => e.CreatedAt).ToListAsync(ct);
+        => await db.Set<T>().Where(predicate).OrderBy(e => e.CreatedAt).ToListAsync(ct).ConfigureAwait(false);
 
     public async Task<IReadOnlyList<T>> QueryAsync<T>(
         SharpClawDbContext db,
@@ -35,5 +35,5 @@ public sealed class EfPersistenceEntityResolver : IPersistenceEntityResolver
             .OrderByDescending(e => e.CreatedAt)
             .Take(limit)
             .OrderBy(e => e.CreatedAt)
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
 }

@@ -60,10 +60,11 @@ if (gatewayManifestChanged)
     gatewayPaths.SaveManifest(gatewayManifest);
 
 var loggingOptions = SharpClawLoggingOptions.FromConfiguration(builder.Configuration);
-await using var logging = SharpClawLogRuntime.Create(
-    "gateway",
-    gatewayPaths,
-    loggingOptions);
+var logging = SharpClawLogRuntime.Create(
+  "gateway",
+  gatewayPaths,
+  loggingOptions);
+await using var loggingAsyncDisposal = logging.ConfigureAwait(false);
 var startupLogger = logging.SerilogLogger;
 
 var publishedGatewayUrl = !string.IsNullOrWhiteSpace(configuredGatewayUrl)
@@ -227,7 +228,7 @@ app.Use(async (context, next) =>
         return Task.CompletedTask;
     });
 
-    await next();
+    await next().ConfigureAwait(false);
 });
 
 // ── Health probes (short-circuit before security) ────────────────
@@ -238,7 +239,7 @@ app.Use(async (context, next) =>
     if (path.StartsWithSegments("/healthz"))
     {
         context.Response.StatusCode = 200;
-        await context.Response.WriteAsJsonAsync(new { status = "healthy" });
+        await context.Response.WriteAsJsonAsync(new { status = "healthy" }).ConfigureAwait(false);
         return;
     }
 
@@ -255,7 +256,7 @@ app.Use(async (context, next) =>
         try
         {
             using var probe = new HttpRequestMessage(HttpMethod.Get, "/health");
-            using var response = await coreApiClient.SendRawAsync(probe, CancellationToken.None);
+            using var response = await coreApiClient.SendRawAsync(probe, CancellationToken.None).ConfigureAwait(false);
             checks["coreApi"] = response.IsSuccessStatusCode ? "ok" : $"status:{(int)response.StatusCode}";
         }
         catch
@@ -265,11 +266,11 @@ app.Use(async (context, next) =>
 
         var ready = checks.Values.All(v => v is "ok" or "disabled");
         context.Response.StatusCode = ready ? 200 : 503;
-        await context.Response.WriteAsJsonAsync(new { status = ready ? "ready" : "not_ready", checks });
+        await context.Response.WriteAsJsonAsync(new { status = ready ? "ready" : "not_ready", checks }).ConfigureAwait(false);
         return;
     }
 
-    await next();
+    await next().ConfigureAwait(false);
 });
 
 // ── Middleware pipeline (order matters) ──────────────────────────
@@ -315,4 +316,4 @@ finally
     gatewayPaths.DeleteDiscoveryEntry();
 }
 
-await logging.FlushAndSealAsync();
+await logging.FlushAndSealAsync().ConfigureAwait(false);

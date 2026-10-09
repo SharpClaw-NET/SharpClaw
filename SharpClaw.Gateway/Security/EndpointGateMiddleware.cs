@@ -4,7 +4,7 @@ using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Gateway.Security;
 
-public sealed class EndpointGateMiddleware(
+internal sealed class EndpointGateMiddleware(
     RequestDelegate next,
     IOptionsMonitor<GatewayEndpointOptions> options)
 {
@@ -16,10 +16,10 @@ public sealed class EndpointGateMiddleware(
                 context,
                 StatusCodes.Status503ServiceUnavailable,
                 "Gateway is disabled.",
-                GatewayErrors.GatewayDisabled);
+                GatewayErrors.GatewayDisabled).ConfigureAwait(false);
             return;
         }
 
-        await next(context);
+        await next(context).ConfigureAwait(false);
     }
 }

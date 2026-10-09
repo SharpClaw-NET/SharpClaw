@@ -158,7 +158,7 @@ public sealed partial class SettingsPage : Page
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(5));
-                using var response = await Api.GetAsync("/readyz", timeout.Token);
+                using var response = await Api.GetAsync("/readyz", timeout.Token).ConfigureAwait(true);
                 token.ThrowIfCancellationRequested();
                 status.Text = response.IsSuccessStatusCode
                     ? "ready"
@@ -187,9 +187,9 @@ public sealed partial class SettingsPage : Page
                     App.Services?.GetService<BackendProcessManager>(),
                     Gateway,
                     target,
-                    TimeSpan.FromSeconds(5), token);
+                    TimeSpan.FromSeconds(5), token).ConfigureAwait(true);
                 endpoint.Text = Api.BaseUrl.TrimEnd('/');
-                await RefreshAsync();
+                await RefreshAsync().ConfigureAwait(true);
             }
             catch
             {
@@ -201,11 +201,11 @@ public sealed partial class SettingsPage : Page
                 apply.IsEnabled = true;
             }
         };
-        refresh.Click += async (_, _) => await RefreshAsync();
+        refresh.Click += async (_, _) => await RefreshAsync().ConfigureAwait(true);
 
-        await RefreshAsync();
+        await RefreshAsync().ConfigureAwait(true);
         token.ThrowIfCancellationRequested();
-        try { await LoadProviderSetupAsync(token); }
+        try { await LoadProviderSetupAsync(token).ConfigureAwait(true); }
         catch
         {
             token.ThrowIfCancellationRequested();
@@ -216,14 +216,14 @@ public sealed partial class SettingsPage : Page
     private async Task LoadProviderSetupAsync(CancellationToken token)
     {
         Sub("Provider setup");
-        using var response = await Api.GetAsync("/setup/provider", token);
+        using var response = await Api.GetAsync("/setup/provider", token).ConfigureAwait(true);
         token.ThrowIfCancellationRequested();
         if (!response.IsSuccessStatusCode)
         {
             Lbl("Provider setup information is unavailable.", 0xFF8800);
             return;
         }
-        var setup = await response.Content.ReadFromJsonAsync<SharpClawProviderSetup>(token);
+        var setup = await response.Content.ReadFromJsonAsync<SharpClawProviderSetup>(token).ConfigureAwait(true);
         token.ThrowIfCancellationRequested();
         if (setup is null) return;
         if (setup.Providers.Count == 0)
@@ -272,13 +272,15 @@ public sealed partial class SettingsPage : Page
         {
             using var probe = CancellationTokenSource.CreateLinkedTokenSource(token);
             probe.CancelAfter(TimeSpan.FromSeconds(5));
-            try { catalog = await StatelessChatReadiness.ReadAsync<SharpClawProviderModels>(Api, "/setup/models", probe.Token); }
+            try { catalog = await StatelessChatReadiness.ReadAsync<SharpClawProviderModels>(Api, "/setup/models", probe.Token).ConfigureAwait(true); }
             catch { token.ThrowIfCancellationRequested(); }
         }
         token.ThrowIfCancellationRequested();
         var models = new ComboBox
         {
-            ItemsSource = catalog?.Models, PlaceholderText = "Available models from the selected provider", MinWidth = 320,
+            ItemsSource = catalog?.Models,
+            PlaceholderText = "Available models from the selected provider",
+            MinWidth = 320,
             SelectedItem = catalog?.Models.FirstOrDefault(value => value == setup.Model),
             Visibility = catalog is null ? Visibility.Collapsed : Visibility.Visible,
         };
@@ -318,10 +320,10 @@ public sealed partial class SettingsPage : Page
             {
                 await BundledProviderSetup.ApplyAsync(
                     App.Services!.GetRequiredService<FrontendInstanceService>(), backend,
-                    Gateway, Actions, selected, model.Text, endpoint.Text, credential.Password, token);
+                    Gateway, Actions, selected, model.Text, endpoint.Text, credential.Password, token).ConfigureAwait(true);
                 credential.Password = string.Empty;
                 await App.Services!.GetRequiredService<ClientNavigationService>()
-                    .NavigateRouteAsync(this, "Boot", Qualifiers.ClearBackStack);
+                    .NavigateRouteAsync(this, "Boot", Qualifiers.ClearBackStack).ConfigureAwait(true);
             }
             catch
             {
@@ -341,7 +343,7 @@ public sealed partial class SettingsPage : Page
         TimeSpan readinessTimeout,
         CancellationToken cancellationToken = default)
     {
-        await api.UpdateBaseUrlAsync(target, cancellationToken);
+        await api.UpdateBaseUrlAsync(target, cancellationToken).ConfigureAwait(true);
         await actions.RunCommandAsync(
             "client.runtime.target",
             _ =>
@@ -350,8 +352,8 @@ public sealed partial class SettingsPage : Page
                 gateway?.UpdateBackendBaseUrl(target);
                 return ValueTask.CompletedTask;
             },
-            cancellationToken);
-        await api.WaitForReadyAsync(readinessTimeout, cancellationToken);
+            cancellationToken).ConfigureAwait(true);
+        await api.WaitForReadyAsync(readinessTimeout, cancellationToken).ConfigureAwait(true);
     }
 
 

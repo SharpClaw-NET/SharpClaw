@@ -145,12 +145,12 @@ public sealed class BackendProcessManager : IDisposable
     public async Task<bool> IsApiReachableAsync(CancellationToken ct = default)
     {
         if (_apiReachabilityProbe is not null)
-            return await _apiReachabilityProbe(ct);
+            return await _apiReachabilityProbe(ct).ConfigureAwait(true);
 
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            var response = await http.GetAsync($"{_apiUrl}/echo", ct);
+            var response = await http.GetAsync($"{_apiUrl}/echo", ct).ConfigureAwait(true);
             return response.IsSuccessStatusCode;
         }
         catch
@@ -182,7 +182,7 @@ public sealed class BackendProcessManager : IDisposable
         }
 
         // Check if an external instance is already serving (dev workflow).
-        if (await IsApiReachableAsync(ct))
+        if (await IsApiReachableAsync(ct).ConfigureAwait(true))
         {
             IsExternal = true;
             return;

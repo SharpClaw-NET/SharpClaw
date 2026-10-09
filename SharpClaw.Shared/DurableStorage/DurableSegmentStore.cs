@@ -244,13 +244,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                     await VerifySealedSegmentAsync(segment.Path, cancellationToken)
                         .ConfigureAwait(false);
 
-                await using var stream = new FileStream(
-                    segment.Path,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.ReadWrite,
-                    64 * 1024,
-                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                var stream = new FileStream(
+                  segment.Path,
+                  FileMode.Open,
+                  FileAccess.Read,
+                  FileShare.ReadWrite,
+                  64 * 1024,
+                  FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await using var streamAsyncDisposal = stream.ConfigureAwait(false);
                 var header = await ReadHeaderAsync(stream, cancellationToken)
                     .ConfigureAwait(false);
 
@@ -918,13 +919,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         artifactId.TryWriteBytes(payload.AsSpan(sizeof(long), 16));
         var authentication = ComputeArtifactReferenceAuthentication(payload);
         var path = Path.Combine(state.DirectoryPath, ArtifactReferenceFileName);
-        await using var stream = new FileStream(
-            path,
-            FileMode.OpenOrCreate,
-            FileAccess.Write,
-            FileShare.Read,
-            4096,
-            FileOptions.Asynchronous | FileOptions.WriteThrough);
+        var stream = new FileStream(
+          path,
+          FileMode.OpenOrCreate,
+          FileAccess.Write,
+          FileShare.Read,
+          4096,
+          FileOptions.Asynchronous | FileOptions.WriteThrough);
+        await using var streamAsyncDisposal_ = stream.ConfigureAwait(false);
         stream.Position = stream.Length;
         await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(authentication, cancellationToken).ConfigureAwait(false);
@@ -940,13 +942,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(visit);
         if (!File.Exists(path))
             return;
-        await using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite,
-            4096,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var stream = new FileStream(
+          path,
+          FileMode.Open,
+          FileAccess.Read,
+          FileShare.ReadWrite,
+          4096,
+          FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var streamAsyncDisposal__ = stream.ConfigureAwait(false);
         if (stream.Length % ArtifactReferenceEntryBytes != 0)
         {
             throw new InvalidDataException(
@@ -990,37 +993,40 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         var temporary = path + $".{Guid.NewGuid():N}.tmp";
         try
         {
-            await using (var stream = new FileStream(
+            {
+                var stream = new FileStream(
                 temporary,
                 FileMode.CreateNew,
                 FileAccess.Write,
                 FileShare.None,
                 4096,
-                FileOptions.Asynchronous | FileOptions.WriteThrough))
-            {
-                await ReadArtifactReferenceEntriesAsync(
-                        path,
-                        async entry =>
-                        {
-                            if (entry.Sequence <= throughSequence)
-                                return;
-                            var payload = new byte[sizeof(long) + 16];
-                            BitConverter.TryWriteBytes(
-                                payload.AsSpan(0, sizeof(long)),
-                                entry.Sequence);
-                            entry.ArtifactId.TryWriteBytes(
-                                payload.AsSpan(sizeof(long), 16));
-                            await stream.WriteAsync(payload, cancellationToken)
-                                .ConfigureAwait(false);
-                            await stream.WriteAsync(
-                                    ComputeArtifactReferenceAuthentication(payload),
-                                    cancellationToken)
-                                .ConfigureAwait(false);
-                        },
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
+                FileOptions.Asynchronous | FileOptions.WriteThrough);
+                await using (stream.ConfigureAwait(false))
+                {
+                    await ReadArtifactReferenceEntriesAsync(
+                            path,
+                            async entry =>
+                            {
+                                if (entry.Sequence <= throughSequence)
+                                    return;
+                                var payload = new byte[sizeof(long) + 16];
+                                BitConverter.TryWriteBytes(
+                                    payload.AsSpan(0, sizeof(long)),
+                                    entry.Sequence);
+                                entry.ArtifactId.TryWriteBytes(
+                                    payload.AsSpan(sizeof(long), 16));
+                                await stream.WriteAsync(payload, cancellationToken)
+                                    .ConfigureAwait(false);
+                                await stream.WriteAsync(
+                                        ComputeArtifactReferenceAuthentication(payload),
+                                        cancellationToken)
+                                    .ConfigureAwait(false);
+                            },
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    stream.Flush(flushToDisk: true);
+                }
             }
             File.Move(temporary, path, overwrite: true);
         }
@@ -1247,16 +1253,19 @@ public sealed class DurableSegmentStore : IAsyncDisposable
 
             budget.Consume(SegmentHeaderBytes);
             SegmentHeader header;
-            await using (var stream = new FileStream(
+            {
+                var stream = new FileStream(
                              path,
                              FileMode.Open,
                              FileAccess.Read,
                              FileShare.ReadWrite,
                              4096,
-                             FileOptions.Asynchronous | FileOptions.RandomAccess))
-            {
-                header = await ReadHeaderAsync(stream, cancellationToken)
-                    .ConfigureAwait(false);
+                             FileOptions.Asynchronous | FileOptions.RandomAccess);
+                await using (stream.ConfigureAwait(false))
+                {
+                    header = await ReadHeaderAsync(stream, cancellationToken)
+                        .ConfigureAwait(false);
+                }
             }
 
             budget.Consume(FooterBytes);
@@ -1311,13 +1320,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
 
             hasActiveSegment = true;
             budget.Consume(SegmentHeaderBytes);
-            await using var stream = new FileStream(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite,
-                4096,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var stream = new FileStream(
+              path,
+              FileMode.Open,
+              FileAccess.Read,
+              FileShare.ReadWrite,
+              4096,
+              FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await using var streamAsyncDisposal___ = stream.ConfigureAwait(false);
             var header = await ReadHeaderAsync(stream, cancellationToken)
                 .ConfigureAwait(false);
             var activeCount = 0L;
@@ -1423,16 +1433,19 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         {
             var bytes = JsonSerializer.SerializeToUtf8Bytes(
                 new StreamIdentity(1, state.Key.CanonicalValue));
-            await using (var stream = new FileStream(
+            {
+                var stream = new FileStream(
                              temporary,
                              FileMode.CreateNew,
                              FileAccess.Write,
                              FileShare.None,
                              4096,
-                             FileOptions.Asynchronous | FileOptions.WriteThrough))
-            {
-                await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
+                             FileOptions.Asynchronous | FileOptions.WriteThrough);
+                await using (stream.ConfigureAwait(false))
+                {
+                    await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                    stream.Flush(flushToDisk: true);
+                }
             }
 
             File.Move(temporary, path, overwrite: true);
@@ -2158,13 +2171,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                     .ConfigureAwait(false);
             }
 
-            await using var stream = new FileStream(
-                segment.Path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite,
-                64 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var stream = new FileStream(
+              segment.Path,
+              FileMode.Open,
+              FileAccess.Read,
+              FileShare.ReadWrite,
+              64 * 1024,
+              FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await using var streamAsyncDisposal____ = stream.ConfigureAwait(false);
             var header = await ReadHeaderAsync(stream, cancellationToken)
                 .ConfigureAwait(false);
             while (stream.Position < stream.Length)
@@ -2230,13 +2244,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         if (!File.Exists(path))
             return null;
 
-        await using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            4096,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var stream = new FileStream(
+          path,
+          FileMode.Open,
+          FileAccess.Read,
+          FileShare.Read,
+          4096,
+          FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var streamAsyncDisposal_____ = stream.ConfigureAwait(false);
         var manifest = await JsonSerializer.DeserializeAsync<StreamManifest>(
                 stream,
                 cancellationToken: cancellationToken)
@@ -2276,20 +2291,23 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            await using (var stream = new FileStream(
+            {
+                var stream = new FileStream(
                              temporary,
                              FileMode.CreateNew,
                              FileAccess.Write,
                              FileShare.None,
                              4096,
-                             FileOptions.Asynchronous | FileOptions.WriteThrough))
-            {
-                await JsonSerializer.SerializeAsync(
-                        stream,
-                        manifest,
-                        cancellationToken: cancellationToken)
-                    .ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
+                             FileOptions.Asynchronous | FileOptions.WriteThrough);
+                await using (stream.ConfigureAwait(false))
+                {
+                    await JsonSerializer.SerializeAsync(
+                            stream,
+                            manifest,
+                            cancellationToken: cancellationToken)
+                        .ConfigureAwait(false);
+                    stream.Flush(flushToDisk: true);
+                }
             }
             File.Move(temporary, path, overwrite: true);
         }
@@ -2323,13 +2341,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         string path,
         CancellationToken cancellationToken)
     {
-        await using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            4096,
-            FileOptions.Asynchronous | FileOptions.RandomAccess);
+        var stream = new FileStream(
+          path,
+          FileMode.Open,
+          FileAccess.Read,
+          FileShare.Read,
+          4096,
+          FileOptions.Asynchronous | FileOptions.RandomAccess);
+        await using var streamAsyncDisposal______ = stream.ConfigureAwait(false);
         if (stream.Length < SegmentHeaderBytes + FooterBytes)
             throw new InvalidDataException("Sealed segment is too short.");
         stream.Position = stream.Length - FooterBytes;
@@ -2350,13 +2369,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        await using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite,
-            64 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var stream = new FileStream(
+          path,
+          FileMode.Open,
+          FileAccess.Read,
+          FileShare.ReadWrite,
+          64 * 1024,
+          FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var streamAsyncDisposal_______ = stream.ConfigureAwait(false);
         var buffer = new byte[64 * 1024];
         long remaining = length;
         while (remaining > 0)

@@ -12,8 +12,10 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeCompositionBoundaryTests
+internal sealed class RuntimeCompositionBoundaryTests
 {
     [Test]
     public async Task Discovered_registration_uses_the_host_service_provider_and_lifecycle()
@@ -37,8 +39,8 @@ public sealed class RuntimeCompositionBoundaryTests
         adapter.Graph.GetRequiredService<IProviderPlugin>()
             .Should().BeSameAs(provider);
 
-        await adapter.StartAsync("test-host");
-        await adapter.StopAsync();
+        await adapter.StartAsync("test-host").ConfigureAwait(false);
+        await adapter.StopAsync().ConfigureAwait(false);
 
         contribution.StartCalls.Should().Be(1);
         contribution.StopCalls.Should().Be(1);

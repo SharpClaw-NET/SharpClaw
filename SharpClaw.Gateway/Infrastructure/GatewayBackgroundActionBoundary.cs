@@ -46,7 +46,7 @@ internal static class GatewayBackgroundActionManifest
         GatewayActionManifest.BackgroundRequired;
 }
 
-public sealed record GatewayActionInvocation(
+internal sealed record GatewayActionInvocation(
     string Method,
     string Path,
     string Operation,
@@ -60,7 +60,7 @@ internal sealed record GatewayBackgroundTickInvocation(
     string Operation,
     Guid WorkId);
 
-public sealed class GatewayBackgroundActionBoundary
+internal sealed class GatewayBackgroundActionBoundary
 {
     private readonly KernelGraph _graph;
     private readonly KernelActionDispatcher _dispatcher;
@@ -108,13 +108,13 @@ public sealed class GatewayBackgroundActionBoundary
 
                 if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
                 {
-                    var repeated = await terminalResult.Task.WaitAsync(actionCancellationToken);
+                    var repeated = await terminalResult.Task.WaitAsync(actionCancellationToken).ConfigureAwait(false);
                     return repeated!;
                 }
 
                 try
                 {
-                    var value = await terminal(effectivePayload, actionCancellationToken);
+                    var value = await terminal(effectivePayload, actionCancellationToken).ConfigureAwait(false);
                     terminalResult.TrySetResult(value);
                     return value!;
                 }
@@ -125,7 +125,7 @@ public sealed class GatewayBackgroundActionBoundary
                 }
             },
             _graph.ActionSnapshot,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (Volatile.Read(ref terminalState) == 0)
         {
@@ -135,7 +135,7 @@ public sealed class GatewayBackgroundActionBoundary
 
         return result is TResult typedResult
             ? typedResult
-            : await terminalResult.Task;
+            : await terminalResult.Task.ConfigureAwait(false);
     }
 
     internal async ValueTask StartAsync(
@@ -147,7 +147,7 @@ public sealed class GatewayBackgroundActionBoundary
             new SharpClawActionKey("background.service.start"),
             invocation,
             static (_, _) => ValueTask.CompletedTask,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     internal async ValueTask ExecuteTickAsync(
@@ -164,24 +164,24 @@ public sealed class GatewayBackgroundActionBoundary
                 new SharpClawActionKey("background.tick.prepare"),
                 invocation,
                 static (_, _) => ValueTask.CompletedTask,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
             await RunPhaseAsync(
                 new SharpClawActionKey("background.tick.execute"),
                 invocation,
                 (_, ct) => work(ct),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
             await RunPhaseAsync(
                 new SharpClawActionKey("background.tick.complete"),
                 invocation,
                 static (_, _) => ValueTask.CompletedTask,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
         }
         catch (KernelActionCancelledException exception)
         {
             await RunSignalOrCombineAsync(
                 new SharpClawActionKey("background.tick.cancel"),
                 invocation,
-                exception);
+                exception).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
             throw;
         }
@@ -190,7 +190,7 @@ public sealed class GatewayBackgroundActionBoundary
             await RunSignalOrCombineAsync(
                 new SharpClawActionKey("background.tick.cancel"),
                 invocation,
-                exception);
+                exception).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
             throw;
         }
@@ -199,7 +199,7 @@ public sealed class GatewayBackgroundActionBoundary
             await RunSignalOrCombineAsync(
                 new SharpClawActionKey("background.tick.fail"),
                 invocation,
-                exception);
+                exception).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
             throw;
         }
@@ -214,7 +214,7 @@ public sealed class GatewayBackgroundActionBoundary
             new SharpClawActionKey("background.service.stop"),
             invocation,
             static (_, _) => ValueTask.CompletedTask,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask RunSignalOrCombineAsync(
@@ -228,7 +228,7 @@ public sealed class GatewayBackgroundActionBoundary
                 actionKey,
                 invocation,
                 static (_, _) => ValueTask.CompletedTask,
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception signalFailure)
         {
@@ -247,10 +247,10 @@ public sealed class GatewayBackgroundActionBoundary
             payload,
             async (_, ct) =>
             {
-                await terminal(payload, ct);
+                await terminal(payload, ct).ConfigureAwait(false);
                 return true;
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     private KernelActionExecutionContext CreateHostExecutionContext() =>

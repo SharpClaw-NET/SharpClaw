@@ -4,7 +4,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 /// Request priority for the gateway queue. Higher priorities are processed
 /// first. Clients set this via the <c>X-Priority</c> request header.
 /// </summary>
-public enum RequestPriority
+internal enum RequestPriority
 {
     /// <summary>Processed before all other priorities.</summary>
     High = 0,

@@ -72,7 +72,7 @@ public sealed class ClientActionDispatcher
         CancellationToken cancellationToken = default)
     {
         using var scope = _contextSource.Push(requestContext);
-        return await RunCommandAsync(invocation, terminal, cancellationToken);
+        return await RunCommandAsync(invocation, terminal, cancellationToken).ConfigureAwait(true);
     }
 
     public async ValueTask<TResult> RunCommandAsync<TResult>(
@@ -91,13 +91,13 @@ public sealed class ClientActionDispatcher
                 ClientActionCatalog.CommandReceive,
                 invocation,
                 static (value, _) => ValueTask.FromResult(value),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(true);
             var validated = await RunActionAsync(
                 context,
                 ClientActionCatalog.CommandValidate,
                 received,
                 static (value, _) => ValueTask.FromResult(value),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(true);
             var dispatched = validated;
             var result = await RunActionAsync(
                 context,
@@ -106,30 +106,30 @@ public sealed class ClientActionDispatcher
                 async (value, token) =>
                 {
                     dispatched = value;
-                    return await terminal(value, token);
+                    return await terminal(value, token).ConfigureAwait(true);
                 },
-                cancellationToken);
+                cancellationToken).ConfigureAwait(true);
             await RunActionAsync(
                 context,
                 ClientActionCatalog.CommandComplete,
                 new ClientCommandSignal(dispatched.CommandId, dispatched.Operation),
                 static (_, _) => ValueTask.FromResult(true),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(true);
             return result;
         }
         catch (KernelActionCancelledException)
         {
-            await TrySignalAsync(context, ClientActionCatalog.CommandCancel, invocation);
+            await TrySignalAsync(context, ClientActionCatalog.CommandCancel, invocation).ConfigureAwait(true);
             throw;
         }
         catch (OperationCanceledException)
         {
-            await TrySignalAsync(context, ClientActionCatalog.CommandCancel, invocation);
+            await TrySignalAsync(context, ClientActionCatalog.CommandCancel, invocation).ConfigureAwait(true);
             throw;
         }
         catch
         {
-            await TrySignalAsync(context, ClientActionCatalog.CommandFail, invocation);
+            await TrySignalAsync(context, ClientActionCatalog.CommandFail, invocation).ConfigureAwait(true);
             throw;
         }
     }
@@ -157,10 +157,10 @@ public sealed class ClientActionDispatcher
             operation,
             async token =>
             {
-                await terminal(token);
+                await terminal(token).ConfigureAwait(true);
                 return true;
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(true);
     }
 
     public async ValueTask NavigateAsync(
@@ -185,9 +185,9 @@ public sealed class ClientActionDispatcher
                 ClientActionCatalog.NavigationPrepare,
                 invocation,
                 static (value, _) => ValueTask.FromResult(value),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(true);
 
-            await _navigationGate.WaitAsync(cancellationToken);
+            await _navigationGate.WaitAsync(cancellationToken).ConfigureAwait(true);
             try
             {
                 if (invocation.ExpectedVersion != Interlocked.Read(ref _navigationVersion))
@@ -207,11 +207,11 @@ public sealed class ClientActionDispatcher
                         if (Volatile.Read(ref terminalSucceeded) != 0)
                             return receipt;
 
-                        await terminal(prepared, token);
+                        await terminal(prepared, token).ConfigureAwait(true);
                         Volatile.Write(ref terminalSucceeded, 1);
                         return receipt;
                     },
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(true);
 
                 if (Volatile.Read(ref terminalSucceeded) == 0)
                     throw new ClientActionConflictException(
@@ -227,19 +227,19 @@ public sealed class ClientActionDispatcher
         catch (KernelActionCancelledException)
         {
             await TrySignalAsync(context, ClientActionCatalog.CommandCancel,
-                new ClientCommandInvocation("navigation", "CLIENT", route, invocation.NavigationId));
+                new ClientCommandInvocation("navigation", "CLIENT", route, invocation.NavigationId)).ConfigureAwait(true);
             throw;
         }
         catch (OperationCanceledException)
         {
             await TrySignalAsync(context, ClientActionCatalog.CommandCancel,
-                new ClientCommandInvocation("navigation", "CLIENT", route, invocation.NavigationId));
+                new ClientCommandInvocation("navigation", "CLIENT", route, invocation.NavigationId)).ConfigureAwait(true);
             throw;
         }
         catch
         {
             await TrySignalAsync(context, ClientActionCatalog.CommandFail,
-                new ClientCommandInvocation("navigation", "CLIENT", route, invocation.NavigationId));
+                new ClientCommandInvocation("navigation", "CLIENT", route, invocation.NavigationId)).ConfigureAwait(true);
             throw;
         }
     }
@@ -271,9 +271,9 @@ public sealed class ClientActionDispatcher
                 ClientActionCatalog.StatePrepare,
                 invocation,
                 static (value, _) => ValueTask.FromResult(value),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(true);
             var gate = _stateGates.GetOrAdd(stateKey, static _ => new SemaphoreSlim(1, 1));
-            await gate.WaitAsync(cancellationToken);
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(true);
             try
             {
                 var currentVersion = GetStateVersion(invocation.StateKey);
@@ -294,11 +294,11 @@ public sealed class ClientActionDispatcher
                         if (Volatile.Read(ref terminalSucceeded) != 0)
                             return receipt;
 
-                        await terminal(token);
+                        await terminal(token).ConfigureAwait(true);
                         Volatile.Write(ref terminalSucceeded, 1);
                         return receipt;
                     },
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(true);
 
                 if (Volatile.Read(ref terminalSucceeded) == 0)
                     throw new ClientActionConflictException(
@@ -317,19 +317,19 @@ public sealed class ClientActionDispatcher
         catch (KernelActionCancelledException)
         {
             await TrySignalAsync(context, ClientActionCatalog.CommandCancel,
-                new ClientCommandInvocation("state", "CLIENT", stateKey, invocation.MutationId));
+                new ClientCommandInvocation("state", "CLIENT", stateKey, invocation.MutationId)).ConfigureAwait(true);
             throw;
         }
         catch (OperationCanceledException)
         {
             await TrySignalAsync(context, ClientActionCatalog.CommandCancel,
-                new ClientCommandInvocation("state", "CLIENT", stateKey, invocation.MutationId));
+                new ClientCommandInvocation("state", "CLIENT", stateKey, invocation.MutationId)).ConfigureAwait(true);
             throw;
         }
         catch
         {
             await TrySignalAsync(context, ClientActionCatalog.CommandFail,
-                new ClientCommandInvocation("state", "CLIENT", stateKey, invocation.MutationId));
+                new ClientCommandInvocation("state", "CLIENT", stateKey, invocation.MutationId)).ConfigureAwait(true);
             throw;
         }
     }
@@ -346,7 +346,7 @@ public sealed class ClientActionDispatcher
                 actionKey,
                 new ClientCommandSignal(invocation.CommandId, invocation.Operation),
                 static (_, _) => ValueTask.FromResult(true),
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(true);
         }
         catch
         {

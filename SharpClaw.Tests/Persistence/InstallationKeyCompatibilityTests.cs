@@ -7,9 +7,11 @@ using Supprocom.Secrets;
 
 namespace SharpClaw.Tests.Persistence;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
 [NonParallelizable]
-public sealed class InstallationKeyCompatibilityTests
+internal sealed class InstallationKeyCompatibilityTests
 {
     [Test]
     public async Task FreshHostOptions_CreateRawPackageKeyAndShareItWithSharpClawConsumers()
@@ -25,7 +27,7 @@ public sealed class InstallationKeyCompatibilityTests
         configuration["Admin:Username"].Should().Be("FreshAdmin");
         var rawKey = File.ReadAllBytes(workspace.KeyPath);
         rawKey.Should().HaveCount(32);
-        (await new SharpClawInstallationKeyStore(workspace.KeyPath).GetOrCreateKeyAsync())
+        (await new SharpClawInstallationKeyStore(workspace.KeyPath).GetOrCreateKeyAsync().ConfigureAwait(false))
             .Should().Equal(rawKey);
         Convert.FromBase64String(PersistentKeyStore.GetOrCreate("encryption-key", workspace.Paths))
             .Should().Equal(rawKey);
@@ -58,7 +60,7 @@ public sealed class InstallationKeyCompatibilityTests
 
         configuration["Admin:Username"].Should().Be("ImportedAdmin");
         File.ReadAllBytes(workspace.KeyPath).Should().Equal(expectedKey);
-        (await store.ReadDocumentAsync()).Should().Contain("Admin__Username=\"ImportedAdmin\"");
+        (await store.ReadDocumentAsync().ConfigureAwait(false)).Should().Contain("Admin__Username=\"ImportedAdmin\"");
         EncryptionKeyResolver.ResolveKey(workspace.Paths).Should().Equal(expectedKey);
         Convert.FromBase64String(PersistentKeyStore.GetOrCreate("encryption-key", workspace.Paths))
             .Should().Equal(expectedKey);
@@ -79,14 +81,14 @@ public sealed class InstallationKeyCompatibilityTests
             false,
             workspace.Paths);
         var store = new SupprocomSecretFileStore(options);
-        await store.ReplaceDocumentAsync("Api__Url=http://127.0.0.1:48924\n");
+        await store.ReplaceDocumentAsync("Api__Url=http://127.0.0.1:48924\n").ConfigureAwait(false);
 
         var restarted = new SupprocomSecretFileStore(LocalEnvironment.CreateSecretsOptions(
             workspace.EnvironmentDirectory,
             false,
             workspace.Paths));
 
-        (await restarted.ReadDocumentAsync()).Should().Contain("Api__Url=http://127.0.0.1:48924");
+        (await restarted.ReadDocumentAsync().ConfigureAwait(false)).Should().Contain("Api__Url=http://127.0.0.1:48924");
         EncryptionKeyResolver.ResolveKey(workspace.Paths).Should().Equal(expectedKey);
     }
 
@@ -111,7 +113,7 @@ public sealed class InstallationKeyCompatibilityTests
             }
         });
         File.WriteAllBytes(workspace.KeyPath, expectedKey);
-        await fileStore.ReplaceDocumentAsync("Admin__Username=EnvironmentAdmin\n");
+        await fileStore.ReplaceDocumentAsync("Admin__Username=EnvironmentAdmin\n").ConfigureAwait(false);
         File.Delete(workspace.KeyPath);
 
         using var configured = EnvironmentOverride.Set(Convert.ToBase64String(expectedKey));
@@ -124,7 +126,7 @@ public sealed class InstallationKeyCompatibilityTests
             workspace.Paths));
 
         configuration["Admin:Username"].Should().Be("EnvironmentAdmin");
-        (await restarted.ReadDocumentAsync()).Should().Contain("Admin__Username=EnvironmentAdmin");
+        (await restarted.ReadDocumentAsync().ConfigureAwait(false)).Should().Contain("Admin__Username=EnvironmentAdmin");
         File.Exists(workspace.KeyPath).Should().BeFalse();
         EncryptionKeyResolver.ResolveKey(workspace.Paths).Should().Equal(expectedKey);
     }

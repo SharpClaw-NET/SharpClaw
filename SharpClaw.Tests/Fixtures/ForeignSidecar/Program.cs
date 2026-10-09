@@ -30,7 +30,7 @@ Console.Out.Flush();
 
 if (mode == "never-ready")
 {
-    await Task.Delay(Timeout.InfiniteTimeSpan);
+    await Task.Delay(Timeout.InfiniteTimeSpan).ConfigureAwait(false);
     return 0;
 }
 
@@ -45,7 +45,7 @@ _ = Task.Run(async () =>
     {
         while (!stop.Task.IsCompleted)
         {
-            var client = await listener.AcceptTcpClientAsync();
+            var client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
             _ = Task.Run(() => HandleAsync(client));
         }
     }
@@ -57,22 +57,23 @@ _ = Task.Run(async () =>
     }
 });
 
-await stop.Task;
+await stop.Task.ConfigureAwait(false);
 listener.Stop();
 return 0;
 
 async Task HandleAsync(TcpClient client)
 {
-    await using var stream = client.GetStream();
+    var stream = client.GetStream();
+    await using var streamAsyncDisposal = stream.ConfigureAwait(false);
     using (client)
     {
-        var request = await ReadRequestAsync(stream);
+        var request = await ReadRequestAsync(stream).ConfigureAwait(false);
         if (!string.Equals(
                 request.Headers.GetValueOrDefault("X-SharpClaw-Control-Token"),
                 token,
                 StringComparison.Ordinal))
         {
-            await WriteTextAsync(stream, 401, "Unauthorized", "bad token", "text/plain");
+            await WriteTextAsync(stream, 401, "Unauthorized", "bad token", "text/plain").ConfigureAwait(false);
             return;
         }
 
@@ -98,7 +99,7 @@ async Task HandleAsync(TcpClient client)
                         "lifecycleHooks",
                         "providerPlugins",
                     },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/discovery":
@@ -371,7 +372,7 @@ async Task HandleAsync(TcpClient client)
                             },
                         },
                     },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/health":
@@ -379,7 +380,7 @@ async Task HandleAsync(TcpClient client)
                 {
                     isHealthy = true,
                     message = "ready",
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/initialize":
@@ -387,7 +388,7 @@ async Task HandleAsync(TcpClient client)
                 {
                     accepted = true,
                     message = "initialized",
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/shutdown":
@@ -395,7 +396,7 @@ async Task HandleAsync(TcpClient client)
                 {
                     accepted = true,
                     message = "stopping",
-                });
+                }).ConfigureAwait(false);
                 if (mode != "ignore-shutdown")
                     stop.TrySetResult();
                 break;
@@ -404,14 +405,14 @@ async Task HandleAsync(TcpClient client)
                 await WriteJsonAsync(stream, new
                 {
                     result = BuildToolResult("job", request.Body),
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/inline-tools/execute":
                 await WriteJsonAsync(stream, new
                 {
                     result = BuildToolResult("inline", request.Body),
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/tools/stream":
@@ -419,21 +420,21 @@ async Task HandleAsync(TcpClient client)
                     stream,
                     new { delta = "first:" },
                     new { delta = "second" },
-                    new { isFinal = true });
+                    new { isFinal = true }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/contracts/invoke":
                 await WriteJsonAsync(stream, new
                 {
                     result = BuildContractResult(request.Body),
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/header-tags/resolve":
                 await WriteJsonAsync(stream, new
                 {
                     value = BuildHeaderTagResult(request.Body),
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/resources/ids":
@@ -443,7 +444,7 @@ async Task HandleAsync(TcpClient client)
                     {
                         Guid.Parse("11111111-1111-1111-1111-111111111111"),
                     },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/resources/lookup":
@@ -457,7 +458,7 @@ async Task HandleAsync(TcpClient client)
                             name = "Sample One",
                         },
                     },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/cli/execute":
@@ -466,21 +467,21 @@ async Task HandleAsync(TcpClient client)
                     success = true,
                     stdout = BuildCliResult(request.Body),
                     stderr = "",
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/providers/models/list":
                 await WriteJsonAsync(stream, new
                 {
                     modelIds = new[] { "sample-model", "sample-vision-model" },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/providers/capabilities/resolve":
                 await WriteJsonAsync(stream, new
                 {
                     tags = new[] { "chat", "vision" },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/providers/chat/complete":
@@ -498,7 +499,7 @@ async Task HandleAsync(TcpClient client)
                         },
                         finishReason = "Stop",
                     },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/providers/chat/complete-tools":
@@ -523,7 +524,7 @@ async Task HandleAsync(TcpClient client)
                         },
                         finishReason = "ToolCalls",
                     },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/providers/chat/stream-tools":
@@ -564,7 +565,7 @@ async Task HandleAsync(TcpClient client)
                             },
                             finishReason = "ToolCalls",
                         },
-                    });
+                    }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/providers/device-code/start":
@@ -578,14 +579,14 @@ async Task HandleAsync(TcpClient client)
                         expiresInSeconds = 900,
                         intervalSeconds = 5,
                     },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/providers/device-code/poll":
                 await WriteJsonAsync(stream, new
                 {
                     accessToken = "device-access-token",
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/providers/costs":
@@ -605,14 +606,14 @@ async Task HandleAsync(TcpClient client)
                             },
                         },
                     },
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/.sharpclaw/providers/agent-identifier-suffix":
                 await WriteJsonAsync(stream, new
                 {
                     suffix = "sample-sidecar",
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/contributions/sample/ping":
@@ -622,7 +623,7 @@ async Task HandleAsync(TcpClient client)
                     path = request.Path,
                     query = request.Query,
                     marker = request.Headers.GetValueOrDefault("X-Test-Marker"),
-                }, ("X-Sidecar", "yes"));
+                }, ("X-Sidecar", "yes")).ConfigureAwait(false);
                 break;
 
             case "/contributions/sample/echo":
@@ -633,7 +634,7 @@ async Task HandleAsync(TcpClient client)
                     query = request.Query,
                     body = request.Body,
                     contentType = request.Headers.GetValueOrDefault("Content-Type"),
-                });
+                }).ConfigureAwait(false);
                 break;
 
             case "/contributions/sample/static/hello.txt":
@@ -642,7 +643,7 @@ async Task HandleAsync(TcpClient client)
                     200,
                     "OK",
                     "static-parity-asset",
-                    "text/plain");
+                    "text/plain").ConfigureAwait(false);
                 break;
 
             case "/contributions/sample/stream":
@@ -650,15 +651,15 @@ async Task HandleAsync(TcpClient client)
                     stream,
                     new { delta = "first:" },
                     new { delta = "second" },
-                    new { isFinal = true });
+                    new { isFinal = true }).ConfigureAwait(false);
                 break;
 
             case "/contributions/sample/ws":
-                await HandleWebSocketEchoAsync(stream, request);
+                await HandleWebSocketEchoAsync(stream, request).ConfigureAwait(false);
                 break;
 
             default:
-                await WriteTextAsync(stream, 404, "Not Found", "not found", "text/plain");
+                await WriteTextAsync(stream, 404, "Not Found", "not found", "text/plain").ConfigureAwait(false);
                 break;
         }
     }
@@ -729,7 +730,7 @@ static async Task HandleWebSocketEchoAsync(NetworkStream stream, SidecarRequest 
 {
     if (!request.Headers.TryGetValue("Sec-WebSocket-Key", out var key))
     {
-        await WriteTextAsync(stream, 400, "Bad Request", "WebSocket connections only.", "text/plain");
+        await WriteTextAsync(stream, 400, "Bad Request", "WebSocket connections only.", "text/plain").ConfigureAwait(false);
         return;
     }
 
@@ -741,7 +742,7 @@ static async Task HandleWebSocketEchoAsync(NetworkStream stream, SidecarRequest 
         "Upgrade: websocket\r\n" +
         $"Sec-WebSocket-Accept: {accept}\r\n" +
         "\r\n");
-    await stream.WriteAsync(headers);
+    await stream.WriteAsync(headers).ConfigureAwait(false);
 
     using var socket = WebSocket.CreateFromStream(
         stream,
@@ -752,13 +753,13 @@ static async Task HandleWebSocketEchoAsync(NetworkStream stream, SidecarRequest 
 
     while (socket.State == WebSocketState.Open)
     {
-        var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+        var result = await socket.ReceiveAsync(buffer, CancellationToken.None).ConfigureAwait(false);
         if (result.MessageType == WebSocketMessageType.Close)
         {
             await socket.CloseOutputAsync(
                 WebSocketCloseStatus.NormalClosure,
                 "closing",
-                CancellationToken.None);
+                CancellationToken.None).ConfigureAwait(false);
             return;
         }
 
@@ -768,20 +769,20 @@ static async Task HandleWebSocketEchoAsync(NetworkStream stream, SidecarRequest 
             response,
             result.MessageType,
             endOfMessage: true,
-            CancellationToken.None);
+            CancellationToken.None).ConfigureAwait(false);
     }
 }
 
 static async Task<SidecarRequest> ReadRequestAsync(NetworkStream stream)
 {
     using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
-    var requestLine = await reader.ReadLineAsync() ?? string.Empty;
+    var requestLine = await reader.ReadLineAsync().ConfigureAwait(false) ?? string.Empty;
     var parts = requestLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
     var method = parts.Length >= 1 ? parts[0] : "GET";
     var requestUri = parts.Length >= 2 ? new Uri("http://127.0.0.1" + parts[1]) : new Uri("http://127.0.0.1/");
     var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-    while (await reader.ReadLineAsync() is { } line && line.Length > 0)
+    while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line && line.Length > 0)
     {
         var separator = line.IndexOf(':');
         if (separator <= 0)
@@ -799,7 +800,7 @@ static async Task<SidecarRequest> ReadRequestAsync(NetworkStream stream)
         var offset = 0;
         while (offset < contentLength)
         {
-            var read = await reader.ReadAsync(buffer.AsMemory(offset, contentLength - offset));
+            var read = await reader.ReadAsync(buffer.AsMemory(offset, contentLength - offset)).ConfigureAwait(false);
             if (read == 0)
                 break;
 
@@ -840,7 +841,7 @@ static async Task WriteNdjsonAsync(
         200,
         "OK",
         body,
-        "application/x-ndjson");
+        "application/x-ndjson").ConfigureAwait(false);
 }
 
 static async Task WriteTextAsync(
@@ -862,8 +863,8 @@ static async Task WriteTextAsync(
     headerText += "\r\n";
     var headers = Encoding.ASCII.GetBytes(
         headerText);
-    await stream.WriteAsync(headers);
-    await stream.WriteAsync(bytes);
+    await stream.WriteAsync(headers).ConfigureAwait(false);
+    await stream.WriteAsync(bytes).ConfigureAwait(false);
 }
 
 internal sealed record SidecarRequest(

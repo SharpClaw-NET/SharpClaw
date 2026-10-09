@@ -12,7 +12,7 @@ namespace SharpClaw.Runtime.Host;
 /// Stores Runtime event delivery records in the existing registration storage
 /// collection, so this boundary needs no new database table or migration.
 /// </summary>
-public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
+internal sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
     : IRuntimeEventOutboxStore
 {
     private const string SourceId = RuntimeEventDefinitions.SourceId;
@@ -34,7 +34,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
     {
         ArgumentNullException.ThrowIfNull(message);
         var recordKey = CreateRecordKey(message.EventId, message.TargetListenerId);
-        var existing = await FindAsync(recordKey, cancellationToken);
+        var existing = await FindAsync(recordKey, cancellationToken).ConfigureAwait(false);
         if (existing is not null)
             return;
 
@@ -70,7 +70,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
             RecordKey = recordKey,
             StringValue = Pending,
         });
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask<IReadOnlyList<RuntimeEventOutboxRecord>> ReadPendingAsync(
@@ -91,7 +91,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
             .ThenBy(index => index.RecordKey)
             .Take(limit)
             .Select(index => index.RecordKey)
-            .ToArrayAsync(cancellationToken);
+            .ToArrayAsync(cancellationToken).ConfigureAwait(false);
 
         var rows = await db.ScopedStorageRecords
             .AsNoTracking()
@@ -99,7 +99,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
                 record.SourceId == SourceId &&
                 record.StorageName == StorageName &&
                 keys.Contains(record.RecordKey))
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
         var byKey = rows.ToDictionary(row => row.RecordKey, StringComparer.Ordinal);
         return keys
             .Where(byKey.ContainsKey)
@@ -133,7 +133,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(recordKey);
-        var row = await FindAsync(recordKey, cancellationToken)
+        var row = await FindAsync(recordKey, cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException(
                 $"Runtime event outbox record '{recordKey}' was not found.");
         var current = Parse(row);
@@ -163,7 +163,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
                 index.StorageName == StorageName &&
                 index.IndexName == StateIndexName &&
                 index.RecordKey == recordKey,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         if (stateIndex is null)
         {
             db.ScopedStorageIndexEntries.Add(new ScopedStorageIndexEntryDB
@@ -180,7 +180,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
         {
             stateIndex.StringValue = state;
         }
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<ScopedStorageRecordDB?> FindAsync(
@@ -191,7 +191,7 @@ public sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db)
                 record.SourceId == SourceId &&
                 record.StorageName == StorageName &&
                 record.RecordKey == recordKey,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
     private static RuntimeEventOutboxRecord Parse(ScopedStorageRecordDB row)
     {

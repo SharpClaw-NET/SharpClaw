@@ -55,13 +55,13 @@ public sealed class RuntimePersistenceActionRunner(
         async ValueTask<int> SaveTerminalAsync(CancellationToken actionCancellationToken)
         {
             if (Interlocked.CompareExchange(ref terminalStarted, 1, 0) != 0)
-                return await terminal.Task.WaitAsync(actionCancellationToken);
+                return await terminal.Task.WaitAsync(actionCancellationToken).ConfigureAwait(false);
 
             try
             {
                 var saved = await db.SaveChangesTerminalAsync(
                     acceptAllChangesOnSuccess,
-                    actionCancellationToken);
+                    actionCancellationToken).ConfigureAwait(false);
                 terminal.TrySetResult(saved);
                 return saved;
             }
@@ -75,7 +75,7 @@ public sealed class RuntimePersistenceActionRunner(
         await actionBoundary.RunPersistenceActionAsync(
             invocation,
             SaveTerminalAsync,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (Volatile.Read(ref terminalStarted) == 0)
         {
@@ -83,6 +83,6 @@ public sealed class RuntimePersistenceActionRunner(
                 "Persistence action completed without running its save terminal.");
         }
 
-        return await terminal.Task;
+        return await terminal.Task.ConfigureAwait(false);
     }
 }

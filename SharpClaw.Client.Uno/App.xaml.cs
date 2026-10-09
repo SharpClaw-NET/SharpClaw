@@ -252,9 +252,9 @@ public partial class App : Application
                         gw?.Dispose();
                         be?.Dispose();
                         if (api is not null)
-                            await api.DisposeAsync();
+                            await api.DisposeAsync().ConfigureAwait(true);
                         _logging?.Dispose();
-                    });
+                    }).ConfigureAwait(true);
             };
         }
     }

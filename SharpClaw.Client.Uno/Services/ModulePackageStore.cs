@@ -83,15 +83,19 @@ internal sealed class ModulePackageStore : IDisposable
             else
             {
                 var archivePath = Path.Combine(stage, "source.zip");
-                await using (var output = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
-                    if (source.LocalPath is { } file)
+                    var output = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                    await using (output.ConfigureAwait(true))
                     {
-                        RequireNoLinks(file);
-                        await using var input = File.OpenRead(file);
-                        await ModulePackageSources.CopyBoundedAsync(input, output, MaximumArchiveBytes, cancellationToken).ConfigureAwait(false);
+                        if (source.LocalPath is { } file)
+                        {
+                            RequireNoLinks(file);
+                            var input = File.OpenRead(file);
+                            await using var inputAsyncDisposal = input.ConfigureAwait(true);
+                            await ModulePackageSources.CopyBoundedAsync(input, output, MaximumArchiveBytes, cancellationToken).ConfigureAwait(false);
+                        }
+                        else await _sources.DownloadAsync(source, output, githubToken, cancellationToken).ConfigureAwait(false);
                     }
-                    else await _sources.DownloadAsync(source, output, githubToken, cancellationToken).ConfigureAwait(false);
                 }
                 await ExtractAsync(archivePath, payload, cancellationToken).ConfigureAwait(false);
                 VerifyNuGetIdentity(payload, source);
@@ -224,7 +228,8 @@ internal sealed class ModulePackageStore : IDisposable
         Justification = "Each entry passes RequireRelativePath, link/case-collision checks, GetFullPath and RequireContained before CreateNew; traversal and link regressions execute this path.")]
     private static async Task ExtractAsync(string archivePath, string destination, CancellationToken cancellationToken)
     {
-        await using var archive = await ZipFile.OpenReadAsync(archivePath, cancellationToken).ConfigureAwait(false);
+        var archive = await ZipFile.OpenReadAsync(archivePath, cancellationToken).ConfigureAwait(false);
+        await using var archiveAsyncDisposal = archive.ConfigureAwait(true);
         if (archive.Entries.Count > MaximumFiles) throw new InvalidDataException("Too many module archive entries.");
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         long total = 0;
@@ -243,8 +248,10 @@ internal sealed class ModulePackageStore : IDisposable
             total = checked(total + entry.Length);
             if (entry.Length < 0 || total > MaximumExpandedBytes) throw new InvalidDataException("Expanded module exceeds its size limit.");
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-            await using var output = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            await using var input = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
+            var output = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await using var outputAsyncDisposal = output.ConfigureAwait(true);
+            var input = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using var inputAsyncDisposal2 = input.ConfigureAwait(true);
             await ModulePackageSources.CopyBoundedAsync(input, output, entry.Length, cancellationToken).ConfigureAwait(false);
             if (output.Length != entry.Length) throw new InvalidDataException("Module archive entry length mismatch.");
         }
@@ -273,8 +280,10 @@ internal sealed class ModulePackageStore : IDisposable
                 total = checked(total + length);
                 if (total > MaximumExpandedBytes) throw new InvalidDataException("Module directory exceeds its size limit.");
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                await using var input = File.OpenRead(entry);
-                await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                var input = File.OpenRead(entry);
+                await using var inputAsyncDisposal_ = input.ConfigureAwait(true);
+                var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await using var outputAsyncDisposal_ = output.ConfigureAwait(true);
                 await ModulePackageSources.CopyBoundedAsync(input, output, length, cancellationToken).ConfigureAwait(false);
                 if (output.Length != length) throw new InvalidDataException("Module source changed while copying.");
             }
@@ -287,7 +296,8 @@ internal sealed class ModulePackageStore : IDisposable
         foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
         {
             RequireNoLinks(path);
-            await using var input = File.OpenRead(path);
+            var input = File.OpenRead(path);
+            await using var inputAsyncDisposal__ = input.ConfigureAwait(true);
             result.Add(new(Path.GetRelativePath(root, path), input.Length,
                 Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken).ConfigureAwait(false))));
         }

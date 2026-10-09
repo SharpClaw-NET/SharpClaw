@@ -4,7 +4,7 @@ using SharpClaw.Runtime.BLL.Kernel;
 
 namespace SharpClaw.Runtime.Host;
 
-public sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFactory
+internal sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFactory
 {
     public IProviderApiClient Create(
         IConfiguration configuration,

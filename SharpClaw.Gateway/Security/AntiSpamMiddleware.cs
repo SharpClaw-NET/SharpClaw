@@ -6,7 +6,7 @@ namespace SharpClaw.Gateway.Security;
 /// Enforces request body size limits and records violations against the
 /// <see cref="IpBanService"/> so repeat offenders are auto-banned.
 /// </summary>
-public sealed class AntiSpamMiddleware(
+internal sealed class AntiSpamMiddleware(
     RequestDelegate next,
     IpBanService banService,
     ILogger<AntiSpamMiddleware> logger)
@@ -25,7 +25,7 @@ public sealed class AntiSpamMiddleware(
                 ip, context.Request.ContentLength);
             banService.RecordViolation(ip);
             await GatewayErrors.WriteAsync(context, StatusCodes.Status413PayloadTooLarge,
-                "Request body too large.", GatewayErrors.PayloadTooLarge);
+                "Request body too large.", GatewayErrors.PayloadTooLarge).ConfigureAwait(false);
             return;
         }
 
@@ -35,10 +35,10 @@ public sealed class AntiSpamMiddleware(
         {
             banService.RecordViolation(ip);
             await GatewayErrors.WriteAsync(context, StatusCodes.Status415UnsupportedMediaType,
-                "Content-Type header is required.", GatewayErrors.UnsupportedMediaType);
+                "Content-Type header is required.", GatewayErrors.UnsupportedMediaType).ConfigureAwait(false);
             return;
         }
 
-        await next(context);
+        await next(context).ConfigureAwait(false);
     }
 }

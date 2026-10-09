@@ -12,8 +12,10 @@ using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Tests.Gateway;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class GatewayActionBoundaryTests
+internal sealed class GatewayActionBoundaryTests
 {
     [Test]
     public void Manifest_matches_the_published_gateway_action_inventory()
@@ -50,11 +52,11 @@ public sealed class GatewayActionBoundaryTests
         var middleware = CreateMiddleware(boundary, async context =>
         {
             Interlocked.Increment(ref nextCalls);
-            await context.Response.WriteAsync("ok", context.RequestAborted);
+            await context.Response.WriteAsync("ok", context.RequestAborted).ConfigureAwait(false);
         });
         var context = CreateContext("GET", "/api/test", "user-a", "request-a");
 
-        await middleware.InvokeAsync(context);
+        await middleware.InvokeAsync(context).ConfigureAwait(false);
 
         nextCalls.Should().Be(1);
         ReadBody(context).Should().Be("ok");
@@ -83,7 +85,7 @@ public sealed class GatewayActionBoundaryTests
         var first = CreateContext("GET", "/api/one", "user-a", "request-a");
         var second = CreateContext("GET", "/api/two", "user-b", "request-b");
 
-        await Task.WhenAll(middleware.InvokeAsync(first), middleware.InvokeAsync(second));
+        await Task.WhenAll(middleware.InvokeAsync(first), middleware.InvokeAsync(second)).ConfigureAwait(false);
 
         probe.RequestContexts.Should().HaveCount(10);
         probe.RequestContexts.Select(value => value.SubjectId).Distinct()
@@ -107,7 +109,7 @@ public sealed class GatewayActionBoundaryTests
         var action = () => middleware.InvokeAsync(
             CreateContext("GET", "/api/chat", "user-a", "request-a"));
 
-        await action.Should().ThrowAsync<KernelActionFailedException>();
+        await action.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
         nextCalls.Should().Be(0);
         probe.ActionKeys.Should().Contain("gateway.request.fail");
     }
@@ -127,7 +129,7 @@ public sealed class GatewayActionBoundaryTests
         var action = () => middleware.InvokeAsync(
             CreateContext("GET", "/api/chat", "user-a", "request-a"));
 
-        await action.Should().ThrowAsync<KernelActionCancelledException>();
+        await action.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         nextCalls.Should().Be(0);
         probe.ActionKeys.Should().Contain("gateway.request.cancel");
     }
@@ -147,7 +149,7 @@ public sealed class GatewayActionBoundaryTests
         var action = () => middleware.InvokeAsync(
             CreateContext("GET", "/api/test", "user-a", "request-a"));
 
-        await action.Should().ThrowAsync<KernelActionFailedException>();
+        await action.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
         nextCalls.Should().Be(0);
         probe.ActionKeys.Should().Contain("gateway.request.fail");
     }
@@ -161,7 +163,7 @@ public sealed class GatewayActionBoundaryTests
         {
             await context.Response.Body.WriteAsync(
                 Encoding.UTF8.GetBytes("first"),
-                context.RequestAborted);
+                context.RequestAborted).ConfigureAwait(false);
             throw new InvalidOperationException("stream failure");
         });
         var context = CreateContext(
@@ -172,7 +174,7 @@ public sealed class GatewayActionBoundaryTests
             "text/event-stream");
 
         await middleware.Invoking(value => value.InvokeAsync(context))
-            .Should().ThrowAsync<KernelActionFailedException>();
+            .Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
 
         ReadBody(context).Should().Be("first");
         probe.ActionKeys.Should().ContainInOrder(
@@ -252,15 +254,15 @@ public sealed class GatewayActionBoundaryTests
         var graph = TestServiceGraph.Compile(
             [new GatewayProbeRegistration(probe)],
             new KernelGraphCompileOptions
-        {
-            ActionRegistrationCapabilityGrants = new Dictionary<
+            {
+                ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(
                 StringComparer.Ordinal)
-            {
-                ["gateway-boundary-test"] = grants,
-            },
-            SensitiveActionApprovals = GatewayActionManifest.Required
+                {
+                    ["gateway-boundary-test"] = grants,
+                },
+                SensitiveActionApprovals = GatewayActionManifest.Required
                 .Where(key => KernelActionCatalog.DescriptorFor(key).ContainsSensitiveData)
                 .Select(key =>
                 {
@@ -281,7 +283,7 @@ public sealed class GatewayActionBoundaryTests
                             typeof(object)));
                 })
                 .ToArray(),
-        });
+            });
         var dispatcher = new KernelActionDispatcher(
             graph,
             new KernelActionExecutionContext(

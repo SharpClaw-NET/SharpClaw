@@ -18,8 +18,10 @@ using SharpClaw.TestFixtures.ExternalRegistration;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class ModuleSettingsLoaderTests
+internal sealed class ModuleSettingsLoaderTests
 {
     [TestCase("in-process")]
     [TestCase("sidecar")]
@@ -34,9 +36,9 @@ public sealed class ModuleSettingsLoaderTests
             """);
         ZipFile.CreateFromDirectory(source, archive);
         using var store = new ModulePackageStore(workspace.Path("store"), new ModulePackageSources());
-        using var candidate = await store.PrepareAsync(new("fixture.nupkg", LocalPath: archive), null, default);
+        using var candidate = await store.PrepareAsync(new("fixture.nupkg", LocalPath: archive), null, default).ConfigureAwait(false);
         await store.CommitAsync(candidate, workspace.Path("empty"), _ => Task.CompletedTask,
-            (_, _, _) => Task.CompletedTask, default);
+            (_, _, _) => Task.CompletedTask, default).ConfigureAwait(false);
         var bundledRoot = System.IO.Path.Combine(AppContext.BaseDirectory, "contributions");
         const string storageId = "sharpclaw_persistence_jsoncoldstore";
         var settings = new Dictionary<string, string?>
@@ -52,7 +54,8 @@ public sealed class ModuleSettingsLoaderTests
         }
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         var roots = PackagedRegistrationRootResolver.Resolve(bundledRoot, configuration);
-        await using var loaded = await PackagedDotNetRegistrationSet.LoadProductionAsync(roots, configuration);
+        var loaded = await PackagedDotNetRegistrationSet.LoadProductionAsync(roots, configuration).ConfigureAwait(false);
+        await using var loadedAsyncDisposal = loaded.ConfigureAwait(false);
         loaded.SourceIds.Should().BeEquivalentTo([FrontendSettingsFixtureModule.SourceId, storageId]);
         var page = loaded.FrontendSettings.Single();
         page.SourceId.Should().Be(FrontendSettingsFixtureModule.SourceId);
@@ -64,37 +67,39 @@ public sealed class ModuleSettingsLoaderTests
             new(SharpClawInstanceKind.Backend, workspace.Path("instance"), workspace.Path("shared")),
             new EncryptionOptions { Key = new byte[32] },
             new SharpClawPersistenceOptions { DataDirectory = workspace.Path("database") }, loaded.Services);
-        await using var app = builder.Build();
+        var app = builder.Build();
+        await using var appAsyncDisposal = app.ConfigureAwait(false);
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
-        await loaded.ConnectCapabilitiesAsync(app.Services);
-        await adapter.StartAsync("frontend-settings-fixture");
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
+        await loaded.ConnectCapabilitiesAsync(app.Services).ConfigureAwait(false);
+        await adapter.StartAsync("frontend-settings-fixture").ConfigureAwait(false);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         readiness.MarkReady();
         app.UseMiddleware<ApiKeyMiddleware>();
         KernelHostEndpoints.MapModuleSettingsCatalog(app, loaded);
         loaded.Application.MapEndpoints(app, adapter);
-        await app.StartAsync();
+        await app.StartAsync().ConfigureAwait(false);
         try
         {
             using var http = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
-            using var locked = await http.GetAsync("/setup/modules");
+            using var locked = await http.GetAsync("/setup/modules").ConfigureAwait(false);
             ((int)locked.StatusCode).Should().Be(423);
-            await using var api = new SharpClawApiClient(http, NullLogger<SharpClawApiClient>.Instance,
-                new ClientActionDispatcher(), fixedApiKey: app.Services.GetRequiredService<ApiKeyProvider>().ApiKey);
-            var catalog = await ModuleSettingsClient.ReadPagesAsync(api, default);
+            var api = new SharpClawApiClient(http, NullLogger<SharpClawApiClient>.Instance,
+              new ClientActionDispatcher(), fixedApiKey: app.Services.GetRequiredService<ApiKeyProvider>().ApiKey);
+            await using var apiAsyncDisposal = api.ConfigureAwait(false);
+            var catalog = await ModuleSettingsClient.ReadPagesAsync(api, default).ConfigureAwait(false);
             catalog.Should().Equal(page);
-            var document = await ModuleSettingsClient.ReadDocumentAsync(api, page, default);
+            var document = await ModuleSettingsClient.ReadDocumentAsync(api, page, default).ConfigureAwait(false);
             document.Values["message"].GetString().Should().Be("original");
-            await ModuleSettingsClient.SaveAsync(api, page, new Dictionary<string, object?> { ["message"] = "changed" }, default);
-            var changed = await ModuleSettingsClient.ReadDocumentAsync(api, page, default);
+            await ModuleSettingsClient.SaveAsync(api, page, new Dictionary<string, object?> { ["message"] = "changed" }, default).ConfigureAwait(false);
+            var changed = await ModuleSettingsClient.ReadDocumentAsync(api, page, default).ConfigureAwait(false);
             changed.Values["message"].GetString().Should().Be("changed");
         }
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync();
-            await app.StopAsync();
+            await adapter.StopAsync().ConfigureAwait(false);
+            await app.StopAsync().ConfigureAwait(false);
         }
     }
 
@@ -140,12 +145,20 @@ public sealed class ModuleSettingsLoaderTests
             {
                 id = empty ? "empty_frontend_settings" : FrontendSettingsFixtureModule.SourceId,
                 displayName = empty ? "Empty frontend settings" : "External frontend settings",
-                version = "1.0.0", toolPrefix = empty ? "efs" : "sfs", enabled = true,
+                version = "1.0.0",
+                toolPrefix = empty ? "efs" : "sfs",
+                enabled = true,
                 entryAssembly = System.IO.Path.GetFileName(assembly),
                 entryType = empty ? typeof(EmptyFrontendSettingsFixtureModule).FullName : typeof(FrontendSettingsFixtureModule).FullName,
-                runtime = "dotnet", hostMode = mode, minHostVersion = "0.1.0",
-                frontend = new { schemaVersion = 1, settings = new[] {
-                    new { id = "preferences", title = "Preferences", readPath = "/fixture/settings", savePath = "/fixture/settings" } } },
+                runtime = "dotnet",
+                hostMode = mode,
+                minHostVersion = "0.1.0",
+                frontend = new
+                {
+                    schemaVersion = 1,
+                    settings = new[] {
+                    new { id = "preferences", title = "Preferences", readPath = "/fixture/settings", savePath = "/fixture/settings" } }
+                },
             }));
             return source;
         }

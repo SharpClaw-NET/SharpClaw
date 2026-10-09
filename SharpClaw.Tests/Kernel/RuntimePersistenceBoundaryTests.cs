@@ -9,8 +9,10 @@ using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimePersistenceBoundaryTests
+internal sealed class RuntimePersistenceBoundaryTests
 {
     [Test]
     public void Persistence_manifest_matches_the_published_non_transaction_catalog()
@@ -125,32 +127,34 @@ public sealed class RuntimePersistenceBoundaryTests
     [Test]
     public async Task Persistence_action_must_run_its_terminal()
     {
-        await using var db = CreateDatabase(new TestPersistenceBoundary(runTerminal: false));
+        var db = CreateDatabase(new TestPersistenceBoundary(runTerminal: false));
+        await using var dbAsyncDisposal = db.ConfigureAwait(false);
 
-        Func<Task> action = async () => await db.SaveChangesAsync();
+        Func<Task> action = async () => await db.SaveChangesAsync().ConfigureAwait(false);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Persistence action completed without running its save terminal.");
+            .WithMessage("Persistence action completed without running its save terminal.").ConfigureAwait(false);
     }
 
     [Test]
     public async Task Async_save_enters_one_action_and_runs_one_terminal_despite_repeated_requests()
     {
         var actionBoundary = new TestPersistenceBoundary(runTerminal: true, repeatTerminal: true);
-        await using var db = CreateDatabase(actionBoundary);
+        var db = CreateDatabase(actionBoundary);
+        await using var dbAsyncDisposal_ = db.ConfigureAwait(false);
         db.Models.Add(new SharpClaw.Contracts.Entities.Core.ModelDB
         {
             Name = "one",
             ProviderId = Guid.NewGuid(),
         });
 
-        var saved = await db.SaveChangesAsync(acceptAllChangesOnSuccess: true);
+        var saved = await db.SaveChangesAsync(acceptAllChangesOnSuccess: true).ConfigureAwait(false);
 
         saved.Should().Be(1);
         actionBoundary.ActionCalls.Should().Be(1);
         actionBoundary.TerminalCalls.Should().Be(2);
         actionBoundary.TerminalResults.Should().Equal(1, 1);
-        (await db.Models.CountAsync()).Should().Be(1);
+        (await db.Models.CountAsync().ConfigureAwait(false)).Should().Be(1);
     }
 
     [Test]
@@ -160,12 +164,13 @@ public sealed class RuntimePersistenceBoundaryTests
             runTerminal: true,
             repeatTerminal: true,
             terminalFailure: new InvalidOperationException("persistence failed"));
-        await using var db = CreateDatabase(actionBoundary);
+        var db = CreateDatabase(actionBoundary);
+        await using var dbAsyncDisposal__ = db.ConfigureAwait(false);
 
-        Func<Task> action = async () => await db.SaveChangesAsync();
+        Func<Task> action = async () => await db.SaveChangesAsync().ConfigureAwait(false);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("persistence failed");
+            .WithMessage("persistence failed").ConfigureAwait(false);
         actionBoundary.TerminalCalls.Should().Be(1);
     }
 
@@ -176,11 +181,12 @@ public sealed class RuntimePersistenceBoundaryTests
         {
             Cancellation = new OperationCanceledException(),
         };
-        await using var db = CreateDatabase(actionBoundary);
+        var db = CreateDatabase(actionBoundary);
+        await using var dbAsyncDisposal___ = db.ConfigureAwait(false);
 
-        Func<Task> action = async () => await db.SaveChangesAsync();
+        Func<Task> action = async () => await db.SaveChangesAsync().ConfigureAwait(false);
 
-        await action.Should().ThrowAsync<OperationCanceledException>();
+        await action.Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
         actionBoundary.TerminalCalls.Should().Be(0);
     }
 
@@ -257,9 +263,9 @@ public sealed class RuntimePersistenceBoundaryTests
             if (!runTerminal)
                 return;
 
-            await InvokeTerminalAsync(terminal, terminalFailure, cancellationToken);
+            await InvokeTerminalAsync(terminal, terminalFailure, cancellationToken).ConfigureAwait(false);
             if (repeatTerminal)
-                await InvokeTerminalAsync(terminal, terminalFailure, cancellationToken);
+                await InvokeTerminalAsync(terminal, terminalFailure, cancellationToken).ConfigureAwait(false);
         }
 
         private async ValueTask InvokeTerminalAsync(
@@ -271,7 +277,7 @@ public sealed class RuntimePersistenceBoundaryTests
             if (failure is not null)
                 ExceptionDispatchInfo.Capture(failure).Throw();
 
-            TerminalResults.Add(await terminal(cancellationToken));
+            TerminalResults.Add(await terminal(cancellationToken).ConfigureAwait(false));
         }
     }
 

@@ -8,8 +8,10 @@ using System.Collections.Immutable;
 
 namespace SharpClaw.Tests.ClientUno;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class ClientUnoStartupSwitchTests
+internal sealed class ClientUnoStartupSwitchTests
 {
     [Test]
     public async Task Backend_enabled_attempts_to_start_bundled_runtime_host()
@@ -32,7 +34,7 @@ public sealed class ClientUnoStartupSwitchTests
             SkipLaunch = false,
         };
 
-        await manager.EnsureStartedAsync();
+        await manager.EnsureStartedAsync().ConfigureAwait(false);
 
         observed.Should().NotBeNull();
         observed!.FileName.Should().Be(executable);
@@ -63,10 +65,10 @@ public sealed class ClientUnoStartupSwitchTests
             SkipLaunch = true,
         };
 
-        var act = async () => await manager.EnsureStartedAsync();
+        var act = async () => await manager.EnsureStartedAsync().ConfigureAwait(false);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Backend launch is disabled*");
+            .WithMessage("*Backend launch is disabled*").ConfigureAwait(false);
         launchAttempts.Should().Be(0);
         manager.IsRunning.Should().BeFalse();
         manager.IsExternal.Should().BeTrue();
@@ -96,7 +98,7 @@ public sealed class ClientUnoStartupSwitchTests
             GatewayToken = "test-gateway-token",
         };
 
-        await manager.EnsureStartedAsync();
+        await manager.EnsureStartedAsync().ConfigureAwait(false);
 
         observed.Should().NotBeNull();
         observed!.FileName.Should().Be(executable);
@@ -145,7 +147,7 @@ public sealed class ClientUnoStartupSwitchTests
             clientActions: new ClientActionDispatcher());
         var boot = new BootModel(backend, gateway, api, null, new ClientActionDispatcher());
 
-        var result = await boot.RunGatewayStepAsync(CancellationToken.None);
+        var result = await boot.RunGatewayStepAsync(CancellationToken.None).ConfigureAwait(false);
 
         result.Should().BeNull();
         launchAttempts.Should().Be(0);
@@ -161,7 +163,8 @@ public sealed class ClientUnoStartupSwitchTests
             NullLogger<BackendProcessManager>.Instance, null, scope.CreateExecutable("runtime"),
             () => false, _ => Task.FromResult(false), _ => launches++);
         using var gateway = new GatewayProcessManager("http://127.0.0.1:48924", backend.ApiUrl,
-            NullLogger<GatewayProcessManager>.Instance) { SkipLaunch = true };
+            NullLogger<GatewayProcessManager>.Instance)
+        { SkipLaunch = true };
         using var api = new SharpClawApiClient(backend.ApiUrl, NullLogger<SharpClawApiClient>.Instance,
             null, new ClientActionDispatcher());
         var boot = new BootModel(backend, gateway, api, null, new ClientActionDispatcher());
@@ -196,7 +199,8 @@ public sealed class ClientUnoStartupSwitchTests
             NullLogger<BackendProcessManager>.Instance, null, scope.CreateExecutable("runtime"),
             () => false, _ => Task.FromResult(false), _ => { });
         using var gateway = new GatewayProcessManager("http://127.0.0.1:48924", backend.ApiUrl,
-            NullLogger<GatewayProcessManager>.Instance) { SkipLaunch = true };
+            NullLogger<GatewayProcessManager>.Instance)
+        { SkipLaunch = true };
         using var api = new SharpClawApiClient(backend.ApiUrl, NullLogger<SharpClawApiClient>.Instance,
             null, new ClientActionDispatcher());
         var boot = new BootModel(backend, gateway, api, null, new ClientActionDispatcher());

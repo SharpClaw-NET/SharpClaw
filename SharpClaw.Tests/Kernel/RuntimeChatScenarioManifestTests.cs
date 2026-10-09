@@ -5,7 +5,9 @@ using SharpClaw.Runtime.Host;
 
 namespace SharpClaw.Tests.Kernel;
 
-public sealed class RuntimeChatScenarioManifestTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
+internal sealed class RuntimeChatScenarioManifestTests
 {
     [Test]
     public void Manifest_uses_only_published_chat_and_conversation_actions()

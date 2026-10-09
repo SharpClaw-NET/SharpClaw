@@ -10,8 +10,10 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeToolBoundaryTests
+internal sealed class RuntimeToolBoundaryTests
 {
     [Test]
     public void Tool_manifest_matches_the_published_catalog_without_local_keys()
@@ -62,7 +64,7 @@ public sealed class RuntimeToolBoundaryTests
         var provider = new ToolProvider();
         var adapter = CreateAdapter(workspace, probe, provider);
 
-        var result = await adapter.Kernel.RunAsync(new ChatTurnInput("use the tool"));
+        var result = await adapter.Kernel.RunAsync(new ChatTurnInput("use the tool")).ConfigureAwait(false);
 
         result.Completion.Content.Should().Be("tool completed");
         probe.HandlerCalls.Should().Be(1);
@@ -99,7 +101,7 @@ public sealed class RuntimeToolBoundaryTests
             provider,
             mode == "repeat" ? new MatchingRepeatEvidenceAuthority() : null);
 
-        var result = await adapter.Kernel.RunAsync(new ChatTurnInput("use the tool"));
+        var result = await adapter.Kernel.RunAsync(new ChatTurnInput("use the tool")).ConfigureAwait(false);
 
         result.Completion.Content.Should().Be(
             mode == "replace-result" ? "replaced tool result" : "tool completed");
@@ -121,11 +123,11 @@ public sealed class RuntimeToolBoundaryTests
         var adapter = CreateAdapter(workspace, probe, provider);
 
         Func<Task> run = async () => await adapter.Kernel.RunAsync(
-            new ChatTurnInput("blocked tool", Guid.NewGuid()));
+            new ChatTurnInput("blocked tool", Guid.NewGuid())).ConfigureAwait(false);
         if (mode == "cancel")
-            await run.Should().ThrowAsync<KernelActionCancelledException>();
+            await run.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         else
-            await run.Should().ThrowAsync<KernelActionFailedException>();
+            await run.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
 
         probe.HandlerCalls.Should().Be(0);
         probe.Observations.Should().Contain(value =>
@@ -150,7 +152,7 @@ public sealed class RuntimeToolBoundaryTests
             new ChatTurnInput("second", Guid.NewGuid()),
             (input, ct) => adapter.Kernel.RunAsync(input, ct));
 
-        await Task.WhenAll(first.AsTask(), second.AsTask());
+        await Task.WhenAll(first.AsTask(), second.AsTask()).ConfigureAwait(false);
 
         probe.Observations
             .Where(static value => value.Action.StartsWith(
@@ -373,7 +375,7 @@ public sealed class RuntimeToolBoundaryTests
                             context.Action,
                             "Tool pure action repeat.",
                             null),
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
                 }
 
                 if (probe.Mode == "replace-input")
@@ -389,7 +391,7 @@ public sealed class RuntimeToolBoundaryTests
                                 },
                             },
                             "Replace tool input."),
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -401,7 +403,7 @@ public sealed class RuntimeToolBoundaryTests
                     "Replace tool result.");
             }
 
-            return await control.ProceedAsync(cancellationToken);
+            return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

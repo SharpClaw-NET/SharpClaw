@@ -8,8 +8,10 @@ using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Tests.Gateway;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class GatewayBackgroundActionBoundaryTests
+internal sealed class GatewayBackgroundActionBoundaryTests
 {
     [Test]
     public void Manifest_matches_every_published_background_action()
@@ -35,7 +37,7 @@ public sealed class GatewayBackgroundActionBoundaryTests
         var service = new GatewayBackgroundServiceInvocation("test-service");
         var tick = new GatewayBackgroundTickInvocation("test-service", "test-work", Guid.NewGuid());
 
-        await boundary.StartAsync(service, CancellationToken.None);
+        await boundary.StartAsync(service, CancellationToken.None).ConfigureAwait(false);
         await boundary.ExecuteTickAsync(
             tick,
             _ =>
@@ -43,8 +45,8 @@ public sealed class GatewayBackgroundActionBoundaryTests
                 probe.WorkCalls++;
                 return ValueTask.CompletedTask;
             },
-            CancellationToken.None);
-        await boundary.StopAsync(service, CancellationToken.None);
+            CancellationToken.None).ConfigureAwait(false);
+        await boundary.StopAsync(service, CancellationToken.None).ConfigureAwait(false);
 
         probe.ActionKeys.Should().Equal(
             "background.service.start",
@@ -71,7 +73,7 @@ public sealed class GatewayBackgroundActionBoundaryTests
             },
             CancellationToken.None).AsTask();
 
-        await action.Should().ThrowAsync<KernelActionExecutionException>();
+        await action.Should().ThrowAsync<KernelActionExecutionException>().ConfigureAwait(false);
         workCalls.Should().Be(0);
         probe.ActionKeys.Should().ContainInOrder(
             "background.tick.prepare",
@@ -95,7 +97,7 @@ public sealed class GatewayBackgroundActionBoundaryTests
             },
             CancellationToken.None).AsTask();
 
-        await action.Should().ThrowAsync<KernelActionCancelledException>();
+        await action.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         workCalls.Should().Be(0);
         probe.ActionKeys.Should().ContainInOrder(
             "background.tick.prepare",
@@ -116,7 +118,7 @@ public sealed class GatewayBackgroundActionBoundaryTests
             CancellationToken.None).AsTask();
 
         await action.Should().ThrowAsync<KernelActionFailedException>()
-            .WithMessage("test work failure");
+            .WithMessage("test work failure").ConfigureAwait(false);
         probe.ActionKeys.Should().ContainInOrder(
             "background.tick.prepare",
             "background.tick.execute",
@@ -138,7 +140,7 @@ public sealed class GatewayBackgroundActionBoundaryTests
             _ => ValueTask.CompletedTask,
             CancellationToken.None).AsTask();
 
-        await Task.WhenAll(first, second);
+        await Task.WhenAll(first, second).ConfigureAwait(false);
 
         probe.ExecuteContexts.Should().HaveCount(2);
         probe.ExecuteContexts.Select(value => value.TraceId).Distinct().Should().HaveCount(2);
@@ -215,15 +217,15 @@ public sealed class GatewayBackgroundActionBoundaryTests
         var graph = TestServiceGraph.Compile(
             [new BackgroundProbeRegistration(probe)],
             new KernelGraphCompileOptions
-        {
-            ActionRegistrationCapabilityGrants = new Dictionary<
+            {
+                ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
                 IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(
                 StringComparer.Ordinal)
-            {
-                ["gateway-background-test"] = actionGrants,
-            },
-        });
+                {
+                    ["gateway-background-test"] = actionGrants,
+                },
+            });
         var dispatcher = new KernelActionDispatcher(
             graph,
             new KernelActionExecutionContext(

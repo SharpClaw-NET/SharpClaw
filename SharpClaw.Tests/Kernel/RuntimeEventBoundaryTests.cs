@@ -12,8 +12,10 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class RuntimeEventBoundaryTests
+internal sealed class RuntimeEventBoundaryTests
 {
     [Test]
     public void Manifest_contains_every_published_event_action()
@@ -35,7 +37,7 @@ public sealed class RuntimeEventBoundaryTests
         var adapter = CreateAdapter(workspace, probe);
 
         var result = await adapter.PublishAsync(
-            new RuntimeEventPayload("turn.completed", "test", "A turn completed."));
+            new RuntimeEventPayload("turn.completed", "test", "A turn completed.")).ConfigureAwait(false);
 
         result.EventId.Should().NotBe(Guid.Empty);
         result.Payload.Name.Should().Be("turn.completed");
@@ -66,7 +68,7 @@ public sealed class RuntimeEventBoundaryTests
         var adapter = CreateAdapter(workspace, probe);
 
         var result = await adapter.PublishAsync(
-            new RuntimeEventPayload("original.event", "original", "The original payload."));
+            new RuntimeEventPayload("original.event", "original", "The original payload.")).ConfigureAwait(false);
 
         result.Payload.Should().Be(probe.ReplacementPayload);
     }
@@ -80,7 +82,7 @@ public sealed class RuntimeEventBoundaryTests
 
         var result = await adapter.PublishAsync(
             new RuntimeEventPayload("durable.event", "test", "A durable event."),
-            EventDelivery.Durable);
+            EventDelivery.Durable).ConfigureAwait(false);
 
         result.Delivery.Should().Be(EventDelivery.Durable);
         sink.Events.Should().ContainSingle(item =>
@@ -100,11 +102,11 @@ public sealed class RuntimeEventBoundaryTests
         var adapter = CreateAdapter(workspace, probe, sink);
 
         Func<Task> publish = async () => await adapter.PublishAsync(
-            new RuntimeEventPayload("blocked.event", "test", "This event must not publish."));
+            new RuntimeEventPayload("blocked.event", "test", "This event must not publish.")).ConfigureAwait(false);
 
         await publish.Should()
             .ThrowAsync<KernelActionExecutionException>()
-            .WithMessage("*without running its terminal*");
+            .WithMessage("*without running its terminal*").ConfigureAwait(false);
         sink.Events.Should().BeEmpty();
         probe.Actions.Should().Contain("event.delivery.fail");
     }
@@ -121,9 +123,9 @@ public sealed class RuntimeEventBoundaryTests
         var adapter = CreateAdapter(workspace, probe, sink);
 
         Func<Task> publish = async () => await adapter.PublishAsync(
-            new RuntimeEventPayload("cancelled.event", "test", "This event is cancelled."));
+            new RuntimeEventPayload("cancelled.event", "test", "This event is cancelled.")).ConfigureAwait(false);
 
-        await publish.Should().ThrowAsync<KernelActionCancelledException>();
+        await publish.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         sink.Events.Should().BeEmpty();
         probe.Actions.Should().Contain("event.delivery.fail");
     }
@@ -150,7 +152,7 @@ public sealed class RuntimeEventBoundaryTests
             envelope,
             EventDelivery.Durable,
             CancellationToken.None,
-            "test-listener");
+            "test-listener").ConfigureAwait(false);
 
         probe.Actions.Should().ContainSingle(value => value == "event.enqueue");
         store.Messages.Should().ContainSingle(message =>
@@ -181,9 +183,9 @@ public sealed class RuntimeEventBoundaryTests
             now,
             now);
 
-        await service.AcknowledgeAsync(record);
-        await service.FailAsync(record, "temporary delivery failure");
-        await service.CancelAsync(record);
+        await service.AcknowledgeAsync(record).ConfigureAwait(false);
+        await service.FailAsync(record, "temporary delivery failure").ConfigureAwait(false);
+        await service.CancelAsync(record).ConfigureAwait(false);
 
         probe.Actions.Count(value => value == "event.acknowledge").Should().Be(1);
         probe.Actions.Count(value => value == "event.delivery.fail").Should().Be(2);
@@ -350,10 +352,10 @@ public sealed class RuntimeEventBoundaryTests
                 };
                 return await control.ProceedWithInputAsync(
                     new ActionReplacement<KernelActionEnvelope>(replacement, "Event input replacement."),
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
 
-            return await control.ProceedAsync(cancellationToken);
+            return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

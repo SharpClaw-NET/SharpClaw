@@ -85,10 +85,10 @@ public sealed class RuntimeEventDeliverySink(IServiceScopeFactory scopeFactory)
                         effective.Payload,
                         effective.Delivery,
                         targetListenerId),
-                    ct);
+                    ct).ConfigureAwait(false);
                 return true;
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     internal IReadOnlyList<KernelQueuedEvent> DrainObservations()

@@ -125,7 +125,7 @@ internal sealed class PackagedApplicationRegistry
                 route.Descriptor.Name,
                 arguments,
                 context,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
             return response.Result;
         }
 
@@ -144,7 +144,7 @@ internal sealed class PackagedApplicationRegistry
                 route.Descriptor.Name,
                 arguments,
                 localContext),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     public void MapEndpoints(WebApplication app, RuntimeKernelAdapter runtimeKernel)
@@ -205,7 +205,7 @@ internal sealed class PackagedApplicationRegistry
         var body = await ReadBodyAsync(
             context.Request.Body,
             maximumBodyBytes,
-            context.RequestAborted);
+            context.RequestAborted).ConfigureAwait(false);
         if (body is null)
         {
             context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
@@ -238,7 +238,7 @@ internal sealed class PackagedApplicationRegistry
                 async (effective, cancellationToken) =>
                 {
                     ValidateImmutableRoute(original, effective);
-                    using var socket = await context.WebSockets.AcceptWebSocketAsync();
+                    using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
                     var channel = new AspNetWebSocketChannel(
                         socket,
                         target.Client?.HostLimits.StreamChunkBytes
@@ -253,7 +253,7 @@ internal sealed class PackagedApplicationRegistry
                         await client.InvokeWebSocketEndpointAsync(
                             request,
                             channel,
-                            cancellationToken);
+                            cancellationToken).ConfigureAwait(false);
                     }
                     else
                     {
@@ -266,11 +266,11 @@ internal sealed class PackagedApplicationRegistry
                             request,
                             channel,
                             hostActionEntry,
-                            cancellationToken);
+                            cancellationToken).ConfigureAwait(false);
                     }
                     return true;
                 },
-                context.RequestAborted);
+                context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -286,7 +286,7 @@ internal sealed class PackagedApplicationRegistry
                     executionContext,
                     runtimeKernel);
                 if (target.Client is { } client)
-                    return await client.InvokeEndpointAsync(request, cancellationToken);
+                    return await client.InvokeEndpointAsync(request, cancellationToken).ConfigureAwait(false);
 
                 var contexts = runtimeKernel.HostServices
                     .GetRequiredService<RuntimeHostActionContextAccessor>();
@@ -296,9 +296,9 @@ internal sealed class PackagedApplicationRegistry
                 return await target.InProcess!.Invoker.InvokeHttpEndpointAsync(
                     request,
                     hostActionEntry,
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             },
-            context.RequestAborted);
+            context.RequestAborted).ConfigureAwait(false);
         context.Response.StatusCode = response.StatusCode;
         foreach (var header in response.Headers)
         {
@@ -306,7 +306,7 @@ internal sealed class PackagedApplicationRegistry
                 context.Response.Headers[header.Key] = new StringValues(header.Value);
         }
         if (response.Body.Length > 0)
-            await context.Response.Body.WriteAsync(response.Body, context.RequestAborted);
+            await context.Response.Body.WriteAsync(response.Body, context.RequestAborted).ConfigureAwait(false);
     }
 
     private static HostEndpointRouteRequest CreateEndpointRequest(
@@ -572,12 +572,12 @@ internal sealed class PackagedApplicationRegistry
         var buffer = new byte[Math.Min(Math.Max(maximumBytes, 1), 64 * 1024)];
         while (true)
         {
-            var read = await stream.ReadAsync(buffer, cancellationToken);
+            var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
             if (read == 0)
                 return body.ToArray();
             if (body.Length + read > maximumBytes)
                 return null;
-            await body.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            await body.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -641,7 +641,7 @@ internal sealed class PackagedApplicationRegistry
             WebSocketReceiveResult result;
             do
             {
-                result = await socket.ReceiveAsync(buffer, cancellationToken);
+                result = await socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
                 if (result.MessageType == System.Net.WebSockets.WebSocketMessageType.Close)
                 {
                     return new WebSocketMessage(
@@ -652,7 +652,7 @@ internal sealed class PackagedApplicationRegistry
                 }
                 if (payload.Length + result.Count > maximumMessageBytes)
                     throw new InvalidOperationException("The WebSocket message exceeds the host limit.");
-                await payload.WriteAsync(buffer.AsMemory(0, result.Count), cancellationToken);
+                await payload.WriteAsync(buffer.AsMemory(0, result.Count), cancellationToken).ConfigureAwait(false);
             }
             while (!result.EndOfMessage);
 
@@ -697,7 +697,7 @@ internal sealed class PackagedApplicationRegistry
                 await socket.CloseAsync(
                     (WebSocketCloseStatus)closeStatus,
                     description,
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
         }
     }

@@ -17,8 +17,8 @@ public sealed class ClientNavigationService(
             async (_, _) => await navigator.NavigateRouteAsync(
                 sender,
                 route,
-                qualifier ?? string.Empty),
-            cancellationToken);
+                qualifier ?? string.Empty).ConfigureAwait(true),
+            cancellationToken).ConfigureAwait(true);
     }
 
     public async ValueTask NavigateViewModelAsync<TViewModel>(
@@ -34,7 +34,7 @@ public sealed class ClientNavigationService(
             async (_, _) => await navigator.NavigateViewModelAsync<TViewModel>(
                 sender,
                 qualifier: qualifier ?? string.Empty,
-                data: data),
-            cancellationToken);
+                data: data).ConfigureAwait(true),
+            cancellationToken).ConfigureAwait(true);
     }
 }

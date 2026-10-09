@@ -7,23 +7,26 @@ using SharpClaw.Runtime.Host.Api;
 
 namespace SharpClaw.Tests.Kernel;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-public sealed class ExceptionHandlingMiddlewareTests
+internal sealed class ExceptionHandlingMiddlewareTests
 {
     [Test]
     public async Task GenericFailure_ReturnsStableMessageWithoutInternalDetails()
     {
-        await using var body = new MemoryStream();
+        var body = new MemoryStream();
+        await using var bodyAsyncDisposal = body.ConfigureAwait(false);
         var context = new DefaultHttpContext();
         context.Response.Body = body;
         var middleware = new ExceptionHandlingMiddleware(
             _ => throw new Exception("provider secret and storage detail"),
             NullLogger<ExceptionHandlingMiddleware>.Instance);
 
-        await middleware.InvokeAsync(context);
+        await middleware.InvokeAsync(context).ConfigureAwait(false);
 
         context.Response.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
-        var response = await ReadBodyAsync(body);
+        var response = await ReadBodyAsync(body).ConfigureAwait(false);
         response.Should().Contain("An internal server error occurred.");
         response.Should().NotContain("provider secret and storage detail");
     }
@@ -46,7 +49,8 @@ public sealed class ExceptionHandlingMiddlewareTests
     [Test]
     public async Task RequestCancellation_ReturnsClientClosedStatusWithoutServerErrorBody()
     {
-        await using var body = new MemoryStream();
+        var body = new MemoryStream();
+        await using var bodyAsyncDisposal_ = body.ConfigureAwait(false);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         var context = new DefaultHttpContext();
@@ -56,7 +60,7 @@ public sealed class ExceptionHandlingMiddlewareTests
             _ => throw new OperationCanceledException(cancellation.Token),
             NullLogger<ExceptionHandlingMiddleware>.Instance);
 
-        await middleware.InvokeAsync(context);
+        await middleware.InvokeAsync(context).ConfigureAwait(false);
 
         context.Response.StatusCode.Should().Be(499);
         body.Length.Should().Be(0);
@@ -80,22 +84,23 @@ public sealed class ExceptionHandlingMiddlewareTests
     private static async Task<string> ReadBodyAsync(MemoryStream body)
     {
         body.Position = 0;
-        return await new StreamReader(body, Encoding.UTF8, leaveOpen: true).ReadToEndAsync();
+        return await new StreamReader(body, Encoding.UTF8, leaveOpen: true).ReadToEndAsync().ConfigureAwait(false);
     }
 
     private static async Task AssertGeneralFailureIsRedactedAsync(Exception exception)
     {
-        await using var body = new MemoryStream();
+        var body = new MemoryStream();
+        await using var bodyAsyncDisposal__ = body.ConfigureAwait(false);
         var context = new DefaultHttpContext();
         context.Response.Body = body;
         var middleware = new ExceptionHandlingMiddleware(
             _ => throw exception,
             NullLogger<ExceptionHandlingMiddleware>.Instance);
 
-        await middleware.InvokeAsync(context);
+        await middleware.InvokeAsync(context).ConfigureAwait(false);
 
         context.Response.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
-        var response = await ReadBodyAsync(body);
+        var response = await ReadBodyAsync(body).ConfigureAwait(false);
         response.Should().Contain("An internal server error occurred.");
         response.Should().NotContain(exception.Message);
     }
