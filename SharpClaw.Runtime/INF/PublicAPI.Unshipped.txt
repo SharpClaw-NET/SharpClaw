@@ -1,0 +1,198 @@
+#nullable enable
+override SharpClaw.Runtime.INF.Persistence.MigrationResult.Equals(object? obj) -> bool
+override SharpClaw.Runtime.INF.Persistence.MigrationResult.GetHashCode() -> int
+override SharpClaw.Runtime.INF.Persistence.MigrationResult.ToString() -> string!
+override SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.Equals(object? obj) -> bool
+override SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.GetHashCode() -> int
+override SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.ToString() -> string!
+override SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.Equals(object? obj) -> bool
+override SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.GetHashCode() -> int
+override SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.ToString() -> string!
+override SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.Equals(object? obj) -> bool
+override SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.GetHashCode() -> int
+override SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.ToString() -> string!
+override SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.Equals(object? obj) -> bool
+override SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.GetHashCode() -> int
+override SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.ToString() -> string!
+override SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.Equals(object? obj) -> bool
+override SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.GetHashCode() -> int
+override SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.ToString() -> string!
+override SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.GetHashCode() -> int
+override SharpClaw.Runtime.INF.PersistenceProviderSelection.Equals(object? obj) -> bool
+override SharpClaw.Runtime.INF.PersistenceProviderSelection.GetHashCode() -> int
+override SharpClaw.Runtime.INF.PersistenceProviderSelection.ToString() -> string!
+SharpClaw.Runtime.INF.Configuration.LocalEnvironment
+SharpClaw.Runtime.INF.InfrastructureServiceExtensions
+SharpClaw.Runtime.INF.Persistence.EfPersistenceEntityResolver
+SharpClaw.Runtime.INF.Persistence.EfPersistenceEntityResolver.EfPersistenceEntityResolver() -> void
+SharpClaw.Runtime.INF.Persistence.EfPersistenceEntityResolver.FindAsync<T>(SharpClaw.Runtime.INF.Persistence.SharpClawDbContext! db, System.Guid id, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+SharpClaw.Runtime.INF.Persistence.EfPersistenceEntityResolver.QueryAsync<T>(SharpClaw.Runtime.INF.Persistence.SharpClawDbContext! db, System.Linq.Expressions.Expression<System.Func<T!, bool>!>! predicate, int limit, SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint? hint = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T!>!>!
+SharpClaw.Runtime.INF.Persistence.EfPersistenceEntityResolver.QueryAsync<T>(SharpClaw.Runtime.INF.Persistence.SharpClawDbContext! db, System.Linq.Expressions.Expression<System.Func<T!, bool>!>! predicate, SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint? hint = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T!>!>!
+SharpClaw.Runtime.INF.Persistence.IPersistenceEntityResolver
+SharpClaw.Runtime.INF.Persistence.IPersistenceEntityResolver.FindAsync<T>(SharpClaw.Runtime.INF.Persistence.SharpClawDbContext! db, System.Guid id, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+SharpClaw.Runtime.INF.Persistence.IPersistenceEntityResolver.QueryAsync<T>(SharpClaw.Runtime.INF.Persistence.SharpClawDbContext! db, System.Linq.Expressions.Expression<System.Func<T!, bool>!>! predicate, int limit, SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint? hint = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T!>!>!
+SharpClaw.Runtime.INF.Persistence.IPersistenceEntityResolver.QueryAsync<T>(SharpClaw.Runtime.INF.Persistence.SharpClawDbContext! db, System.Linq.Expressions.Expression<System.Func<T!, bool>!>! predicate, SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint? hint = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T!>!>!
+SharpClaw.Runtime.INF.Persistence.IRuntimePersistenceActionBoundary
+SharpClaw.Runtime.INF.Persistence.IRuntimePersistenceActionBoundary.RunPersistenceActionAsync(SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation! invocation, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<int>>! terminal, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.INF.Persistence.IRuntimeTransactionActionBoundary
+SharpClaw.Runtime.INF.Persistence.IRuntimeTransactionActionBoundary.RunTransactionActionAsync(SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation! invocation, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult>>! terminal, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult>
+SharpClaw.Runtime.INF.Persistence.IRuntimeTransactionActionRunner
+SharpClaw.Runtime.INF.Persistence.IRuntimeTransactionActionRunner.BeginSerializableAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction?>!
+SharpClaw.Runtime.INF.Persistence.IRuntimeTransactionActionRunner.CommitAsync(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction! transaction, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SharpClaw.Runtime.INF.Persistence.IRuntimeTransactionActionRunner.RollbackAsync(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction! transaction, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SharpClaw.Runtime.INF.Persistence.IRuntimeTransactionActionRunnerAccessor
+SharpClaw.Runtime.INF.Persistence.IRuntimeTransactionActionRunnerAccessor.GetRequiredRunner() -> SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunner!
+SharpClaw.Runtime.INF.Persistence.MigrationGate
+SharpClaw.Runtime.INF.Persistence.MigrationGate.Dispose() -> void
+SharpClaw.Runtime.INF.Persistence.MigrationGate.EnterMigrationAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.IDisposable!>!
+SharpClaw.Runtime.INF.Persistence.MigrationGate.EnterRequestAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.IDisposable!>
+SharpClaw.Runtime.INF.Persistence.MigrationGate.MigrationGate() -> void
+SharpClaw.Runtime.INF.Persistence.MigrationGate.State.get -> SharpClaw.Runtime.INF.Persistence.MigrationState
+SharpClaw.Runtime.INF.Persistence.MigrationResult
+SharpClaw.Runtime.INF.Persistence.MigrationResult.AlreadyInProgress.get -> bool
+SharpClaw.Runtime.INF.Persistence.MigrationResult.AlreadyInProgress.init -> void
+SharpClaw.Runtime.INF.Persistence.MigrationResult.Applied.get -> bool
+SharpClaw.Runtime.INF.Persistence.MigrationResult.Applied.init -> void
+SharpClaw.Runtime.INF.Persistence.MigrationResult.Deconstruct(out bool Applied, out bool AlreadyInProgress, out System.Collections.Generic.IReadOnlyList<string!>! Migrations, out string! Message) -> void
+SharpClaw.Runtime.INF.Persistence.MigrationResult.Message.get -> string!
+SharpClaw.Runtime.INF.Persistence.MigrationResult.Message.init -> void
+SharpClaw.Runtime.INF.Persistence.MigrationResult.MigrationResult(bool Applied, bool AlreadyInProgress, System.Collections.Generic.IReadOnlyList<string!>! Migrations, string! Message) -> void
+SharpClaw.Runtime.INF.Persistence.MigrationResult.MigrationResult(SharpClaw.Runtime.INF.Persistence.MigrationResult! original) -> void
+SharpClaw.Runtime.INF.Persistence.MigrationResult.Migrations.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SharpClaw.Runtime.INF.Persistence.MigrationResult.Migrations.init -> void
+SharpClaw.Runtime.INF.Persistence.MigrationService
+SharpClaw.Runtime.INF.Persistence.MigrationService.Dispose() -> void
+SharpClaw.Runtime.INF.Persistence.MigrationService.GetStatusAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SharpClaw.Runtime.INF.Persistence.MigrationStatusResult!>!
+SharpClaw.Runtime.INF.Persistence.MigrationService.MigrateAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SharpClaw.Runtime.INF.Persistence.MigrationResult!>!
+SharpClaw.Runtime.INF.Persistence.MigrationService.MigrationService(Microsoft.Extensions.DependencyInjection.IServiceScopeFactory! scopeFactory, SharpClaw.Runtime.INF.Persistence.MigrationGate! gate, Microsoft.Extensions.Logging.ILogger<SharpClaw.Runtime.INF.Persistence.MigrationService!>! logger) -> void
+SharpClaw.Runtime.INF.Persistence.MigrationState
+SharpClaw.Runtime.INF.Persistence.MigrationState.Draining = 1 -> SharpClaw.Runtime.INF.Persistence.MigrationState
+SharpClaw.Runtime.INF.Persistence.MigrationState.Idle = 0 -> SharpClaw.Runtime.INF.Persistence.MigrationState
+SharpClaw.Runtime.INF.Persistence.MigrationState.Migrating = 2 -> SharpClaw.Runtime.INF.Persistence.MigrationState
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.Applied.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.Applied.init -> void
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.Deconstruct(out SharpClaw.Runtime.INF.Persistence.MigrationState State, out System.Collections.Generic.IReadOnlyList<string!>! Applied, out System.Collections.Generic.IReadOnlyList<string!>! Pending) -> void
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.MigrationStatusResult(SharpClaw.Runtime.INF.Persistence.MigrationState State, System.Collections.Generic.IReadOnlyList<string!>! Applied, System.Collections.Generic.IReadOnlyList<string!>! Pending) -> void
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.MigrationStatusResult(SharpClaw.Runtime.INF.Persistence.MigrationStatusResult! original) -> void
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.Pending.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.Pending.init -> void
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.State.get -> SharpClaw.Runtime.INF.Persistence.MigrationState
+SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.State.init -> void
+SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint
+SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.<Clone>$() -> SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint!
+SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.Deconstruct(out string! PropertyName, out System.Guid Value) -> void
+SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.Equals(SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint? other) -> bool
+SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.PersistenceQueryHint(string! PropertyName, System.Guid Value) -> void
+SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.PropertyName.get -> string!
+SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.PropertyName.init -> void
+SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.Value.get -> System.Guid
+SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.Value.init -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RegistrationDbContextFactory
+SharpClaw.Runtime.INF.Persistence.Registrations.RegistrationDbContextFactory.CreateDbContext(System.Type! dbContextType) -> object!
+SharpClaw.Runtime.INF.Persistence.Registrations.RegistrationDbContextFactory.RegistrationDbContextFactory(SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistry! registry, SharpClaw.Runtime.INF.PersistenceProviderSelection! selection, SharpClaw.Persistence.SharpClawPersistenceOptions! persistenceOptions, Microsoft.Extensions.Configuration.IConfiguration! configuration, System.IServiceProvider! serviceProvider, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory = null) -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RegistrationPersistenceRegistrationFactory
+SharpClaw.Runtime.INF.Persistence.Registrations.RegistrationPersistenceRegistrationFactory.CreateRegistrations(string! SourceId, System.Reflection.Assembly! assembly) -> System.Collections.Generic.IReadOnlyList<SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration!>!
+SharpClaw.Runtime.INF.Persistence.Registrations.RegistrationPersistenceRegistrationFactory.RegistrationPersistenceRegistrationFactory() -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.<Clone>$() -> SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration!
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.DbContextType.get -> System.Type!
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.DbContextType.init -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.Deconstruct(out string! SourceId, out System.Type! DbContextType, out System.Collections.Generic.IReadOnlyList<System.Type!>! EntityTypes) -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.EntityTypes.get -> System.Collections.Generic.IReadOnlyList<System.Type!>!
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.EntityTypes.init -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.Equals(SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration? other) -> bool
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.RuntimeRegistrationDbContextRegistration(string! SourceId, System.Type! DbContextType, System.Collections.Generic.IReadOnlyList<System.Type!>! EntityTypes) -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.SourceId.get -> string!
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.SourceId.init -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistry
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistry.GetAll() -> System.Collections.Generic.IReadOnlyList<SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration!>!
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistry.GetRegistration(System.Type! dbContextType) -> SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration?
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistry.IsRegistered(System.Type! dbContextType) -> bool
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistry.Register(SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration! registration) -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistry.RuntimeRegistrationDbContextRegistry() -> void
+SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistry.UnregisterSource(string! SourceId) -> void
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.<Clone>$() -> SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation!
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.ActionKey.get -> SharpClaw.Contracts.Kernel.SharpClawActionKey
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.ActionKey.init -> void
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.AddedCount.get -> int
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.AddedCount.init -> void
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.Deconstruct(out SharpClaw.Contracts.Kernel.SharpClawActionKey ActionKey, out int AddedCount, out int ModifiedCount, out int DeletedCount) -> void
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.DeletedCount.get -> int
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.DeletedCount.init -> void
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.Equals(SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation? other) -> bool
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.ModifiedCount.get -> int
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.ModifiedCount.init -> void
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.RuntimePersistenceActionInvocation(SharpClaw.Contracts.Kernel.SharpClawActionKey ActionKey, int AddedCount, int ModifiedCount, int DeletedCount) -> void
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionRunner
+SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionRunner.RuntimePersistenceActionRunner(SharpClaw.Runtime.INF.Persistence.IRuntimePersistenceActionBoundary! actionBoundary) -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.<Clone>$() -> SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation!
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.ActionKey.get -> SharpClaw.Contracts.Kernel.SharpClawActionKey
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.ActionKey.init -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.Deconstruct(out SharpClaw.Contracts.Kernel.SharpClawActionKey ActionKey, out System.Data.IsolationLevel? IsolationLevel, out bool HasExistingTransaction) -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.Equals(SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation? other) -> bool
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.HasExistingTransaction.get -> bool
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.HasExistingTransaction.init -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.IsolationLevel.get -> System.Data.IsolationLevel?
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.IsolationLevel.init -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.RuntimeTransactionActionInvocation(SharpClaw.Contracts.Kernel.SharpClawActionKey ActionKey, System.Data.IsolationLevel? IsolationLevel, bool HasExistingTransaction) -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.Deconstruct(out Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? Transaction) -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.Equals(SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult other) -> bool
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.RuntimeTransactionActionResult() -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.RuntimeTransactionActionResult(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? Transaction) -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.Transaction.get -> Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction?
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.Transaction.init -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunner
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunner.BeginSerializableAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction?>!
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunner.CommitAsync(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction! transaction, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunner.RollbackAsync(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction! transaction, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunner.RuntimeTransactionActionRunner(SharpClaw.Runtime.INF.Persistence.SharpClawDbContext! db, SharpClaw.Runtime.INF.Persistence.IRuntimeTransactionActionBoundary! actionBoundary) -> void
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunnerAccessor
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunnerAccessor.GetRequiredRunner() -> SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunner!
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionRunnerAccessor.RuntimeTransactionActionRunnerAccessor(System.IServiceProvider! services) -> void
+SharpClaw.Runtime.INF.PersistenceProviderSelection
+SharpClaw.Runtime.INF.PersistenceProviderSelection.<Clone>$() -> SharpClaw.Runtime.INF.PersistenceProviderSelection!
+SharpClaw.Runtime.INF.PersistenceProviderSelection.Deconstruct(out SharpClaw.Persistence.ISharpClawPersistenceProvider! Provider) -> void
+SharpClaw.Runtime.INF.PersistenceProviderSelection.Equals(SharpClaw.Runtime.INF.PersistenceProviderSelection? other) -> bool
+SharpClaw.Runtime.INF.PersistenceProviderSelection.PersistenceProviderSelection(SharpClaw.Persistence.ISharpClawPersistenceProvider! Provider) -> void
+SharpClaw.Runtime.INF.PersistenceProviderSelection.Provider.get -> SharpClaw.Persistence.ISharpClawPersistenceProvider!
+SharpClaw.Runtime.INF.PersistenceProviderSelection.Provider.init -> void
+static SharpClaw.Runtime.INF.Configuration.LocalEnvironment.AddLocalEnvironment(this Microsoft.Extensions.Configuration.IConfigurationBuilder! builder, bool isDevelopment = false, SharpClaw.Shared.Instances.SharpClawInstancePaths? instancePaths = null) -> Microsoft.Extensions.Configuration.IConfigurationBuilder!
+static SharpClaw.Runtime.INF.Configuration.LocalEnvironment.CreateSecretsOptions(string! envDir, bool isDevelopment, SharpClaw.Shared.Instances.SharpClawInstancePaths? instancePaths = null) -> Supprocom.Secrets.SupprocomSecretsOptions!
+static SharpClaw.Runtime.INF.Configuration.LocalEnvironment.ResolveActiveEnvFilePath() -> string!
+static SharpClaw.Runtime.INF.InfrastructureServiceExtensions.AddInfrastructure(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration, SharpClaw.Persistence.SharpClawPersistenceOptions! persistenceOptions) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static SharpClaw.Runtime.INF.InfrastructureServiceExtensions.InitializeInfrastructureAsync(this System.IServiceProvider! services) -> System.Threading.Tasks.Task!
+static SharpClaw.Runtime.INF.InfrastructureServiceExtensions.ShutdownInfrastructureAsync(this System.IServiceProvider! services) -> System.Threading.Tasks.Task!
+static SharpClaw.Runtime.INF.Persistence.MigrationResult.AlreadyRunning() -> SharpClaw.Runtime.INF.Persistence.MigrationResult!
+static SharpClaw.Runtime.INF.Persistence.MigrationResult.NoPending() -> SharpClaw.Runtime.INF.Persistence.MigrationResult!
+static SharpClaw.Runtime.INF.Persistence.MigrationResult.operator !=(SharpClaw.Runtime.INF.Persistence.MigrationResult? left, SharpClaw.Runtime.INF.Persistence.MigrationResult? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.MigrationResult.operator ==(SharpClaw.Runtime.INF.Persistence.MigrationResult? left, SharpClaw.Runtime.INF.Persistence.MigrationResult? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.MigrationResult.Success(System.Collections.Generic.List<string!>! names) -> SharpClaw.Runtime.INF.Persistence.MigrationResult!
+static SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.operator !=(SharpClaw.Runtime.INF.Persistence.MigrationStatusResult? left, SharpClaw.Runtime.INF.Persistence.MigrationStatusResult? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.operator ==(SharpClaw.Runtime.INF.Persistence.MigrationStatusResult? left, SharpClaw.Runtime.INF.Persistence.MigrationStatusResult? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.operator !=(SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint? left, SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint.operator ==(SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint? left, SharpClaw.Runtime.INF.Persistence.PersistenceQueryHint? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.operator !=(SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration? left, SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration.operator ==(SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration? left, SharpClaw.Runtime.INF.Persistence.Registrations.RuntimeRegistrationDbContextRegistration? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.operator !=(SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation? left, SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation.operator ==(SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation? left, SharpClaw.Runtime.INF.Persistence.RuntimePersistenceActionInvocation? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.operator !=(SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation? left, SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation.operator ==(SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation? left, SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionInvocation? right) -> bool
+static SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.Completed.get -> SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult
+static SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.operator !=(SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult left, SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult right) -> bool
+static SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.operator ==(SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult left, SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult right) -> bool
+static SharpClaw.Runtime.INF.PersistenceProviderSelection.operator !=(SharpClaw.Runtime.INF.PersistenceProviderSelection? left, SharpClaw.Runtime.INF.PersistenceProviderSelection? right) -> bool
+static SharpClaw.Runtime.INF.PersistenceProviderSelection.operator ==(SharpClaw.Runtime.INF.PersistenceProviderSelection? left, SharpClaw.Runtime.INF.PersistenceProviderSelection? right) -> bool
+virtual SharpClaw.Runtime.INF.Persistence.MigrationResult.<Clone>$() -> SharpClaw.Runtime.INF.Persistence.MigrationResult!
+virtual SharpClaw.Runtime.INF.Persistence.MigrationResult.EqualityContract.get -> System.Type!
+virtual SharpClaw.Runtime.INF.Persistence.MigrationResult.Equals(SharpClaw.Runtime.INF.Persistence.MigrationResult? other) -> bool
+virtual SharpClaw.Runtime.INF.Persistence.MigrationResult.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.<Clone>$() -> SharpClaw.Runtime.INF.Persistence.MigrationStatusResult!
+virtual SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.EqualityContract.get -> System.Type!
+virtual SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.Equals(SharpClaw.Runtime.INF.Persistence.MigrationStatusResult? other) -> bool
+virtual SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.PrintMembers(System.Text.StringBuilder! builder) -> bool
+~override SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.Equals(object obj) -> bool
+~override SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.ToString() -> string

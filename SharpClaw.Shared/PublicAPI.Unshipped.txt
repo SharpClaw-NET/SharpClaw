@@ -1,0 +1,806 @@
+#nullable enable
+const SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.HardMaximumEntries = 1024 -> int
+const SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.HardMaximumScanBytes = 67108864 -> long
+const SharpClaw.Shared.DurableStorage.DurableStorageOptions.HardMaximumPageBytes = 16777216 -> int
+const SharpClaw.Shared.DurableStorage.DurableStorageOptions.HardMaximumReadScanBytes = 67108864 -> long
+const SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.CurrentSchemaVersion = 1 -> int
+const SharpClaw.Shared.Instances.SharpClawInstanceManifest.CurrentSchemaVersion = 1 -> int
+const SharpClaw.Shared.Instances.SharpClawModuleSettings.MaximumDocumentBytes = 32768 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.CategoryBytes = 512 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.CorrelationIdBytes = 256 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.EventIdNameBytes = 256 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.EventNameBytes = 512 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.ExceptionBytes = 98304 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.ExceptionTypeBytes = 512 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.LevelBytes = 32 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.MessageBytes = 65536 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.PropertyCount = 32 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.PropertyNameBytes = 128 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.PropertyValueBytes = 4096 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.SidecarTailBytes = 65536 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.SpanIdBytes = 256 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.TemplateBytes = 8192 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.TotalRecordBytes = 196608 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.TraceIdBytes = 256 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.TrustedPropertyCount = 4 -> int
+const SharpClaw.Shared.Logging.SharpClawLogBounds.UserPropertyCount = 28 -> int
+const SharpClaw.Shared.Logging.SharpClawLoggingOptions.SectionPath = "Logging" -> string!
+const SharpClaw.Shared.Security.ApiKeyEncryptor.MinEnvelopeSize = 29 -> int
+const SharpClaw.Shared.Security.SharpClawEnvironmentDirectory.OverrideVariable = "SHARPCLAW_ENVIRONMENT_DIR" -> string!
+override SharpClaw.Shared.DurableStorage.DurableAppendReceipt.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableAppendReceipt.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableAppendReceipt.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableArtifactReference.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableArtifactReference.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableArtifactReference.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableCursor.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableCursor.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableCursor.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableReadOptions.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableReadOptions.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableReadOptions.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableRecord.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableRecord.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableRecord.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableRecordPage.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableRecordPage.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableRecordPage.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableRecordWrite.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableRecordWrite.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableRecordWrite.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableRetentionResult.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableRetentionResult.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableRetentionResult.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.ToString() -> string!
+override SharpClaw.Shared.DurableStorage.DurableStreamKey.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableStreamSummary.Equals(object? obj) -> bool
+override SharpClaw.Shared.DurableStorage.DurableStreamSummary.GetHashCode() -> int
+override SharpClaw.Shared.DurableStorage.DurableStreamSummary.ToString() -> string!
+override SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.Equals(object? obj) -> bool
+override SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.GetHashCode() -> int
+override SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.ToString() -> string!
+override SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Equals(object? obj) -> bool
+override SharpClaw.Shared.Instances.SharpClawModuleSettingsField.GetHashCode() -> int
+override SharpClaw.Shared.Instances.SharpClawModuleSettingsField.ToString() -> string!
+override SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.Equals(object? obj) -> bool
+override SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.GetHashCode() -> int
+override SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.ToString() -> string!
+override SharpClaw.Shared.Instances.SharpClawProviderModels.Equals(object? obj) -> bool
+override SharpClaw.Shared.Instances.SharpClawProviderModels.GetHashCode() -> int
+override SharpClaw.Shared.Instances.SharpClawProviderModels.ToString() -> string!
+override SharpClaw.Shared.Instances.SharpClawProviderSetup.Equals(object? obj) -> bool
+override SharpClaw.Shared.Instances.SharpClawProviderSetup.GetHashCode() -> int
+override SharpClaw.Shared.Instances.SharpClawProviderSetup.ToString() -> string!
+override SharpClaw.Shared.Instances.SharpClawProviderSetupOption.Equals(object? obj) -> bool
+override SharpClaw.Shared.Instances.SharpClawProviderSetupOption.GetHashCode() -> int
+override SharpClaw.Shared.Instances.SharpClawProviderSetupOption.ToString() -> string!
+override SharpClaw.Shared.Logging.SharpClawLoggingOptions.Equals(object? obj) -> bool
+override SharpClaw.Shared.Logging.SharpClawLoggingOptions.GetHashCode() -> int
+override SharpClaw.Shared.Logging.SharpClawLoggingOptions.ToString() -> string!
+override SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.Equals(object? obj) -> bool
+override SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.GetHashCode() -> int
+override SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.ToString() -> string!
+override SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.Equals(object? obj) -> bool
+override SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.GetHashCode() -> int
+override SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.ToString() -> string!
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableAppendReceipt!
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.Deconstruct(out long Sequence, out long RecordCount, out System.DateTimeOffset Timestamp) -> void
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.DurableAppendReceipt(long Sequence, long RecordCount, System.DateTimeOffset Timestamp) -> void
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.Equals(SharpClaw.Shared.DurableStorage.DurableAppendReceipt? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.RecordCount.get -> long
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.RecordCount.init -> void
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.Sequence.get -> long
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.Sequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.Timestamp.get -> System.DateTimeOffset
+SharpClaw.Shared.DurableStorage.DurableAppendReceipt.Timestamp.init -> void
+SharpClaw.Shared.DurableStorage.DurableArtifactReference
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableArtifactReference!
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Deconstruct(out System.Guid Id, out string! MediaType, out long Length, out string! Sha256, out string? Preview) -> void
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.DurableArtifactReference(System.Guid Id, string! MediaType, long Length, string! Sha256, string? Preview = null) -> void
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Equals(SharpClaw.Shared.DurableStorage.DurableArtifactReference? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Id.get -> System.Guid
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Id.init -> void
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Length.get -> long
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Length.init -> void
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.MediaType.get -> string!
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.MediaType.init -> void
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Preview.get -> string?
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Preview.init -> void
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Sha256.get -> string!
+SharpClaw.Shared.DurableStorage.DurableArtifactReference.Sha256.init -> void
+SharpClaw.Shared.DurableStorage.DurableCursor
+SharpClaw.Shared.DurableStorage.DurableCursor.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableCursor!
+SharpClaw.Shared.DurableStorage.DurableCursor.Deconstruct(out long NextSequence, out long SnapshotLastSequence) -> void
+SharpClaw.Shared.DurableStorage.DurableCursor.DurableCursor(long NextSequence, long SnapshotLastSequence) -> void
+SharpClaw.Shared.DurableStorage.DurableCursor.Equals(SharpClaw.Shared.DurableStorage.DurableCursor? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableCursor.NextSequence.get -> long
+SharpClaw.Shared.DurableStorage.DurableCursor.NextSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableCursor.SnapshotLastSequence.get -> long
+SharpClaw.Shared.DurableStorage.DurableCursor.SnapshotLastSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableCursorCodec
+SharpClaw.Shared.DurableStorage.DurableCursorCodec.Decode(string! cursor, SharpClaw.Shared.DurableStorage.DurableStreamKey expectedStream, string! expectedFilterFingerprint) -> SharpClaw.Shared.DurableStorage.DurableCursor!
+SharpClaw.Shared.DurableStorage.DurableCursorCodec.DurableCursorCodec(byte[]! key, SharpClaw.Shared.DurableStorage.DurableStreamPathEncoder! paths) -> void
+SharpClaw.Shared.DurableStorage.DurableCursorCodec.Encode(SharpClaw.Shared.DurableStorage.DurableStreamKey stream, long nextSequence, long snapshotLastSequence, string! filterFingerprint) -> string!
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog!
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.Deconstruct(out System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary!>! Streams, out System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap!>! IdentityGaps, out bool HasMore, out int ScannedDirectories, out long ScannedBytes) -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.DurableOperationalStreamCatalog(System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary!>! Streams, System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap!>! IdentityGaps, bool HasMore, int ScannedDirectories, long ScannedBytes) -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.Equals(SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.HasMore.get -> bool
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.HasMore.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.IdentityGaps.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap!>!
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.IdentityGaps.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.ScannedBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.ScannedBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.ScannedDirectories.get -> int
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.ScannedDirectories.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.Streams.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary!>!
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.Streams.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.DurableOperationalStreamEnumerationOptions() -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.MaxDuration.get -> System.TimeSpan
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.MaxDuration.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.MaxEntries.get -> int
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.MaxEntries.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.MaxScanBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.MaxScanBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap!
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.Deconstruct(out SharpClaw.Shared.DurableStorage.DurableStreamKind Kind, out string! StreamHash, out string! Reason) -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.DurableOperationalStreamIdentityGap(SharpClaw.Shared.DurableStorage.DurableStreamKind Kind, string! StreamHash, string! Reason) -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.Equals(SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.Kind.get -> SharpClaw.Shared.DurableStorage.DurableStreamKind
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.Kind.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.Reason.get -> string!
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.Reason.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.StreamHash.get -> string!
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.StreamHash.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary!
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.AppName.get -> string?
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.AppName.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.BootId.get -> System.Guid
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.BootId.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.Deconstruct(out SharpClaw.Shared.DurableStorage.DurableStreamKey Stream, out string? AppName, out string? SourceId, out System.Guid BootId, out bool HasActiveSegment, out bool HasSealedSegments, out long RecordCount, out long EncodedBytes, out long FirstSequence, out long? LastSequence, out long FirstAvailableSequence, out long ExpiredRecordCount, out System.DateTimeOffset? LastTimestamp) -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.DurableOperationalStreamSummary(SharpClaw.Shared.DurableStorage.DurableStreamKey Stream, string? AppName, string? SourceId, System.Guid BootId, bool HasActiveSegment, bool HasSealedSegments, long RecordCount, long EncodedBytes, long FirstSequence, long? LastSequence, long FirstAvailableSequence, long ExpiredRecordCount, System.DateTimeOffset? LastTimestamp) -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.EncodedBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.EncodedBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.Equals(SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.ExpiredRecordCount.get -> long
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.ExpiredRecordCount.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.FirstAvailableSequence.get -> long
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.FirstAvailableSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.FirstSequence.get -> long
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.FirstSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.HasActiveSegment.get -> bool
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.HasActiveSegment.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.HasSealedSegments.get -> bool
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.HasSealedSegments.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.LastSequence.get -> long?
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.LastSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.LastTimestamp.get -> System.DateTimeOffset?
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.LastTimestamp.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.RecordCount.get -> long
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.RecordCount.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.SourceId.get -> string?
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.SourceId.init -> void
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.Stream.get -> SharpClaw.Shared.DurableStorage.DurableStreamKey
+SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.Stream.init -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions
+SharpClaw.Shared.DurableStorage.DurableReadOptions.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableReadOptions!
+SharpClaw.Shared.DurableStorage.DurableReadOptions.Contains.get -> string?
+SharpClaw.Shared.DurableStorage.DurableReadOptions.Contains.init -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions.Deconstruct(out int Take, out int MaxBytes, out string? MinimumLevel, out System.DateTimeOffset? From, out System.DateTimeOffset? To, out string? Contains, out long? ThroughSequence, out long MaxScanBytes) -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions.DurableReadOptions(int Take = 200, int MaxBytes = 262144, string? MinimumLevel = null, System.DateTimeOffset? From = null, System.DateTimeOffset? To = null, string? Contains = null, long? ThroughSequence = null, long MaxScanBytes = 16777216) -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions.Equals(SharpClaw.Shared.DurableStorage.DurableReadOptions? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableReadOptions.From.get -> System.DateTimeOffset?
+SharpClaw.Shared.DurableStorage.DurableReadOptions.From.init -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions.MaxBytes.get -> int
+SharpClaw.Shared.DurableStorage.DurableReadOptions.MaxBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions.MaxScanBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableReadOptions.MaxScanBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions.MinimumLevel.get -> string?
+SharpClaw.Shared.DurableStorage.DurableReadOptions.MinimumLevel.init -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions.Take.get -> int
+SharpClaw.Shared.DurableStorage.DurableReadOptions.Take.init -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions.ThroughSequence.get -> long?
+SharpClaw.Shared.DurableStorage.DurableReadOptions.ThroughSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableReadOptions.To.get -> System.DateTimeOffset?
+SharpClaw.Shared.DurableStorage.DurableReadOptions.To.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord
+SharpClaw.Shared.DurableStorage.DurableRecord.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableRecord!
+SharpClaw.Shared.DurableStorage.DurableRecord.Artifact.get -> SharpClaw.Shared.DurableStorage.DurableArtifactReference?
+SharpClaw.Shared.DurableStorage.DurableRecord.Artifact.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.Category.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecord.Category.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.CorrelationId.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecord.CorrelationId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.Deconstruct(out long Sequence, out System.Guid RecordId, out System.DateTimeOffset Timestamp, out string! Level, out string! EventName, out string! Message, out string? ExceptionType, out string? CorrelationId, out SharpClaw.Shared.DurableStorage.DurableArtifactReference? Artifact, out string? ExceptionText, out string? MessageTemplate, out string? Category, out int? EventIdId, out string? EventIdName, out string? TraceId, out string? SpanId, out System.Collections.Generic.IReadOnlyDictionary<string!, string!>? Properties) -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.DurableRecord(long Sequence, System.Guid RecordId, System.DateTimeOffset Timestamp, string! Level, string! EventName, string! Message, string? ExceptionType, string? CorrelationId, SharpClaw.Shared.DurableStorage.DurableArtifactReference? Artifact, string? ExceptionText = null, string? MessageTemplate = null, string? Category = null, int? EventIdId = null, string? EventIdName = null, string? TraceId = null, string? SpanId = null, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? Properties = null) -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.Equals(SharpClaw.Shared.DurableStorage.DurableRecord? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableRecord.EventIdId.get -> int?
+SharpClaw.Shared.DurableStorage.DurableRecord.EventIdId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.EventIdName.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecord.EventIdName.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.EventName.get -> string!
+SharpClaw.Shared.DurableStorage.DurableRecord.EventName.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.ExceptionText.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecord.ExceptionText.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.ExceptionType.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecord.ExceptionType.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.Level.get -> string!
+SharpClaw.Shared.DurableStorage.DurableRecord.Level.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.Message.get -> string!
+SharpClaw.Shared.DurableStorage.DurableRecord.Message.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.MessageTemplate.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecord.MessageTemplate.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.Properties.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>?
+SharpClaw.Shared.DurableStorage.DurableRecord.Properties.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.RecordId.get -> System.Guid
+SharpClaw.Shared.DurableStorage.DurableRecord.RecordId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.Sequence.get -> long
+SharpClaw.Shared.DurableStorage.DurableRecord.Sequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.SpanId.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecord.SpanId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.Timestamp.get -> System.DateTimeOffset
+SharpClaw.Shared.DurableStorage.DurableRecord.Timestamp.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecord.TraceId.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecord.TraceId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordPage
+SharpClaw.Shared.DurableStorage.DurableRecordPage.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableRecordPage!
+SharpClaw.Shared.DurableStorage.DurableRecordPage.Deconstruct(out System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.DurableStorage.DurableRecord!>! Records, out long? NextSequence, out bool HasMore, out int ReturnedBytes, out long SnapshotLastSequence, out long FirstAvailableSequence, out long ExpiredRecordCount) -> void
+SharpClaw.Shared.DurableStorage.DurableRecordPage.DurableRecordPage(System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.DurableStorage.DurableRecord!>! Records, long? NextSequence, bool HasMore, int ReturnedBytes, long SnapshotLastSequence, long FirstAvailableSequence, long ExpiredRecordCount) -> void
+SharpClaw.Shared.DurableStorage.DurableRecordPage.Equals(SharpClaw.Shared.DurableStorage.DurableRecordPage? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableRecordPage.ExpiredRecordCount.get -> long
+SharpClaw.Shared.DurableStorage.DurableRecordPage.ExpiredRecordCount.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordPage.FirstAvailableSequence.get -> long
+SharpClaw.Shared.DurableStorage.DurableRecordPage.FirstAvailableSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordPage.HasMore.get -> bool
+SharpClaw.Shared.DurableStorage.DurableRecordPage.HasMore.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordPage.NextSequence.get -> long?
+SharpClaw.Shared.DurableStorage.DurableRecordPage.NextSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordPage.Records.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.DurableStorage.DurableRecord!>!
+SharpClaw.Shared.DurableStorage.DurableRecordPage.Records.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordPage.ReturnedBytes.get -> int
+SharpClaw.Shared.DurableStorage.DurableRecordPage.ReturnedBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordPage.SnapshotLastSequence.get -> long
+SharpClaw.Shared.DurableStorage.DurableRecordPage.SnapshotLastSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableRecordWrite!
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Artifact.get -> SharpClaw.Shared.DurableStorage.DurableArtifactReference?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Artifact.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Category.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Category.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.CorrelationId.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.CorrelationId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Deconstruct(out System.Guid RecordId, out System.DateTimeOffset Timestamp, out string! Level, out string! EventName, out string! Message, out string? ExceptionType, out string? CorrelationId, out SharpClaw.Shared.DurableStorage.DurableArtifactReference? Artifact, out bool Idempotent, out string? ExceptionText, out string? MessageTemplate, out string? Category, out int? EventIdId, out string? EventIdName, out string? TraceId, out string? SpanId, out System.Collections.Generic.IReadOnlyDictionary<string!, string!>? Properties) -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.DurableRecordWrite(System.Guid RecordId, System.DateTimeOffset Timestamp, string! Level, string! EventName, string! Message, string? ExceptionType = null, string? CorrelationId = null, SharpClaw.Shared.DurableStorage.DurableArtifactReference? Artifact = null, bool Idempotent = false, string? ExceptionText = null, string? MessageTemplate = null, string? Category = null, int? EventIdId = null, string? EventIdName = null, string? TraceId = null, string? SpanId = null, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? Properties = null) -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Equals(SharpClaw.Shared.DurableStorage.DurableRecordWrite? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.EventIdId.get -> int?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.EventIdId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.EventIdName.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.EventIdName.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.EventName.get -> string!
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.EventName.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.ExceptionText.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.ExceptionText.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.ExceptionType.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.ExceptionType.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Idempotent.get -> bool
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Idempotent.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Level.get -> string!
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Level.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Message.get -> string!
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Message.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.MessageTemplate.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.MessageTemplate.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Properties.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Properties.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.RecordId.get -> System.Guid
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.RecordId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.SpanId.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.SpanId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Timestamp.get -> System.DateTimeOffset
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.Timestamp.init -> void
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.TraceId.get -> string?
+SharpClaw.Shared.DurableStorage.DurableRecordWrite.TraceId.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.DurableRetentionOptions() -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.GetMaximumAge(SharpClaw.Shared.DurableStorage.DurableStreamKind kind) -> System.TimeSpan
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.JobLogAge.get -> System.TimeSpan
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.JobLogAge.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.MaximumDeletesPerRun.get -> int
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.MaximumDeletesPerRun.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.MaximumEncodedBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.MaximumEncodedBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.MinimumFreeBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.MinimumFreeBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.ProcessLogAge.get -> System.TimeSpan
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.ProcessLogAge.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.RegistrationLogAge.get -> System.TimeSpan
+SharpClaw.Shared.DurableStorage.DurableRetentionOptions.RegistrationLogAge.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionResult
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableRetentionResult!
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.AvailableFreeBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.AvailableFreeBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.CompletedAt.get -> System.DateTimeOffset
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.CompletedAt.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.Deconstruct(out int DeletedSegments, out long ReclaimedBytes, out long RemainingEncodedBytes, out long AvailableFreeBytes, out bool QuotaSatisfied, out System.DateTimeOffset CompletedAt) -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.DeletedSegments.get -> int
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.DeletedSegments.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.DurableRetentionResult(int DeletedSegments, long ReclaimedBytes, long RemainingEncodedBytes, long AvailableFreeBytes, bool QuotaSatisfied, System.DateTimeOffset CompletedAt) -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.Equals(SharpClaw.Shared.DurableStorage.DurableRetentionResult? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.QuotaSatisfied.get -> bool
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.QuotaSatisfied.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.ReclaimedBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.ReclaimedBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.RemainingEncodedBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableRetentionResult.RemainingEncodedBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableSegmentStore
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.AppendAsync(SharpClaw.Shared.DurableStorage.DurableStreamKey key, SharpClaw.Shared.DurableStorage.DurableRecordWrite! record, SharpClaw.Shared.DurableStorage.DurableWriteMode writeMode = SharpClaw.Shared.DurableStorage.DurableWriteMode.Durable, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SharpClaw.Shared.DurableStorage.DurableAppendReceipt!>
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.ApplyRetentionAsync(SharpClaw.Shared.DurableStorage.DurableRetentionOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SharpClaw.Shared.DurableStorage.DurableRetentionResult!>!
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.DurableSegmentStore(SharpClaw.Shared.DurableStorage.DurableStorageOptions! options) -> void
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.EnumerateOperationalStreamsAsync(SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog!>!
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.FindIdempotentAppendAsync(SharpClaw.Shared.DurableStorage.DurableStreamKey key, System.Guid recordId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SharpClaw.Shared.DurableStorage.DurableAppendReceipt?>
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.FlushAsync(SharpClaw.Shared.DurableStorage.DurableStreamKey key, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.GetSnapshot() -> SharpClaw.Shared.DurableStorage.DurableStorageSnapshot!
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.GetSummaryAsync(SharpClaw.Shared.DurableStorage.DurableStreamKey key, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SharpClaw.Shared.DurableStorage.DurableStreamSummary!>
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.MaxRecordBytes.get -> int
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.ReadArtifactReferencesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.HashSet<System.Guid>!>!
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.ReadAsync(SharpClaw.Shared.DurableStorage.DurableStreamKey key, long nextSequence, SharpClaw.Shared.DurableStorage.DurableReadOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SharpClaw.Shared.DurableStorage.DurableRecordPage!>
+SharpClaw.Shared.DurableStorage.DurableSegmentStore.SealAsync(SharpClaw.Shared.DurableStorage.DurableStreamKey key, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Shared.DurableStorage.DurableStorageKeyDerivation
+SharpClaw.Shared.DurableStorage.DurableStorageOptions
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.AcquireWriterLease.get -> bool
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.AcquireWriterLease.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.DurableStorageOptions() -> void
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.EncryptionKey.get -> byte[]?
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.EncryptionKey.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.MaxPageBytes.get -> int
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.MaxPageBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.MaxPageRecords.get -> int
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.MaxPageRecords.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.MaxReadScanBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.MaxReadScanBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.MaxRecordBytes.get -> int
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.MaxRecordBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.RootDirectory.get -> string!
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.RootDirectory.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.SegmentMaxAge.get -> System.TimeSpan
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.SegmentMaxAge.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.SegmentMaxBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableStorageOptions.SegmentMaxBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableStorageSnapshot!
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.ActiveStreams.get -> int
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.ActiveStreams.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.Deconstruct(out bool IsHealthy, out string? DegradedReason, out long EncodedBytes, out int ActiveStreams, out int ResidentStreams, out long SealedSegments, out System.DateTimeOffset? LastSuccessfulFlush) -> void
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.DegradedReason.get -> string?
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.DegradedReason.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.DurableStorageSnapshot(bool IsHealthy, string? DegradedReason, long EncodedBytes, int ActiveStreams, int ResidentStreams, long SealedSegments, System.DateTimeOffset? LastSuccessfulFlush) -> void
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.EncodedBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.EncodedBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.Equals(SharpClaw.Shared.DurableStorage.DurableStorageSnapshot? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.IsHealthy.get -> bool
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.IsHealthy.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.LastSuccessfulFlush.get -> System.DateTimeOffset?
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.LastSuccessfulFlush.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.ResidentStreams.get -> int
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.ResidentStreams.init -> void
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.SealedSegments.get -> long
+SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.SealedSegments.init -> void
+SharpClaw.Shared.DurableStorage.DurableStreamKey
+SharpClaw.Shared.DurableStorage.DurableStreamKey.CanonicalValue.get -> string!
+SharpClaw.Shared.DurableStorage.DurableStreamKey.DurableStreamKey() -> void
+SharpClaw.Shared.DurableStorage.DurableStreamKey.Equals(SharpClaw.Shared.DurableStorage.DurableStreamKey other) -> bool
+SharpClaw.Shared.DurableStorage.DurableStreamKey.Kind.get -> SharpClaw.Shared.DurableStorage.DurableStreamKind
+SharpClaw.Shared.DurableStorage.DurableStreamKind
+SharpClaw.Shared.DurableStorage.DurableStreamKind.JobLog = 0 -> SharpClaw.Shared.DurableStorage.DurableStreamKind
+SharpClaw.Shared.DurableStorage.DurableStreamKind.ProcessLog = 1 -> SharpClaw.Shared.DurableStorage.DurableStreamKind
+SharpClaw.Shared.DurableStorage.DurableStreamKind.RegistrationLog = 2 -> SharpClaw.Shared.DurableStorage.DurableStreamKind
+SharpClaw.Shared.DurableStorage.DurableStreamPathEncoder
+SharpClaw.Shared.DurableStorage.DurableStreamPathEncoder.DurableStreamPathEncoder(string! rootDirectory) -> void
+SharpClaw.Shared.DurableStorage.DurableStreamPathEncoder.GetStreamDirectory(SharpClaw.Shared.DurableStorage.DurableStreamKey key) -> string!
+SharpClaw.Shared.DurableStorage.DurableStreamPathEncoder.GetStreamHash(SharpClaw.Shared.DurableStorage.DurableStreamKey key) -> string!
+SharpClaw.Shared.DurableStorage.DurableStreamSummary
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.<Clone>$() -> SharpClaw.Shared.DurableStorage.DurableStreamSummary!
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.Deconstruct(out long RecordCount, out long? LastSequence, out System.DateTimeOffset? LastTimestamp, out long EncodedBytes, out long FirstAvailableSequence, out long ExpiredRecordCount) -> void
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.DurableStreamSummary(long RecordCount, long? LastSequence, System.DateTimeOffset? LastTimestamp, long EncodedBytes, long FirstAvailableSequence, long ExpiredRecordCount) -> void
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.EncodedBytes.get -> long
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.EncodedBytes.init -> void
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.Equals(SharpClaw.Shared.DurableStorage.DurableStreamSummary? other) -> bool
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.ExpiredRecordCount.get -> long
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.ExpiredRecordCount.init -> void
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.FirstAvailableSequence.get -> long
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.FirstAvailableSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.LastSequence.get -> long?
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.LastSequence.init -> void
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.LastTimestamp.get -> System.DateTimeOffset?
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.LastTimestamp.init -> void
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.RecordCount.get -> long
+SharpClaw.Shared.DurableStorage.DurableStreamSummary.RecordCount.init -> void
+SharpClaw.Shared.DurableStorage.DurableWriteMode
+SharpClaw.Shared.DurableStorage.DurableWriteMode.Buffered = 0 -> SharpClaw.Shared.DurableStorage.DurableWriteMode
+SharpClaw.Shared.DurableStorage.DurableWriteMode.Durable = 1 -> SharpClaw.Shared.DurableStorage.DurableWriteMode
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.ApiKeyFilePath.get -> string!
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.ApiKeyFilePath.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.BaseUrl.get -> string!
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.BaseUrl.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.GatewayTokenFilePath.get -> string?
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.GatewayTokenFilePath.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.InstallFingerprint.get -> string!
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.InstallFingerprint.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.InstanceId.get -> string!
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.InstanceId.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.InstanceKind.get -> SharpClaw.Shared.Instances.SharpClawInstanceKind
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.InstanceKind.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.InstanceRoot.get -> string!
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.InstanceRoot.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.LastSeenUtc.get -> System.DateTimeOffset
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.LastSeenUtc.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.ProcessId.get -> int
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.ProcessId.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.RuntimeDirectory.get -> string!
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.RuntimeDirectory.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.SchemaVersion.get -> int
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.SchemaVersion.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.SharpClawDiscoveryEntry() -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.StartedAtUtc.get -> System.DateTimeOffset
+SharpClaw.Shared.Instances.SharpClawDiscoveryEntry.StartedAtUtc.set -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryLease
+SharpClaw.Shared.Instances.SharpClawDiscoveryLease.Dispose() -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryLease.PublishNow() -> void
+SharpClaw.Shared.Instances.SharpClawDiscoveryLease.SharpClawDiscoveryLease(SharpClaw.Shared.Instances.SharpClawInstancePaths! instancePaths, string! baseUrl, System.TimeSpan refreshInterval) -> void
+SharpClaw.Shared.Instances.SharpClawInstanceKind
+SharpClaw.Shared.Instances.SharpClawInstanceKind.Backend = 0 -> SharpClaw.Shared.Instances.SharpClawInstanceKind
+SharpClaw.Shared.Instances.SharpClawInstanceKind.Frontend = 1 -> SharpClaw.Shared.Instances.SharpClawInstanceKind
+SharpClaw.Shared.Instances.SharpClawInstanceKind.Gateway = 2 -> SharpClaw.Shared.Instances.SharpClawInstanceKind
+SharpClaw.Shared.Instances.SharpClawInstanceLock
+SharpClaw.Shared.Instances.SharpClawInstanceLock.Dispose() -> void
+SharpClaw.Shared.Instances.SharpClawInstanceLock.LockFilePath.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstanceLock.SharpClawInstanceLock(SharpClaw.Shared.Instances.SharpClawInstancePaths! instancePaths) -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.BaseUrl.get -> string?
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.BaseUrl.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.CreatedAtUtc.get -> System.DateTimeOffset
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.CreatedAtUtc.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.DataDirectory.get -> string?
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.DataDirectory.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.InstallFingerprint.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.InstallFingerprint.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.InstanceId.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.InstanceId.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.InstanceKind.get -> SharpClaw.Shared.Instances.SharpClawInstanceKind
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.InstanceKind.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.InstanceRoot.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.InstanceRoot.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.LegacyImportCompletedAtUtc.get -> System.DateTimeOffset?
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.LegacyImportCompletedAtUtc.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.SchemaVersion.get -> int
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.SchemaVersion.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.SelectedBackendBaseUrl.get -> string?
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.SelectedBackendBaseUrl.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.SelectedBackendBindingKind.get -> string?
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.SelectedBackendBindingKind.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.SelectedBackendInstanceId.get -> string?
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.SelectedBackendInstanceId.set -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.SharpClawInstanceManifest() -> void
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.UpdatedAtUtc.get -> System.DateTimeOffset
+SharpClaw.Shared.Instances.SharpClawInstanceManifest.UpdatedAtUtc.set -> void
+SharpClaw.Shared.Instances.SharpClawInstancePaths
+SharpClaw.Shared.Instances.SharpClawInstancePaths.ApiKeyFilePath.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.CleanupStaleDiscoveryEntries(System.TimeSpan maxAge) -> void
+SharpClaw.Shared.Instances.SharpClawInstancePaths.ConfigDirectory.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.DataDirectory.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.DeleteDiscoveryEntry() -> void
+SharpClaw.Shared.Instances.SharpClawInstancePaths.DeleteRuntimeFiles() -> void
+SharpClaw.Shared.Instances.SharpClawInstancePaths.DiscoveryDirectory.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.DiscoveryEntryPath.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.DurableDirectory.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.EnsureDirectories() -> void
+SharpClaw.Shared.Instances.SharpClawInstancePaths.GatewayTokenFilePath.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.GetSecretFilePath(string! keyName) -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.InstallAnchor.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.InstallFingerprint.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.InstanceKind.get -> SharpClaw.Shared.Instances.SharpClawInstanceKind
+SharpClaw.Shared.Instances.SharpClawInstancePaths.InstanceRoot.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.LogsDirectory.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.Manifest.get -> SharpClaw.Shared.Instances.SharpClawInstanceManifest!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.ManifestPath.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.PublishDiscoveryEntry(string! baseUrl) -> void
+SharpClaw.Shared.Instances.SharpClawInstancePaths.PublishDiscoveryEntry(string! baseUrl, System.DateTimeOffset startedAtUtc, int processId) -> void
+SharpClaw.Shared.Instances.SharpClawInstancePaths.PublishDiscoveryEntry(string! baseUrl, System.DateTimeOffset startedAtUtc, int processId, string? gatewayTokenFilePath) -> void
+SharpClaw.Shared.Instances.SharpClawInstancePaths.RuntimeDirectory.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.SaveManifest(SharpClaw.Shared.Instances.SharpClawInstanceManifest! manifest) -> void
+SharpClaw.Shared.Instances.SharpClawInstancePaths.SecretsDirectory.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.SharedRoot.get -> string!
+SharpClaw.Shared.Instances.SharpClawInstancePaths.SharpClawInstancePaths(SharpClaw.Shared.Instances.SharpClawInstanceKind instanceKind, string? explicitInstanceRoot = null, string? sharedRootOverride = null, string? installAnchorOverride = null) -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettings
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.<Clone>$() -> SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.Deconstruct(out int SchemaVersion, out System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.Instances.SharpClawModuleSettingsField!>! Fields, out System.Collections.Generic.IReadOnlyDictionary<string!, System.Text.Json.JsonElement>! Values) -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.Equals(SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument? other) -> bool
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.Fields.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.Instances.SharpClawModuleSettingsField!>!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.Fields.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.SchemaVersion.get -> int
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.SchemaVersion.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.SharpClawModuleSettingsDocument(int SchemaVersion, System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.Instances.SharpClawModuleSettingsField!>! Fields, System.Collections.Generic.IReadOnlyDictionary<string!, System.Text.Json.JsonElement>! Values) -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.Values.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Text.Json.JsonElement>!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.Values.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.<Clone>$() -> SharpClaw.Shared.Instances.SharpClawModuleSettingsField!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Choices.get -> System.Collections.Generic.IReadOnlyList<string!>?
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Choices.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Deconstruct(out string! Key, out string! Label, out string! Kind, out bool Required, out System.Collections.Generic.IReadOnlyList<string!>? Choices) -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Equals(SharpClaw.Shared.Instances.SharpClawModuleSettingsField? other) -> bool
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Key.get -> string!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Key.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Kind.get -> string!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Kind.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Label.get -> string!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Label.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Required.get -> bool
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.Required.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsField.SharpClawModuleSettingsField(string! Key, string! Label, string! Kind, bool Required = false, System.Collections.Generic.IReadOnlyList<string!>? Choices = null) -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.<Clone>$() -> SharpClaw.Shared.Instances.SharpClawModuleSettingsPage!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.Deconstruct(out string! SourceId, out string! ModuleName, out string! Id, out string! Title, out string! ReadPath, out string! SavePath) -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.Equals(SharpClaw.Shared.Instances.SharpClawModuleSettingsPage? other) -> bool
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.Id.get -> string!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.Id.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.ModuleName.get -> string!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.ModuleName.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.ReadPath.get -> string!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.ReadPath.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.SavePath.get -> string!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.SavePath.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.SharpClawModuleSettingsPage(string! SourceId, string! ModuleName, string! Id, string! Title, string! ReadPath, string! SavePath) -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.SourceId.get -> string!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.SourceId.init -> void
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.Title.get -> string!
+SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.Title.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderModels
+SharpClaw.Shared.Instances.SharpClawProviderModels.<Clone>$() -> SharpClaw.Shared.Instances.SharpClawProviderModels!
+SharpClaw.Shared.Instances.SharpClawProviderModels.Deconstruct(out string! ProviderKey, out System.Collections.Generic.IReadOnlyList<string!>! Models) -> void
+SharpClaw.Shared.Instances.SharpClawProviderModels.Equals(SharpClaw.Shared.Instances.SharpClawProviderModels? other) -> bool
+SharpClaw.Shared.Instances.SharpClawProviderModels.Models.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SharpClaw.Shared.Instances.SharpClawProviderModels.Models.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderModels.ProviderKey.get -> string!
+SharpClaw.Shared.Instances.SharpClawProviderModels.ProviderKey.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderModels.SharpClawProviderModels(string! ProviderKey, System.Collections.Generic.IReadOnlyList<string!>! Models) -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetup
+SharpClaw.Shared.Instances.SharpClawProviderSetup.<Clone>$() -> SharpClaw.Shared.Instances.SharpClawProviderSetup!
+SharpClaw.Shared.Instances.SharpClawProviderSetup.Deconstruct(out bool SetupRequired, out string? ProviderKey, out string? Model, out System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.Instances.SharpClawProviderSetupOption!>! Providers) -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetup.Equals(SharpClaw.Shared.Instances.SharpClawProviderSetup? other) -> bool
+SharpClaw.Shared.Instances.SharpClawProviderSetup.Model.get -> string?
+SharpClaw.Shared.Instances.SharpClawProviderSetup.Model.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetup.ProviderKey.get -> string?
+SharpClaw.Shared.Instances.SharpClawProviderSetup.ProviderKey.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetup.Providers.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.Instances.SharpClawProviderSetupOption!>!
+SharpClaw.Shared.Instances.SharpClawProviderSetup.Providers.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetup.SetupRequired.get -> bool
+SharpClaw.Shared.Instances.SharpClawProviderSetup.SetupRequired.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetup.SharpClawProviderSetup(bool SetupRequired, string? ProviderKey, string? Model, System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.Instances.SharpClawProviderSetupOption!>! Providers) -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.<Clone>$() -> SharpClaw.Shared.Instances.SharpClawProviderSetupOption!
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.Deconstruct(out string! Key, out string! DisplayName, out bool RequiresApiKey, out bool RequiresEndpoint) -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.DisplayName.get -> string!
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.DisplayName.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.Equals(SharpClaw.Shared.Instances.SharpClawProviderSetupOption? other) -> bool
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.Key.get -> string!
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.Key.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.RequiresApiKey.get -> bool
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.RequiresApiKey.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.RequiresEndpoint.get -> bool
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.RequiresEndpoint.init -> void
+SharpClaw.Shared.Instances.SharpClawProviderSetupOption.SharpClawProviderSetupOption(string! Key, string! DisplayName, bool RequiresApiKey, bool RequiresEndpoint) -> void
+SharpClaw.Shared.Logging.HttpLoggingDelegatingHandler
+SharpClaw.Shared.Logging.HttpLoggingDelegatingHandler.HttpLoggingDelegatingHandler(Microsoft.Extensions.Logging.ILogger<SharpClaw.Shared.Logging.HttpLoggingDelegatingHandler!>! logger) -> void
+SharpClaw.Shared.Logging.HttpLoggingDelegatingHandler.HttpLoggingDelegatingHandler(Microsoft.Extensions.Logging.ILogger<SharpClaw.Shared.Logging.HttpLoggingDelegatingHandler!>! logger, System.Net.Http.HttpMessageHandler! innerHandler) -> void
+SharpClaw.Shared.Logging.SharpClawAppDataPaths
+SharpClaw.Shared.Logging.SharpClawBoundedTextTail
+SharpClaw.Shared.Logging.SharpClawBoundedTextTail.AppendLine(string! value) -> void
+SharpClaw.Shared.Logging.SharpClawBoundedTextTail.Clear() -> void
+SharpClaw.Shared.Logging.SharpClawBoundedTextTail.Count.get -> int
+SharpClaw.Shared.Logging.SharpClawBoundedTextTail.EncodedBytes.get -> int
+SharpClaw.Shared.Logging.SharpClawBoundedTextTail.SharpClawBoundedTextTail(int maximumBytes) -> void
+SharpClaw.Shared.Logging.SharpClawBoundedTextTail.Snapshot() -> System.Collections.Generic.IReadOnlyList<string!>!
+SharpClaw.Shared.Logging.SharpClawLogBounds
+SharpClaw.Shared.Logging.SharpClawLogDispatcher
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.Dispose() -> void
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.DroppedRecords.get -> long
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.Emit(Serilog.Events.LogEvent! logEvent) -> void
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.Failure.get -> string?
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.FlushAndSealAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.QueueDepth.get -> int
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.RecordFailure(System.Exception! exception) -> void
+SharpClaw.Shared.Logging.SharpClawLogDispatcher.SharpClawLogDispatcher(SharpClaw.Shared.DurableStorage.DurableSegmentStore! records, string! appName, System.Guid bootId, SharpClaw.Shared.Logging.SharpClawLoggingOptions! options) -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.<Clone>$() -> SharpClaw.Shared.Logging.SharpClawLoggingOptions!
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.AspNetCoreMinimumLevel.get -> Serilog.Events.LogEventLevel
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.AspNetCoreMinimumLevel.init -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.ConsoleEnabled.get -> bool
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.ConsoleEnabled.init -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.EntityFrameworkCoreMinimumLevel.get -> Serilog.Events.LogEventLevel
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.EntityFrameworkCoreMinimumLevel.init -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.Equals(SharpClaw.Shared.Logging.SharpClawLoggingOptions? other) -> bool
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.FlushInterval.get -> System.TimeSpan
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.FlushInterval.init -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.MicrosoftMinimumLevel.get -> Serilog.Events.LogEventLevel
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.MicrosoftMinimumLevel.init -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.MinimumLevel.get -> Serilog.Events.LogEventLevel
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.MinimumLevel.init -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.QueueCapacity.get -> int
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.QueueCapacity.init -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.RequestLoggingEnabled.get -> bool
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.RequestLoggingEnabled.init -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.SharpClawLoggingOptions() -> void
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.UnoMinimumLevel.get -> Serilog.Events.LogEventLevel
+SharpClaw.Shared.Logging.SharpClawLoggingOptions.UnoMinimumLevel.init -> void
+SharpClaw.Shared.Logging.SharpClawLogOwnership
+SharpClaw.Shared.Logging.SharpClawLogRuntime
+SharpClaw.Shared.Logging.SharpClawLogRuntime.AppName.get -> string!
+SharpClaw.Shared.Logging.SharpClawLogRuntime.BootId.get -> System.Guid
+SharpClaw.Shared.Logging.SharpClawLogRuntime.Dispatcher.get -> SharpClaw.Shared.Logging.SharpClawLogDispatcher!
+SharpClaw.Shared.Logging.SharpClawLogRuntime.Dispose() -> void
+SharpClaw.Shared.Logging.SharpClawLogRuntime.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SharpClaw.Shared.Logging.SharpClawLogRuntime.EnumerateOperationalStreamsAsync(SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog!>!
+SharpClaw.Shared.Logging.SharpClawLogRuntime.FlushAndSealAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SharpClaw.Shared.Logging.SharpClawLogRuntime.ProcessStream.get -> SharpClaw.Shared.DurableStorage.DurableStreamKey
+SharpClaw.Shared.Logging.SharpClawLogRuntime.RetentionFailure.get -> System.Exception?
+SharpClaw.Shared.Logging.SharpClawLogRuntime.RetentionFirstRun.get -> System.Threading.Tasks.Task?
+SharpClaw.Shared.Logging.SharpClawLogRuntime.SerilogLogger.get -> Serilog.ILogger!
+SharpClaw.Shared.Logging.SharpClawLogSink
+SharpClaw.Shared.Logging.SharpClawLogSink.Emit(Serilog.Events.LogEvent! logEvent) -> void
+SharpClaw.Shared.Logging.SharpClawLogSink.SharpClawLogSink(SharpClaw.Shared.Logging.SharpClawLogDispatcher! dispatcher) -> void
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetention
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetention.Completion.get -> System.Threading.Tasks.Task!
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetention.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetention.Failure.get -> System.Exception?
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetention.FirstRun.get -> System.Threading.Tasks.Task!
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetention.SharpClawOwnedStoreRetention(SharpClaw.Shared.DurableStorage.DurableSegmentStore! records, SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions? options = null) -> void
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.<Clone>$() -> SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions!
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.Equals(SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions? other) -> bool
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.Interval.get -> System.TimeSpan
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.Interval.init -> void
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.Retention.get -> SharpClaw.Shared.DurableStorage.DurableRetentionOptions!
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.Retention.init -> void
+SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.SharpClawOwnedStoreRetentionOptions() -> void
+SharpClaw.Shared.Logging.SharpClawRegistrationHostKind
+SharpClaw.Shared.Logging.SharpClawRegistrationHostKind.Gateway = 2 -> SharpClaw.Shared.Logging.SharpClawRegistrationHostKind
+SharpClaw.Shared.Logging.SharpClawRegistrationHostKind.RuntimeInProcess = 0 -> SharpClaw.Shared.Logging.SharpClawRegistrationHostKind
+SharpClaw.Shared.Logging.SharpClawRegistrationHostKind.RuntimeSidecar = 1 -> SharpClaw.Shared.Logging.SharpClawRegistrationHostKind
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.<Clone>$() -> SharpClaw.Shared.Logging.SharpClawRegistrationLogContext!
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.BootId.get -> System.Guid
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.BootId.init -> void
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.Deconstruct(out string! SourceId, out string? RegistrationVersion, out SharpClaw.Shared.Logging.SharpClawRegistrationHostKind HostKind, out System.Guid BootId) -> void
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.Equals(SharpClaw.Shared.Logging.SharpClawRegistrationLogContext? other) -> bool
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.HostKind.get -> SharpClaw.Shared.Logging.SharpClawRegistrationHostKind
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.HostKind.init -> void
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.RegistrationVersion.get -> string?
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.RegistrationVersion.init -> void
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.SharpClawRegistrationLogContext(string! SourceId, string? RegistrationVersion, SharpClaw.Shared.Logging.SharpClawRegistrationHostKind HostKind, System.Guid BootId) -> void
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.SourceId.get -> string!
+SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.SourceId.init -> void
+SharpClaw.Shared.Logging.SharpClawRegistrationLoggerFactory
+SharpClaw.Shared.Logging.SharpClawRegistrationLoggerFactory.AddProvider(Microsoft.Extensions.Logging.ILoggerProvider! provider) -> void
+SharpClaw.Shared.Logging.SharpClawRegistrationLoggerFactory.CreateLogger(string! categoryName) -> Microsoft.Extensions.Logging.ILogger!
+SharpClaw.Shared.Logging.SharpClawRegistrationLoggerFactory.Dispose() -> void
+SharpClaw.Shared.Logging.SharpClawRegistrationLoggerFactory.SharpClawRegistrationLoggerFactory(Microsoft.Extensions.Logging.ILoggerFactory! hostFactory, SharpClaw.Shared.Logging.SharpClawRegistrationLogContext! context) -> void
+SharpClaw.Shared.Security.ApiKeyEncryptor
+SharpClaw.Shared.Security.EncryptionKeyResolver
+SharpClaw.Shared.Security.PasswordHelper
+SharpClaw.Shared.Security.PathGuard
+SharpClaw.Shared.Security.PersistentKeyStore
+SharpClaw.Shared.Security.SharpClawEnvironmentDirectory
+SharpClaw.Shared.Security.SharpClawInstallationKeyStore
+SharpClaw.Shared.Security.SharpClawInstallationKeyStore.GetOrCreateKeyAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<byte[]!>!
+SharpClaw.Shared.Security.SharpClawInstallationKeyStore.ReadExistingKeyAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<byte[]!>!
+SharpClaw.Shared.Security.SharpClawInstallationKeyStore.SharpClawInstallationKeyStore(string! path) -> void
+static readonly SharpClaw.Shared.DurableStorage.DurableOperationalStreamEnumerationOptions.HardMaximumDuration -> System.TimeSpan
+static SharpClaw.Shared.DurableStorage.DurableAppendReceipt.operator !=(SharpClaw.Shared.DurableStorage.DurableAppendReceipt? left, SharpClaw.Shared.DurableStorage.DurableAppendReceipt? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableAppendReceipt.operator ==(SharpClaw.Shared.DurableStorage.DurableAppendReceipt? left, SharpClaw.Shared.DurableStorage.DurableAppendReceipt? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableArtifactReference.operator !=(SharpClaw.Shared.DurableStorage.DurableArtifactReference? left, SharpClaw.Shared.DurableStorage.DurableArtifactReference? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableArtifactReference.operator ==(SharpClaw.Shared.DurableStorage.DurableArtifactReference? left, SharpClaw.Shared.DurableStorage.DurableArtifactReference? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableCursor.operator !=(SharpClaw.Shared.DurableStorage.DurableCursor? left, SharpClaw.Shared.DurableStorage.DurableCursor? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableCursor.operator ==(SharpClaw.Shared.DurableStorage.DurableCursor? left, SharpClaw.Shared.DurableStorage.DurableCursor? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.operator !=(SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog? left, SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog.operator ==(SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog? left, SharpClaw.Shared.DurableStorage.DurableOperationalStreamCatalog? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.operator !=(SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap? left, SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap.operator ==(SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap? left, SharpClaw.Shared.DurableStorage.DurableOperationalStreamIdentityGap? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.operator !=(SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary? left, SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary.operator ==(SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary? left, SharpClaw.Shared.DurableStorage.DurableOperationalStreamSummary? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableReadOptions.operator !=(SharpClaw.Shared.DurableStorage.DurableReadOptions? left, SharpClaw.Shared.DurableStorage.DurableReadOptions? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableReadOptions.operator ==(SharpClaw.Shared.DurableStorage.DurableReadOptions? left, SharpClaw.Shared.DurableStorage.DurableReadOptions? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableRecord.operator !=(SharpClaw.Shared.DurableStorage.DurableRecord? left, SharpClaw.Shared.DurableStorage.DurableRecord? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableRecord.operator ==(SharpClaw.Shared.DurableStorage.DurableRecord? left, SharpClaw.Shared.DurableStorage.DurableRecord? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableRecordPage.operator !=(SharpClaw.Shared.DurableStorage.DurableRecordPage? left, SharpClaw.Shared.DurableStorage.DurableRecordPage? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableRecordPage.operator ==(SharpClaw.Shared.DurableStorage.DurableRecordPage? left, SharpClaw.Shared.DurableStorage.DurableRecordPage? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableRecordWrite.operator !=(SharpClaw.Shared.DurableStorage.DurableRecordWrite? left, SharpClaw.Shared.DurableStorage.DurableRecordWrite? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableRecordWrite.operator ==(SharpClaw.Shared.DurableStorage.DurableRecordWrite? left, SharpClaw.Shared.DurableStorage.DurableRecordWrite? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableRetentionResult.operator !=(SharpClaw.Shared.DurableStorage.DurableRetentionResult? left, SharpClaw.Shared.DurableStorage.DurableRetentionResult? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableRetentionResult.operator ==(SharpClaw.Shared.DurableStorage.DurableRetentionResult? left, SharpClaw.Shared.DurableStorage.DurableRetentionResult? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableSegmentStore.MeasureEncodedRecordBody(SharpClaw.Shared.DurableStorage.DurableRecordWrite! record) -> int
+static SharpClaw.Shared.DurableStorage.DurableStorageKeyDerivation.Derive(byte[]! rootKey, string! purpose) -> byte[]!
+static SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.operator !=(SharpClaw.Shared.DurableStorage.DurableStorageSnapshot? left, SharpClaw.Shared.DurableStorage.DurableStorageSnapshot? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableStorageSnapshot.operator ==(SharpClaw.Shared.DurableStorage.DurableStorageSnapshot? left, SharpClaw.Shared.DurableStorage.DurableStorageSnapshot? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableStreamKey.Job(System.Guid jobId) -> SharpClaw.Shared.DurableStorage.DurableStreamKey
+static SharpClaw.Shared.DurableStorage.DurableStreamKey.operator !=(SharpClaw.Shared.DurableStorage.DurableStreamKey left, SharpClaw.Shared.DurableStorage.DurableStreamKey right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableStreamKey.operator ==(SharpClaw.Shared.DurableStorage.DurableStreamKey left, SharpClaw.Shared.DurableStorage.DurableStreamKey right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableStreamKey.Process(string! appName, System.Guid bootId) -> SharpClaw.Shared.DurableStorage.DurableStreamKey
+static SharpClaw.Shared.DurableStorage.DurableStreamKey.Registration(string! sourceId, System.Guid bootId) -> SharpClaw.Shared.DurableStorage.DurableStreamKey
+static SharpClaw.Shared.DurableStorage.DurableStreamKey.TryParseOperational(string? canonicalValue, out SharpClaw.Shared.DurableStorage.DurableStreamKey key, out string? appName, out string? SourceId, out System.Guid bootId) -> bool
+static SharpClaw.Shared.DurableStorage.DurableStreamSummary.operator !=(SharpClaw.Shared.DurableStorage.DurableStreamSummary? left, SharpClaw.Shared.DurableStorage.DurableStreamSummary? right) -> bool
+static SharpClaw.Shared.DurableStorage.DurableStreamSummary.operator ==(SharpClaw.Shared.DurableStorage.DurableStreamSummary? left, SharpClaw.Shared.DurableStorage.DurableStreamSummary? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawModuleSettings.IsEndpointPath(string? value) -> bool
+static SharpClaw.Shared.Instances.SharpClawModuleSettings.IsIdentifier(string? value) -> bool
+static SharpClaw.Shared.Instances.SharpClawModuleSettings.IsLabel(string? value) -> bool
+static SharpClaw.Shared.Instances.SharpClawModuleSettings.ReadDocument(string! json) -> SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument!
+static SharpClaw.Shared.Instances.SharpClawModuleSettings.ReadManifest(string! json, string! sourceId, string! moduleName) -> System.Collections.Generic.IReadOnlyList<SharpClaw.Shared.Instances.SharpClawModuleSettingsPage!>!
+static SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.operator !=(SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument? left, SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument.operator ==(SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument? left, SharpClaw.Shared.Instances.SharpClawModuleSettingsDocument? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawModuleSettingsField.operator !=(SharpClaw.Shared.Instances.SharpClawModuleSettingsField? left, SharpClaw.Shared.Instances.SharpClawModuleSettingsField? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawModuleSettingsField.operator ==(SharpClaw.Shared.Instances.SharpClawModuleSettingsField? left, SharpClaw.Shared.Instances.SharpClawModuleSettingsField? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.operator !=(SharpClaw.Shared.Instances.SharpClawModuleSettingsPage? left, SharpClaw.Shared.Instances.SharpClawModuleSettingsPage? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawModuleSettingsPage.operator ==(SharpClaw.Shared.Instances.SharpClawModuleSettingsPage? left, SharpClaw.Shared.Instances.SharpClawModuleSettingsPage? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawProviderModels.operator !=(SharpClaw.Shared.Instances.SharpClawProviderModels? left, SharpClaw.Shared.Instances.SharpClawProviderModels? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawProviderModels.operator ==(SharpClaw.Shared.Instances.SharpClawProviderModels? left, SharpClaw.Shared.Instances.SharpClawProviderModels? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawProviderSetup.operator !=(SharpClaw.Shared.Instances.SharpClawProviderSetup? left, SharpClaw.Shared.Instances.SharpClawProviderSetup? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawProviderSetup.operator ==(SharpClaw.Shared.Instances.SharpClawProviderSetup? left, SharpClaw.Shared.Instances.SharpClawProviderSetup? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawProviderSetupOption.operator !=(SharpClaw.Shared.Instances.SharpClawProviderSetupOption? left, SharpClaw.Shared.Instances.SharpClawProviderSetupOption? right) -> bool
+static SharpClaw.Shared.Instances.SharpClawProviderSetupOption.operator ==(SharpClaw.Shared.Instances.SharpClawProviderSetupOption? left, SharpClaw.Shared.Instances.SharpClawProviderSetupOption? right) -> bool
+static SharpClaw.Shared.Logging.SharpClawAppDataPaths.GetAppLogDirectory(string! appName) -> string!
+static SharpClaw.Shared.Logging.SharpClawAppDataPaths.GetLogsRootDirectory() -> string!
+static SharpClaw.Shared.Logging.SharpClawAppDataPaths.GetSharpClawRootDirectory() -> string!
+static SharpClaw.Shared.Logging.SharpClawLogBounds.TruncateUtf8(string! value, int maximumBytes, out int originalBytes) -> string!
+static SharpClaw.Shared.Logging.SharpClawLoggingOptions.FromConfiguration(Microsoft.Extensions.Configuration.IConfiguration! configuration) -> SharpClaw.Shared.Logging.SharpClawLoggingOptions!
+static SharpClaw.Shared.Logging.SharpClawLoggingOptions.operator !=(SharpClaw.Shared.Logging.SharpClawLoggingOptions? left, SharpClaw.Shared.Logging.SharpClawLoggingOptions? right) -> bool
+static SharpClaw.Shared.Logging.SharpClawLoggingOptions.operator ==(SharpClaw.Shared.Logging.SharpClawLoggingOptions? left, SharpClaw.Shared.Logging.SharpClawLoggingOptions? right) -> bool
+static SharpClaw.Shared.Logging.SharpClawLogOwnership.Current.get -> SharpClaw.Shared.Logging.SharpClawRegistrationLogContext?
+static SharpClaw.Shared.Logging.SharpClawLogOwnership.Push(SharpClaw.Shared.Logging.SharpClawRegistrationLogContext! context) -> System.IDisposable!
+static SharpClaw.Shared.Logging.SharpClawLogRuntime.Create(string! appName, SharpClaw.Shared.DurableStorage.DurableSegmentStore! records, SharpClaw.Shared.Logging.SharpClawLoggingOptions! options, System.Guid? bootId = null, SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions? retentionOptions = null) -> SharpClaw.Shared.Logging.SharpClawLogRuntime!
+static SharpClaw.Shared.Logging.SharpClawLogRuntime.Create(string! appName, SharpClaw.Shared.Instances.SharpClawInstancePaths! paths, SharpClaw.Shared.Logging.SharpClawLoggingOptions! options, System.Guid? bootId = null, SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions? retentionOptions = null) -> SharpClaw.Shared.Logging.SharpClawLogRuntime!
+static SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.operator !=(SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions? left, SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions? right) -> bool
+static SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions.operator ==(SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions? left, SharpClaw.Shared.Logging.SharpClawOwnedStoreRetentionOptions? right) -> bool
+static SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.operator !=(SharpClaw.Shared.Logging.SharpClawRegistrationLogContext? left, SharpClaw.Shared.Logging.SharpClawRegistrationLogContext? right) -> bool
+static SharpClaw.Shared.Logging.SharpClawRegistrationLogContext.operator ==(SharpClaw.Shared.Logging.SharpClawRegistrationLogContext? left, SharpClaw.Shared.Logging.SharpClawRegistrationLogContext? right) -> bool
+static SharpClaw.Shared.Security.ApiKeyEncryptor.Decrypt(string! encryptedText, byte[]! key) -> string!
+static SharpClaw.Shared.Security.ApiKeyEncryptor.DecryptBytes(System.ReadOnlySpan<byte> envelope, byte[]! key) -> byte[]!
+static SharpClaw.Shared.Security.ApiKeyEncryptor.DecryptOrPassthrough(string! storedValue, byte[]! key) -> string!
+static SharpClaw.Shared.Security.ApiKeyEncryptor.Encrypt(string! plainText, byte[]! key) -> string!
+static SharpClaw.Shared.Security.ApiKeyEncryptor.EncryptBytes(System.ReadOnlySpan<byte> plaintext, byte[]! key) -> byte[]!
+static SharpClaw.Shared.Security.ApiKeyEncryptor.GenerateKey() -> byte[]!
+static SharpClaw.Shared.Security.EncryptionKeyResolver.ResolveKey(SharpClaw.Shared.Instances.SharpClawInstancePaths? instancePaths = null) -> byte[]?
+static SharpClaw.Shared.Security.PasswordHelper.GenerateSalt() -> byte[]!
+static SharpClaw.Shared.Security.PasswordHelper.Hash(string! password, byte[]! salt) -> byte[]!
+static SharpClaw.Shared.Security.PasswordHelper.Verify(string! password, byte[]! hash, byte[]! salt) -> bool
+static SharpClaw.Shared.Security.PathGuard.EnsureAbsolutePath(string! path, string! paramName = "path") -> string!
+static SharpClaw.Shared.Security.PathGuard.EnsureContainedIn(string! combined, string! parentDir) -> string!
+static SharpClaw.Shared.Security.PathGuard.EnsureExtension(string! path, params System.ReadOnlySpan<string!> allowed) -> string!
+static SharpClaw.Shared.Security.PathGuard.EnsureFileName(string! name, string! paramName = "name") -> string!
+static SharpClaw.Shared.Security.PathGuard.SanitizeForLog(string! value) -> string!
+static SharpClaw.Shared.Security.PersistentKeyStore.GetOrCreate(string! keyName) -> string!
+static SharpClaw.Shared.Security.PersistentKeyStore.GetOrCreate(string! keyName, SharpClaw.Shared.Instances.SharpClawInstancePaths! instancePaths) -> string!
+static SharpClaw.Shared.Security.SharpClawEnvironmentDirectory.Prepare(string! templateDirectory, string! writableDirectory) -> string!
+static SharpClaw.Shared.Security.SharpClawEnvironmentDirectory.Resolve(string! assemblyDirectory) -> string!
+static SharpClaw.Shared.Security.SharpClawInstallationKeyStore.GetConfiguredKeyBase64OrNull() -> string?
+~override SharpClaw.Shared.DurableStorage.DurableStreamKey.Equals(object obj) -> bool
+~override SharpClaw.Shared.DurableStorage.DurableStreamKey.ToString() -> string

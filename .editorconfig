@@ -72,6 +72,16 @@ indent_size = 2
 end_of_line = lf
 
 [*.cs]
+# Correctness-sensitive specialist suggestions participate in the build gate.
+dotnet_analyzer_diagnostic.category-Security.severity = warning
+dotnet_analyzer_diagnostic.category-Reliability.severity = warning
+dotnet_analyzer_diagnostic.category-Usage.severity = warning
+dotnet_analyzer_diagnostic.category-Performance.severity = warning
+dotnet_analyzer_diagnostic.category-Threading.severity = warning
+dotnet_diagnostic.VSTHRD111.severity = warning
+dotnet_diagnostic.RS0030.severity = warning
+dotnet_diagnostic.RS0041.severity = warning
+
 # EOL should be normalized by Git. See https://github.com/dotnet/format/issues/1099
 end_of_line = unset
 

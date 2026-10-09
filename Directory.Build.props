@@ -2,6 +2,16 @@
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AnalysisLevel>latest-all</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Build-only tooling: central and project-local package policies use the same pins. -->
+    <SharpClawMeziantouAnalyzerVersion>3.0.296</SharpClawMeziantouAnalyzerVersion>
+    <SharpClawRoslynatorAnalyzersVersion>5.0.1</SharpClawRoslynatorAnalyzersVersion>
+    <SharpClawThreadingAnalyzersVersion>18.7.23</SharpClawThreadingAnalyzersVersion>
+    <SharpClawBannedApiAnalyzersVersion>5.6.0</SharpClawBannedApiAnalyzersVersion>
+    <SharpClawPublicApiAnalyzersVersion>5.6.0</SharpClawPublicApiAnalyzersVersion>
+    <SharpClawNUnitAnalyzersVersion>4.15.0</SharpClawNUnitAnalyzersVersion>
+    <SharpClawHyperlinqAnalyzerVersion>2.3.0</SharpClawHyperlinqAnalyzerVersion>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
     <Version>0.5.0-preview.1</Version>

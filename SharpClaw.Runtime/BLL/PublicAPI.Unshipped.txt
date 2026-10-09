@@ -1,0 +1,225 @@
+#nullable enable
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.Equals(object? obj) -> bool
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.GetHashCode() -> int
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.ToString() -> string!
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.Equals(object? obj) -> bool
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.GetHashCode() -> int
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.ToString() -> string!
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.Equals(object? obj) -> bool
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.GetHashCode() -> int
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.ToString() -> string!
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.Equals(object? obj) -> bool
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.GetHashCode() -> int
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.ToString() -> string!
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.Equals(object? obj) -> bool
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.GetHashCode() -> int
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.ToString() -> string!
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.Equals(object? obj) -> bool
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.GetHashCode() -> int
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.ToString() -> string!
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.Equals(object? obj) -> bool
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.GetHashCode() -> int
+override SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.ToString() -> string!
+override SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.Equals(object? obj) -> bool
+override SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.GetHashCode() -> int
+override SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.ToString() -> string!
+SharpClaw.Runtime.BLL.Kernel.DirectChatKernel
+SharpClaw.Runtime.BLL.Kernel.DirectChatKernel.RunAsync(SharpClaw.Contracts.Kernel.ChatTurnInput! input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SharpClaw.Contracts.Kernel.ChatTurnResult!>
+SharpClaw.Runtime.BLL.Kernel.DirectChatKernel.StreamAsync(SharpClaw.Contracts.Kernel.ChatTurnInput! input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<SharpClaw.Contracts.Providers.ChatStreamChunk!>!
+SharpClaw.Runtime.BLL.Kernel.FixedChatProfileResolver
+SharpClaw.Runtime.BLL.Kernel.FixedChatProfileResolver.FixedChatProfileResolver(SharpClaw.Contracts.Kernel.ChatProfile! profile) -> void
+SharpClaw.Runtime.BLL.Kernel.FixedChatProfileResolver.ResolveAsync(SharpClaw.Contracts.Kernel.ChatTurnContext! turn, SharpClaw.Contracts.Kernel.ChatOperationContext! context, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<SharpClaw.Contracts.Kernel.ChatProfile!>
+SharpClaw.Runtime.BLL.Kernel.InMemoryConversationStore
+SharpClaw.Runtime.BLL.Kernel.InMemoryConversationStore.CommitExchangeAsync(SharpClaw.Contracts.Kernel.ChatExchange! exchange, SharpClaw.Contracts.Kernel.ChatOperationContext! context, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.InMemoryConversationStore.InMemoryConversationStore() -> void
+SharpClaw.Runtime.BLL.Kernel.InMemoryConversationStore.LoadHistoryAsync(System.Guid conversationId, SharpClaw.Contracts.Kernel.ChatOperationContext! context, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<SharpClaw.Contracts.Providers.ChatCompletionMessage!>!>
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventActionBoundary
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventActionBoundary.RunEventActionAsync<TResult>(SharpClaw.Contracts.Kernel.SharpClawActionKey actionKey, SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation! invocation, System.Func<SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TResult>>! terminal, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<TResult>
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventActionBoundaryAccessor
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventActionBoundaryAccessor.GetRequiredBoundary() -> SharpClaw.Runtime.BLL.Kernel.IRuntimeEventActionBoundary!
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxService
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxService.AcknowledgeAsync(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord! record, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxService.CancelAsync(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord! record, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxService.FailAsync(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord! record, string! error, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxService.ReadPendingAsync(int limit, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord!>!>
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxStore
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxStore.AcknowledgeAsync(string! recordKey, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxStore.CancelAsync(string! recordKey, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxStore.EnqueueAsync(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage! message, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxStore.FailAsync(string! recordKey, string! error, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventOutboxStore.ReadPendingAsync(int limit, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord!>!>
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventPublisher
+SharpClaw.Runtime.BLL.Kernel.IRuntimeEventPublisher.PublishAsync(SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload! payload, SharpClaw.Contracts.Kernel.EventDelivery delivery = SharpClaw.Contracts.Kernel.EventDelivery.Inline, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult!>
+SharpClaw.Runtime.BLL.Kernel.IRuntimeProviderClientFactory
+SharpClaw.Runtime.BLL.Kernel.IRuntimeProviderClientFactory.Create(Microsoft.Extensions.Configuration.IConfiguration! configuration, System.Collections.Generic.IReadOnlyList<SharpClaw.Contracts.Providers.IProviderPlugin!>! plugins, string! providerKey) -> SharpClaw.Contracts.Providers.IProviderApiClient!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionBoundaryAccessor
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionBoundaryAccessor.GetRequiredBoundary() -> SharpClaw.Runtime.BLL.Kernel.IRuntimeEventActionBoundary!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionBoundaryAccessor.RuntimeEventActionBoundaryAccessor(System.IServiceProvider! services) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.<Clone>$() -> SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.Deconstruct(out SharpClaw.Contracts.Kernel.SharpClawEventKey EventKey, out System.Guid EventId, out SharpClaw.Contracts.Kernel.EventDelivery Delivery, out string! Phase, out object? Payload) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.Delivery.get -> SharpClaw.Contracts.Kernel.EventDelivery
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.Delivery.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.Equals(SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation? other) -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.EventId.get -> System.Guid
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.EventId.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.EventKey.get -> SharpClaw.Contracts.Kernel.SharpClawEventKey
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.EventKey.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.Payload.get -> object?
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.Payload.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.Phase.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.Phase.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.RuntimeEventActionInvocation(SharpClaw.Contracts.Kernel.SharpClawEventKey EventKey, System.Guid EventId, SharpClaw.Contracts.Kernel.EventDelivery Delivery, string! Phase, object? Payload) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionManifest
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventDeliverySink
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventDeliverySink.EnqueueAsync(SharpClaw.Contracts.Kernel.SharpClawEventKey eventKey, object! envelope, SharpClaw.Contracts.Kernel.EventDelivery delivery, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventDeliverySink.EnqueueAsync(SharpClaw.Contracts.Kernel.SharpClawEventKey eventKey, object! envelope, SharpClaw.Contracts.Kernel.EventDelivery delivery, System.Threading.CancellationToken cancellationToken, string! targetListenerId) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventDeliverySink.RuntimeEventDeliverySink(Microsoft.Extensions.DependencyInjection.IServiceScopeFactory! scopeFactory) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventDeliverySink.SupportsDurable.get -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.<Clone>$() -> SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.Code.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.Code.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.Deconstruct(out string! Phase, out string! Code, out bool IsCancellation) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.Equals(SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure? other) -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.IsCancellation.get -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.IsCancellation.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.Phase.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.Phase.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.RuntimeEventFailure(string! Phase, string! Code, bool IsCancellation) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.<Clone>$() -> SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.Deconstruct(out System.Guid EventId, out SharpClaw.Contracts.Kernel.SharpClawEventKey EventKey, out object! Envelope, out SharpClaw.Contracts.Kernel.EventDelivery Delivery, out string! TargetListenerId) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.Delivery.get -> SharpClaw.Contracts.Kernel.EventDelivery
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.Delivery.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.Envelope.get -> object!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.Envelope.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.Equals(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage? other) -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.EventId.get -> System.Guid
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.EventId.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.EventKey.get -> SharpClaw.Contracts.Kernel.SharpClawEventKey
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.EventKey.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.RuntimeEventOutboxMessage(System.Guid EventId, SharpClaw.Contracts.Kernel.SharpClawEventKey EventKey, object! Envelope, SharpClaw.Contracts.Kernel.EventDelivery Delivery, string! TargetListenerId) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.TargetListenerId.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.TargetListenerId.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.<Clone>$() -> SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.Attempts.get -> int
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.Attempts.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.CreatedAt.get -> System.DateTimeOffset
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.CreatedAt.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.Deconstruct(out string! RecordKey, out System.Guid EventId, out SharpClaw.Contracts.Kernel.SharpClawEventKey EventKey, out string! EnvelopeJson, out SharpClaw.Contracts.Kernel.EventDelivery Delivery, out string! TargetListenerId, out string! State, out int Attempts, out string? LastError, out System.DateTimeOffset CreatedAt, out System.DateTimeOffset UpdatedAt) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.Delivery.get -> SharpClaw.Contracts.Kernel.EventDelivery
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.Delivery.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.EnvelopeJson.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.EnvelopeJson.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.Equals(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord? other) -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.EventId.get -> System.Guid
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.EventId.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.EventKey.get -> SharpClaw.Contracts.Kernel.SharpClawEventKey
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.EventKey.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.LastError.get -> string?
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.LastError.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.RecordKey.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.RecordKey.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.RuntimeEventOutboxRecord(string! RecordKey, System.Guid EventId, SharpClaw.Contracts.Kernel.SharpClawEventKey EventKey, string! EnvelopeJson, SharpClaw.Contracts.Kernel.EventDelivery Delivery, string! TargetListenerId, string! State, int Attempts, string? LastError, System.DateTimeOffset CreatedAt, System.DateTimeOffset UpdatedAt) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.State.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.State.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.TargetListenerId.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.TargetListenerId.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.UpdatedAt.get -> System.DateTimeOffset
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.UpdatedAt.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.<Clone>$() -> SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.Deconstruct(out string! RecordKey, out string? Error, out bool IsCancellation) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.Equals(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition? other) -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.Error.get -> string?
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.Error.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.IsCancellation.get -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.IsCancellation.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.RecordKey.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.RecordKey.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.RuntimeEventOutboxTransition(string! RecordKey, string? Error, bool IsCancellation) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.<Clone>$() -> SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.DataJson.get -> string?
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.DataJson.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.Deconstruct(out string! Name, out string! SourceId, out string! Summary, out string? DataJson) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.Equals(SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload? other) -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.Name.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.Name.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.RuntimeEventPayload(string! Name, string! SourceId, string! Summary, string? DataJson = null) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.SourceId.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.SourceId.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.Summary.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.Summary.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.Validate() -> SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.<Clone>$() -> SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.Deconstruct(out System.Guid EventId, out SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload! Payload, out SharpClaw.Contracts.Kernel.EventDelivery Delivery) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.Delivery.get -> SharpClaw.Contracts.Kernel.EventDelivery
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.Delivery.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.Equals(SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult? other) -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.EventId.get -> System.Guid
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.EventId.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.Payload.get -> SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload!
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.Payload.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.RuntimeEventPublishResult(System.Guid EventId, SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload! Payload, SharpClaw.Contracts.Kernel.EventDelivery Delivery) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.ActionDispatcher.get -> SharpClaw.Contracts.Kernel.IActionDispatcher!
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.Graph.get -> SharpClaw.Core.Kernel.KernelGraph!
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.Kernel.get -> SharpClaw.Runtime.BLL.Kernel.DirectChatKernel!
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.PublishAsync(SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload! payload, SharpClaw.Contracts.Kernel.EventDelivery delivery = SharpClaw.Contracts.Kernel.EventDelivery.Inline, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult!>
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.RunEventActionAsync<TResult>(SharpClaw.Contracts.Kernel.SharpClawActionKey actionKey, SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation! invocation, System.Func<SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TResult>>! terminal, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<TResult>
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.RunRuntimeLifecycleActionAsync(SharpClaw.Contracts.Kernel.SharpClawActionKey actionKey, object? payload, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>! terminal, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.RunSecurityDecisionAsync(SharpClaw.Core.Kernel.KernelActionExecutionContext! executionContext, SharpClaw.Contracts.Kernel.SharpClawActionKey actionKey, SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation! invocation, System.Func<SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>! baseDecision, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.RuntimeKernelAdapter(Microsoft.Extensions.Configuration.IConfiguration! configuration, System.IServiceProvider! hostServices, SharpClaw.Core.Kernel.KernelJobsBindings! jobsBindings, System.Collections.Generic.IEnumerable<SharpClaw.Contracts.Kernel.IServiceLifecycle!>! lifecycleServices, SharpClaw.Shared.Instances.SharpClawInstancePaths! instancePaths, SharpClaw.Runtime.BLL.Kernel.IRuntimeProviderClientFactory! providerClientFactory, SharpClaw.Core.Kernel.KernelGraphCompileOptions? graphCompileOptions = null, SharpClaw.Core.Kernel.IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null, SharpClaw.Core.Kernel.IKernelEventDeliverySink? eventDeliverySink = null, SharpClaw.Core.Kernel.KernelExternalAuthoritySessionRegistry? externalAuthorityRegistry = null) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.StartAsync(string! hostVersion, SharpClaw.Contracts.Kernel.RequestPrincipal? caller = null, SharpClaw.Contracts.Kernel.ExtensionFeatureSet? features = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.RuntimeKernelAdapter.StopAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>? onPrepare = null, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>? onComplete = null) -> System.Threading.Tasks.ValueTask
+SharpClaw.Runtime.BLL.Kernel.RuntimePersistenceActionManifest
+SharpClaw.Runtime.BLL.Kernel.RuntimeProviderActionManifest
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.<Clone>$() -> SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation!
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.Deconstruct(out string! Operation, out string! Resource) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.Equals(SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation? other) -> bool
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.Operation.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.Operation.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.Resource.get -> string!
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.Resource.init -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.RuntimeSecurityActionInvocation(string! Operation, string! Resource) -> void
+SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionManifest
+SharpClaw.Runtime.BLL.Kernel.RuntimeStartupActionDefinitions
+SharpClaw.Runtime.BLL.Kernel.RuntimeToolActionManifest
+SharpClaw.Runtime.BLL.Kernel.RuntimeTransactionActionManifest
+SharpClaw.Runtime.BLL.Kernel.SingleConversationResolver
+SharpClaw.Runtime.BLL.Kernel.SingleConversationResolver.ResolveAsync(SharpClaw.Contracts.Kernel.ChatTurnInput! input, SharpClaw.Contracts.Kernel.ChatOperationContext! context, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<SharpClaw.Contracts.Kernel.ConversationSelection!>
+SharpClaw.Runtime.BLL.Kernel.SingleConversationResolver.SingleConversationResolver(System.Guid conversationId) -> void
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.operator !=(SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation.operator ==(SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionInvocation? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionManifest.Contains(SharpClaw.Contracts.Kernel.SharpClawActionKey key) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventActionManifest.Required.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Contracts.Kernel.SharpClawActionKey>!
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.operator !=(SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure.operator ==(SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventFailure? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.operator !=(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage.operator ==(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxMessage? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.operator !=(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord.operator ==(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxRecord? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.operator !=(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition.operator ==(SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventOutboxTransition? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.operator !=(SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload.operator ==(SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventPayload? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.operator !=(SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult.operator ==(SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult? left, SharpClaw.Runtime.BLL.Kernel.RuntimeEventPublishResult? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimePersistenceActionManifest.Contains(SharpClaw.Contracts.Kernel.SharpClawActionKey key) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimePersistenceActionManifest.Required.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Contracts.Kernel.SharpClawActionKey>!
+static SharpClaw.Runtime.BLL.Kernel.RuntimeProviderActionManifest.Contains(SharpClaw.Contracts.Kernel.SharpClawActionKey key) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeProviderActionManifest.Required.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Contracts.Kernel.SharpClawActionKey>!
+static SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.operator !=(SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation? left, SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation.operator ==(SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation? left, SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionInvocation? right) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionManifest.Contains(SharpClaw.Contracts.Kernel.SharpClawActionKey key) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeSecurityActionManifest.Required.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Contracts.Kernel.SharpClawActionKey>!
+static SharpClaw.Runtime.BLL.Kernel.RuntimeStartupActionDefinitions.Initialize.get -> SharpClaw.Contracts.Kernel.ActionDescriptor<string!, bool>!
+static SharpClaw.Runtime.BLL.Kernel.RuntimeToolActionManifest.Contains(SharpClaw.Contracts.Kernel.SharpClawActionKey key) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeToolActionManifest.Required.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Contracts.Kernel.SharpClawActionKey>!
+static SharpClaw.Runtime.BLL.Kernel.RuntimeTransactionActionManifest.Contains(SharpClaw.Contracts.Kernel.SharpClawActionKey key) -> bool
+static SharpClaw.Runtime.BLL.Kernel.RuntimeTransactionActionManifest.Required.get -> System.Collections.Generic.IReadOnlyList<SharpClaw.Contracts.Kernel.SharpClawActionKey>!

@@ -1,0 +1,9 @@
+// Repository-wide build-time security/reliability policy, not a runtime permission system.
+// No formatter-based object deserialization, obsolete symmetric crypto or unsafe thread control.
+T:System.Runtime.Serialization.Formatters.Binary.BinaryFormatter;Use bounded typed serialization instead of executable object deserialization.
+T:System.Security.Cryptography.DESCryptoServiceProvider;Use an authenticated modern cipher through the existing secret boundary.
+T:System.Security.Cryptography.RC2CryptoServiceProvider;Use an authenticated modern cipher through the existing secret boundary.
+M:System.Threading.Thread.Abort;Use cooperative cancellation and an explicit lifetime owner.
+M:System.Threading.Thread.Abort(System.Object);Use cooperative cancellation and an explicit lifetime owner.
+M:System.Threading.Thread.Suspend;Use cooperative synchronization rather than suspending arbitrary code.
+M:System.Threading.Thread.Resume;Use cooperative synchronization rather than resuming arbitrary code.

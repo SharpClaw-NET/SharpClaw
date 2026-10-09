@@ -1,3 +1,35 @@
 <Project>
+  <PropertyGroup Condition="'$(SharpClawAnalyzerReportDirectory)' != ''">
+    <ErrorLog>$(SharpClawAnalyzerReportDirectory)/$(MSBuildProjectName).$(TargetFramework).sarif</ErrorLog>
+  </PropertyGroup>
+  <!-- Late evaluation preserves project-local CPM opt-outs; no global MSBuild override. -->
+  <ItemGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
+    <PackageReference Include="Meziantou.Analyzer" PrivateAssets="all" IncludeAssets="analyzers;build;buildtransitive">
+      <Version Condition="'$(ManagePackageVersionsCentrally)' != 'true'">$(SharpClawMeziantouAnalyzerVersion)</Version>
+    </PackageReference>
+    <PackageReference Include="Roslynator.Analyzers" PrivateAssets="all" IncludeAssets="analyzers;build;buildtransitive">
+      <Version Condition="'$(ManagePackageVersionsCentrally)' != 'true'">$(SharpClawRoslynatorAnalyzersVersion)</Version>
+    </PackageReference>
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" PrivateAssets="all" IncludeAssets="analyzers;build;buildtransitive">
+      <Version Condition="'$(ManagePackageVersionsCentrally)' != 'true'">$(SharpClawThreadingAnalyzersVersion)</Version>
+    </PackageReference>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" IncludeAssets="analyzers;build;buildtransitive">
+      <Version Condition="'$(ManagePackageVersionsCentrally)' != 'true'">$(SharpClawBannedApiAnalyzersVersion)</Version>
+    </PackageReference>
+    <PackageReference Include="NetFabric.Hyperlinq.Analyzer" PrivateAssets="all" IncludeAssets="analyzers;build;buildtransitive">
+      <Version Condition="'$(ManagePackageVersionsCentrally)' != 'true'">$(SharpClawHyperlinqAnalyzerVersion)</Version>
+    </PackageReference>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <PackageReference Include="NUnit.Analyzers" PrivateAssets="all" IncludeAssets="analyzers;build;buildtransitive">
+      <Version Condition="'$(ManagePackageVersionsCentrally)' != 'true'">$(SharpClawNUnitAnalyzersVersion)</Version>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'SharpClaw.Shared' Or '$(MSBuildProjectName)' == 'SharpClaw.Runtime.INF' Or '$(MSBuildProjectName)' == 'SharpClaw.Runtime.BLL'">
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" IncludeAssets="analyzers;build;buildtransitive">
+      <Version Condition="'$(ManagePackageVersionsCentrally)' != 'true'">$(SharpClawPublicApiAnalyzersVersion)</Version>
+    </PackageReference>
+  </ItemGroup>
   <Import Project="build/PublishAssetProvenance.targets" Condition="'$(SharpClawCapturePublishAssets)' == 'true'" />
 </Project>

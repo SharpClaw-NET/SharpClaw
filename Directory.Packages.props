@@ -6,6 +6,13 @@
     See https://aka.platform.uno/using-uno-sdk#implicit-packages for more information regarding the Implicit Packages.
   -->
   <ItemGroup>
+    <PackageVersion Include="Meziantou.Analyzer" Version="$(SharpClawMeziantouAnalyzerVersion)" />
+    <PackageVersion Include="Roslynator.Analyzers" Version="$(SharpClawRoslynatorAnalyzersVersion)" />
+    <PackageVersion Include="Microsoft.VisualStudio.Threading.Analyzers" Version="$(SharpClawThreadingAnalyzersVersion)" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="$(SharpClawBannedApiAnalyzersVersion)" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="$(SharpClawPublicApiAnalyzersVersion)" />
+    <PackageVersion Include="NUnit.Analyzers" Version="$(SharpClawNUnitAnalyzersVersion)" />
+    <PackageVersion Include="NetFabric.Hyperlinq.Analyzer" Version="$(SharpClawHyperlinqAnalyzerVersion)" />
     <PackageVersion Include="coverlet.collector" Version="6.0.2" />
     <PackageVersion Include="FluentAssertions" Version="8.10.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
