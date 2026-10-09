@@ -14,7 +14,8 @@
   <Grid
         VerticalAlignment="Stretch">
 
-    <StackPanel HorizontalAlignment="Center"
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel HorizontalAlignment="Center" Margin="20"
                 VerticalAlignment="Center"
                 Spacing="6"
                 MinWidth="420">
@@ -27,6 +28,39 @@
                  Foreground="#00FF00"
                  HorizontalAlignment="Center"
                  Margin="0,0,0,16" />
+
+      <StackPanel Spacing="8" Margin="0,0,0,12">
+        <Button Content="Install modules" Style="{StaticResource TerminalButton}"
+                Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace"
+                Click="OnInstallModulesClick" AutomationProperties.AutomationId="BootInstallModules" />
+        <Button Content="Settings" Style="{StaticResource TerminalButton}"
+                Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace"
+                Click="OnSettingsClick" AutomationProperties.AutomationId="BootSettings" />
+        <Button Content="Open stateless chat" Style="{StaticResource TerminalButton}"
+                Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace"
+                Click="OnStatelessChatClick" AutomationProperties.AutomationId="BootStatelessChat" />
+      </StackPanel>
+
+      <StackPanel x:Name="ModuleInstallPanel" Visibility="Collapsed" Spacing="8" Margin="0,0,0,12">
+        <TextBlock Text="Local module folder/package or NuGet/GitHub link"
+                   Style="{StaticResource TerminalText}" FontSize="12" Foreground="#808080" />
+        <TextBox x:Name="ModuleSourceInput" Style="{StaticResource TerminalInput}" TextChanged="OnModuleSourceChanged"
+                 AutomationProperties.AutomationId="ModuleInstallSource" />
+        <PasswordBox x:Name="ModuleGitHubToken" Style="{StaticResource TerminalPasswordInput}"
+                     PlaceholderText="GitHub read:packages token (optional; not saved)"
+                     AutomationProperties.AutomationId="ModuleInstallGitHubToken" />
+        <Button x:Name="ModuleInspectButton" Content="Inspect" Style="{StaticResource TerminalButton}"
+                Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace"
+                Click="OnInspectModuleClick" />
+        <ComboBox x:Name="ModuleAssetPicker" Visibility="Collapsed" DisplayMemberPath="Name"
+                  SelectionChanged="OnModuleAssetChanged" />
+        <TextBlock x:Name="ModuleInstallStatus" Style="{StaticResource TerminalText}"
+                   FontSize="12" Foreground="#808080" TextWrapping="Wrap" MaxWidth="520" />
+        <Button x:Name="ModuleConfirmButton" Content="Install and enable module code"
+                Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace"
+                Style="{StaticResource TerminalButton}" Click="OnConfirmModuleClick"
+                Visibility="Collapsed" />
+      </StackPanel>
 
       <!-- Blinking cursor / command line (echo step) -->
       <local:TerminalCursor x:Name="Cursor"
@@ -166,6 +200,7 @@
                  IsTabStop="True" />
       </StackPanel>
     </StackPanel>
+    </ScrollViewer>
 
     <!-- Bottom-left env button -->
   </Grid>

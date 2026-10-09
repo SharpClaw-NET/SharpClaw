@@ -3,8 +3,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using SharpClaw.Helpers;
 using SharpClaw.Services;
-using System.Net.Http.Json;
-using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Presentation;
 
@@ -12,7 +10,11 @@ public sealed partial class MainPage : Page
 {
     private static readonly FontFamily MonoFont = TerminalUI.Mono;
     private bool _isSending;
+    private bool _canChat;
+    private CancellationTokenSource? _pageLifetime;
     private CancellationTokenSource? _streamCts;
+    private CancellationToken _streamPageToken;
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly List<ChatBubbleRow> _chatBubblePool = [];
     private int _chatBubblePoolUsed;
 
@@ -33,41 +35,41 @@ public sealed partial class MainPage : Page
         if (App.Services is null)
             return;
 
-        await CommitUiStateAsync(_ =>
-        {
-            ChatTitleBlock.Text = "> direct chat";
-            MessagesPanel.Children.Clear();
-            _chatBubblePoolUsed = 0;
-            _isSending = false;
-            _streamCts?.Cancel();
-            _streamCts = null;
-            MessageInput.IsEnabled = true;
-            SendButton.IsEnabled = true;
-            CancelButton.Visibility = Visibility.Collapsed;
-            return ValueTask.CompletedTask;
-        });
-
-        UpdateCursor();
-        MessageInput.Focus(FocusState.Programmatic);
+        _pageLifetime?.Cancel();
+        _pageLifetime?.Dispose();
+        _pageLifetime = new CancellationTokenSource();
+        var token = _pageLifetime.Token;
         try
         {
-            using var response = await App.Services.GetRequiredService<SharpClawApiClient>()
-                .GetAsync("/setup/provider");
-            var setup = response.IsSuccessStatusCode
-                ? await response.Content.ReadFromJsonAsync<SharpClawProviderSetup>() : null;
-            if (setup is { SetupRequired: true })
-                await App.Services.GetRequiredService<ClientNavigationService>()
-                    .NavigateRouteAsync(this, "Settings");
+            await CommitUiStateAsync(_ =>
+            {
+                ChatTitleBlock.Text = "> stateless chat (debug)";
+                MessagesPanel.Children.Clear();
+                _chatBubblePoolUsed = 0;
+                _isSending = false;
+                _streamCts?.Cancel();
+                _streamCts = null;
+                SetChatAvailability(false);
+                CancelButton.Visibility = Visibility.Collapsed;
+                return ValueTask.CompletedTask;
+            }, token);
+            UpdateCursor();
+            await RefreshChatAvailabilityAsync(token);
         }
-        catch (Exception error) when (error is HttpRequestException or System.Text.Json.JsonException or OperationCanceledException)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            // Chat requests report transport failures; setup is not inferred
-            // from a failed metadata request to an external/older Runtime.
+            // A previous page visit cannot enable this page after navigation.
+        }
+        catch (Exception)
+        {
+            // Readiness and state-action failures never escape a UI event handler.
+            // The page starts fail-closed and the Settings link remains available.
         }
     }
 
     private async void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        _pageLifetime?.Cancel();
         try
         {
             var actions = App.Services?.GetService<ClientActionDispatcher>();
@@ -86,6 +88,35 @@ public sealed partial class MainPage : Page
         {
             // The active stream owns its cancellation path while the page leaves the visual tree.
         }
+    }
+
+    private void SetChatAvailability(bool available)
+    {
+        _canChat = available;
+        ChatSetupPrompt.Visibility = available ? Visibility.Collapsed : Visibility.Visible;
+        MessageInput.IsEnabled = available && !_isSending;
+        SendButton.IsEnabled = available && !_isSending;
+    }
+
+    private async Task<bool> RefreshChatAvailabilityAsync(CancellationToken cancellationToken)
+    {
+        var available = await StatelessChatReadiness.CheckAsync(
+            App.Services!.GetRequiredService<SharpClawApiClient>(), cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await CommitUiStateAsync(_ =>
+        {
+            SetChatAvailability(available);
+            return ValueTask.CompletedTask;
+        }, cancellationToken);
+        return available;
+    }
+
+    private async void OnCheckProviderClick(object sender, RoutedEventArgs e)
+    {
+        if (_isSending || _pageLifetime is not { IsCancellationRequested: false } lifetime) return;
+        try { await RefreshChatAvailabilityAsync(lifetime.Token); }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { /* Keep the last fail-closed state if a client action is denied. */ }
     }
 
     private void OnMessageTextChanged(object sender, TextChangedEventArgs e)

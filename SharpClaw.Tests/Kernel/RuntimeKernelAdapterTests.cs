@@ -14,6 +14,24 @@ namespace SharpClaw.Tests.Kernel;
 public sealed class RuntimeKernelAdapterTests
 {
     [Test]
+    public async Task ProviderModelCatalogUsesTheRegisteredProviderWithoutInference()
+    {
+        var provider = new RecordingProviderClient();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        { ["Provider:Key"] = "test", ["Provider:Model"] = "test-model" }).Build();
+        using var workspace = new TemporaryWorkspace();
+        var factory = new RecordingProviderClientFactory(provider);
+        var adapter = RuntimeKernelAdapterTestFactory.Create(configuration, [new ProviderModule(provider)],
+            workspace.CreateInstancePaths(), factory);
+        var models = await RuntimeProviderModelCatalog.ReadAsync(new(RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty, Guid.NewGuid(), Guid.NewGuid()), configuration, adapter, factory, default);
+        models.ProviderKey.Should().Be("test");
+        models.Models.Should().Equal("test-model");
+        provider.Messages.Should().BeEmpty();
+        provider.SystemPrompts.Should().BeEmpty();
+    }
+
+    [Test]
     public async Task Adapter_compiles_registration_graph_and_routes_direct_chat_through_registration_provider()
     {
         var provider = new RecordingProviderClient();

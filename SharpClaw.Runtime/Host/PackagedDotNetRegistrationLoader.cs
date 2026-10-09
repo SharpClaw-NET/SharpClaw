@@ -11,6 +11,7 @@ using SharpClaw.SidecarHost.InProcess;
 using SharpClaw.SidecarHost.OutOfProcess;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.BLL.Configuration;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Runtime.Host;
 
@@ -19,6 +20,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
 {
     private readonly List<ServiceDescriptor> _services;
     private readonly List<InProcessRegistrationHost> _inProcessHosts;
+    private readonly List<SharpClawModuleSettingsPage> _frontendSettings;
     private readonly List<OutOfProcessRegistrationProxy> _sidecarRegistrations = [];
     private readonly List<PackagedSidecarProcess> _sidecarProcesses = [];
     private PackagedApplicationRegistry _application =
@@ -28,11 +30,14 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
 
     private PackagedDotNetRegistrationSet(
         IReadOnlyList<ServiceDescriptor> services,
-        IReadOnlyList<InProcessRegistrationHost> inProcessHosts)
+        IReadOnlyList<InProcessRegistrationHost> inProcessHosts,
+        IReadOnlyList<SharpClawModuleSettingsPage> frontendSettings)
     {
         _services = services.ToList();
         _inProcessHosts = inProcessHosts.ToList();
+        _frontendSettings = frontendSettings.ToList();
         _application = new PackagedApplicationRegistry(_inProcessHosts, []);
+        _application.ValidateFrontendSettings(_frontendSettings);
     }
 
     public IReadOnlyList<ServiceDescriptor> Services => _services;
@@ -45,6 +50,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
     internal IReadOnlyList<OutOfProcessRegistrationProxy> Sidecars => _sidecarRegistrations;
 
     public PackagedApplicationRegistry Application => _application;
+    public IReadOnlyList<SharpClawModuleSettingsPage> FrontendSettings => _frontendSettings.AsReadOnly();
 
     public static PackagedDotNetRegistrationSet Load(
         string registrationsRoot,
@@ -80,6 +86,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
 
         var services = new List<ServiceDescriptor>();
         var inProcessHosts = new List<InProcessRegistrationHost>();
+        var frontendSettings = new List<SharpClawModuleSettingsPage>();
 
         try
         {
@@ -96,6 +103,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                 if (!manifest.RuntimeInfo.IsInProcessHostMode)
                     continue;
 
+                var settings = ReadFrontendSettings(manifest);
                 var registrationDirectory = Path.GetDirectoryName(manifest.ManifestPath)!;
                 var host = InProcessRegistrationHost.LoadAsync(
                         registrationDirectory,
@@ -104,9 +112,10 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                     .GetResult();
                 inProcessHosts.Add(host);
                 services.AddRange(host.ServiceDescriptors);
+                frontendSettings.AddRange(settings);
             }
 
-            return new PackagedDotNetRegistrationSet(services, inProcessHosts);
+            return new PackagedDotNetRegistrationSet(services, inProcessHosts, frontendSettings);
         }
         catch
         {
@@ -151,6 +160,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                 }
 
                 manifest.RuntimeInfo.EnsureDotNetEntryAssembly(manifest.Manifest);
+                _ = ReadFrontendSettings(manifest);
                 var process = await PackagedSidecarProcess.StartAsync(
                     manifest,
                     configuration,
@@ -208,6 +218,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
                 registrationSet._services.AddRange(proxy.GetServiceDescriptors());
                 registrationSet._sidecarRegistrations.Add(proxy);
                 registrationSet._sidecarProcesses.Add(item.Process);
+                registrationSet._frontendSettings.AddRange(ReadFrontendSettings(item.Manifest));
             }
 
             AddExternalContractExports(
@@ -219,6 +230,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             registrationSet._application = new PackagedApplicationRegistry(
                 registrationSet._inProcessHosts,
                 registrationSet._sidecarRegistrations);
+            registrationSet._application.ValidateFrontendSettings(registrationSet._frontendSettings);
 
             return registrationSet;
         }
@@ -350,6 +362,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
 
         _services.Clear();
         _inProcessHosts.Clear();
+        _frontendSettings.Clear();
         _sidecarRegistrations.Clear();
         _sidecarProcesses.Clear();
         _application = PackagedApplicationRegistry.Empty;
@@ -720,8 +733,12 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             runtimeInfo,
             enabled,
             root,
-            path);
+            path,
+            json);
     }
+
+    private static IReadOnlyList<SharpClawModuleSettingsPage> ReadFrontendSettings(PackagedRegistrationManifest manifest) =>
+        SharpClawModuleSettings.ReadManifest(manifest.ManifestJson, manifest.Id, manifest.Manifest.DisplayName);
 
     private static bool IsEnabled(
         PackagedRegistrationManifest manifest,
@@ -919,7 +936,8 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
         PackageRuntimeInfo RuntimeInfo,
         bool IsEnabled,
         string Root,
-        string ManifestPath);
+        string ManifestPath,
+        string ManifestJson);
 
     private sealed record PendingSidecar(
         PackagedRegistrationManifest Manifest,

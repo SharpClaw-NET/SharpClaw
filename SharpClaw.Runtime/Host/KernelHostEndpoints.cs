@@ -32,10 +32,22 @@ internal static class KernelHostEndpoints
                 CreateExecutionContext(context), "/setup/provider",
                 (_, _) => ValueTask.FromResult(RuntimeProviderSetup.Describe(configuration, adapter)),
                 cancellationToken)));
+        app.MapGet("/setup/models", async (HttpContext context, IConfiguration configuration,
+            RuntimeKernelAdapter adapter, IRuntimeProviderClientFactory factory, CancellationToken cancellationToken) =>
+            Results.Ok(await adapter.RunRequestAsync(
+                CreateExecutionContext(context), "/setup/models",
+                (_, token) => RuntimeProviderModelCatalog.ReadAsync(CreateExecutionContext(context),
+                    configuration, adapter, factory, token), cancellationToken)));
         app.MapGet("/env/core", ReadEnvironmentAsync);
         app.MapPost("/chat", RunChatAsync);
         app.MapPost("/chat/stream", StreamChatAsync);
     }
+
+    internal static void MapModuleSettingsCatalog(WebApplication app, PackagedDotNetRegistrationSet registrations) =>
+        app.MapGet("/setup/modules", async (HttpContext context, RuntimeKernelAdapter adapter,
+            CancellationToken cancellationToken) => Results.Ok(await adapter.RunRequestAsync(
+                CreateExecutionContext(context), "/setup/modules",
+                (_, _) => ValueTask.FromResult(registrations.FrontendSettings), cancellationToken)));
 
     private static async Task<IResult> RunChatAsync(
         HttpContext context,

@@ -184,6 +184,7 @@ public partial class App : Application
                         ClientActionDispatcher.CreateProduction(
                             sp.GetRequiredService<ClientActionContextSource>()));
                     services.AddTransient<ClientNavigationService>();
+                    services.AddSingleton<ModulePackageStore>();
                     services.AddSingleton<SharpClawApiClient>(sp =>
                         new SharpClawApiClient(
                             apiUrl,
@@ -208,7 +209,7 @@ public partial class App : Application
                 // assigned at this point, but BootPage needs services.
                 Services = services;
 
-                // Verify the Runtime connection before opening direct chat.
+                // Boot is the module-neutral home, not a transient route into chat.
                 // Use the scoped navigator supplied by Uno for this shell, while
                 // retaining the same client action boundary as later navigation.
                 await new ClientNavigationService(navigator, services.GetRequiredService<ClientActionDispatcher>())
@@ -282,20 +283,16 @@ public partial class App : Application
             new ViewMap(ViewModel: typeof(ShellModel)),
             new ViewMap<BootPage>(),
             new ViewMap<MainPage>(),
-            new ViewMap<SettingsPage>(),
-            new ViewMap<LegalNoticesPage>(),
-            new ViewMap<UserGuidePage>()
+            new ViewMap<SettingsPage>()
         );
 
         routes.Register(
             new RouteMap("", View: views.FindByViewModel<ShellModel>(),
                 Nested:
                 [
-                    new ("Boot", View: views.FindByView<BootPage>()),
-                    new ("Main", View: views.FindByView<MainPage>(), IsDefault:true),
-                    new ("Settings", View: views.FindByView<SettingsPage>()),
-                    new ("LegalNotices", View: views.FindByView<LegalNoticesPage>()),
-                    new ("UserGuide", View: views.FindByView<UserGuidePage>())
+                    new ("Boot", View: views.FindByView<BootPage>(), IsDefault:true),
+                    new ("Main", View: views.FindByView<MainPage>()),
+                    new ("Settings", View: views.FindByView<SettingsPage>())
                 ]
             )
         );

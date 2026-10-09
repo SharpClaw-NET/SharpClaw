@@ -14,37 +14,10 @@ public sealed partial class MainPage
             .NavigateRouteAsync(this, "Settings");
     }
 
-    private async void OnReportIssueClick(object sender, RoutedEventArgs e)
-        => await Windows.System.Launcher.LaunchUriAsync(
-            new Uri("https://github.com/SharpClaw-NET/SharpClaw/issues"));
-
-    private async void OnOfficialWebsiteClick(object sender, RoutedEventArgs e)
-        => await Windows.System.Launcher.LaunchUriAsync(
-            new Uri("https://sharpclaw.mkn8rn.com"));
-
-    private async void OnMatrixCommunityClick(object sender, RoutedEventArgs e)
-        => await Windows.System.Launcher.LaunchUriAsync(
-            new Uri("https://matrix.to/#/#p1:matrix.mkn8rn.com"));
-
-    private async void OnCreatorBlogClick(object sender, RoutedEventArgs e)
-        => await Windows.System.Launcher.LaunchUriAsync(
-            new Uri("https://blog.mkn8rn.com"));
-
-    private void OnLegalNoticesClick(object sender, RoutedEventArgs e)
+    private void OnBootClick(object sender, RoutedEventArgs e)
     {
-        if (App.Services is not { } services)
-            return;
-
-        _ = services.GetRequiredService<ClientNavigationService>()
-            .NavigateRouteAsync(this, "LegalNotices");
+        if (App.Services is not { } services) return;
+        _ = services.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Boot");
     }
 
-    private void OnUserGuideClick(object sender, RoutedEventArgs e)
-    {
-        if (App.Services is not { } services)
-            return;
-
-        _ = services.GetRequiredService<ClientNavigationService>()
-            .NavigateRouteAsync(this, "UserGuide");
-    }
 }

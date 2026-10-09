@@ -12,3 +12,5 @@ public sealed record SharpClawProviderSetupOption(
     string DisplayName,
     bool RequiresApiKey,
     bool RequiresEndpoint);
+
+public sealed record SharpClawProviderModels(string ProviderKey, IReadOnlyList<string> Models);

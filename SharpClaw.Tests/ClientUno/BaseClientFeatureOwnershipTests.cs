@@ -41,9 +41,10 @@ public sealed class BaseClientFeatureOwnershipTests
         settings.Should().NotContain("isUserAdmin");
         settings.Should().NotContain("Danger Zone");
         settings.Should().Contain("AddTabButton(\"Runtime\"");
-        settings.Should().Contain("AddTabButton(\"Gateway\"");
+        settings.Should().Contain("AddTabButton(\"Modules\"");
+        settings.Should().NotContain("AddTabButton(\"Gateway\"");
         settings.Should().NotContain("/providers");
-        settings.Should().NotContain("/models");
+        settings.Should().NotContain("\"/models\"");
         settings.Should().NotContain("/modules");
         settings.Should().NotContain("/system/factory-reset");
     }
@@ -58,8 +59,9 @@ public sealed class BaseClientFeatureOwnershipTests
         app.Should().Contain("new (\"Boot\"");
         app.Should().Contain("new (\"Main\"");
         app.Should().Contain("new (\"Settings\"");
-        app.Should().Contain("new (\"LegalNotices\"");
-        app.Should().Contain("new (\"UserGuide\"");
+        app.Should().NotContain("new (\"LegalNotices\"");
+        app.Should().NotContain("new (\"UserGuide\"");
+        app.Should().Contain("new (\"Boot\", View: views.FindByView<BootPage>(), IsDefault:true)");
         app.Should().Contain("services.AddTransient<ClientNavigationService>()");
         app.Should().NotContain("services.AddSingleton<ClientNavigationService>()");
         app.Should().NotContain("new (\"Login\"");
@@ -85,7 +87,7 @@ public sealed class BaseClientFeatureOwnershipTests
     }
 
     [Test]
-    public void Successful_boot_opens_chat_without_a_setup_or_login_transition()
+    public void Successful_boot_stays_home_and_chat_requires_an_explicit_choice()
     {
         var sourceRoot = FindSourceRoot();
         var boot = File.ReadAllText(Path.Combine(
@@ -94,7 +96,10 @@ public sealed class BaseClientFeatureOwnershipTests
             "Presentation",
             "BootPage.xaml.cs"));
 
-        boot.Should().Contain("NavigateRouteAsync(this, \"Main\", Qualifiers.ClearBackStack)");
+        boot.Should().NotContain("NavigateRouteAsync(this, \"Main\"");
+        var menu = File.ReadAllText(Path.Combine(sourceRoot, "SharpClaw.Client.Uno", "Presentation", "BootPage.Modules.cs"));
+        menu.Should().Contain("OnStatelessChatClick");
+        menu.Should().Contain("NavigateRouteAsync(this, \"Main\")");
         boot.Should().NotContain("TryAutoLoginAsync");
         boot.Should().NotContain("FirstSetup");
         boot.Should().NotContain("Login");

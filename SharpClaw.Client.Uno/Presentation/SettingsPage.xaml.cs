@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml.Media;
 using SharpClaw.Helpers;
 using SharpClaw.Services;
-using Windows.ApplicationModel.DataTransfer;
 using System.Net.Http.Json;
 using SharpClaw.Shared.Instances;
 
@@ -27,6 +26,7 @@ public sealed partial class SettingsPage : Page
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        Unloaded += (_, _) => { _settingsLifetime?.Cancel(); _tabLifetime?.Cancel(); };
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -34,6 +34,10 @@ public sealed partial class SettingsPage : Page
         Cursor.SetCommand("sharpclaw settings ");
         BuildTabs();
         SelectTab("Runtime");
+        _settingsLifetime?.Cancel();
+        _settingsLifetime?.Dispose();
+        _settingsLifetime = new CancellationTokenSource();
+        _ = LoadModuleTabsAsync(_settingsLifetime.Token);
     }
 
     private void BuildTabs()
@@ -41,8 +45,8 @@ public sealed partial class SettingsPage : Page
         TabPanel.Children.Clear();
         AddTabSection("Kernel");
         AddTabButton("Runtime", "sharpclaw runtime status");
-        AddTabSection("Gateway");
-        AddTabButton("Gateway", "sharpclaw gateway status");
+        AddTabButton("Modules", "sharpclaw modules");
+        AddTabButton("About", "sharpclaw notices");
     }
 
     private void AddTabSection(string title) => TabPanel.Children.Add(new TextBlock
@@ -54,7 +58,7 @@ public sealed partial class SettingsPage : Page
         Margin = new Thickness(8, 12, 0, 4),
     });
 
-    private void AddTabButton(string label, string cursorCommand)
+    private void AddTabButton(string label, string cursorCommand, string? tabId = null)
     {
         var marker = new TextBlock
         {
@@ -83,10 +87,10 @@ public sealed partial class SettingsPage : Page
             Background = Trans,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(12, 8, 12, 8),
-            Tag = label,
+            Tag = tabId ?? label,
             Content = content,
         };
-        button.Click += (_, _) => SelectTab(label);
+        button.Click += (_, _) => SelectTab(tabId ?? label);
         button.PointerEntered += (_, _) => Cursor.SetCommand(cursorCommand);
         button.PointerExited += (_, _) => Cursor.SetCommand("sharpclaw settings ");
         TabPanel.Children.Add(button);
@@ -95,15 +99,12 @@ public sealed partial class SettingsPage : Page
     private void SelectTab(string tab)
     {
         _activeTab = tab;
+        _tabLifetime?.Cancel();
+        _tabLifetime?.Dispose();
+        _tabLifetime = new CancellationTokenSource();
         HighlightTabs();
         ContentPanel.Children.Clear();
-
-        _ = tab switch
-        {
-            "Runtime" => LoadRuntimeAsync(),
-            "Gateway" => LoadGatewayAsync(),
-            _ => Task.CompletedTask,
-        };
+        _ = LoadTabAsync(tab, _tabLifetime.Token);
     }
 
     private void HighlightTabs()
@@ -127,7 +128,7 @@ public sealed partial class SettingsPage : Page
         }
     }
 
-    private async Task LoadRuntimeAsync()
+    private async Task LoadRuntimeAsync(CancellationToken token)
     {
         H("Runtime");
         Lbl("Endpoint", 0x808080);
@@ -155,7 +156,10 @@ public sealed partial class SettingsPage : Page
         {
             try
             {
-                using var response = await Api.GetAsync("/readyz");
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                using var response = await Api.GetAsync("/readyz", timeout.Token);
+                token.ThrowIfCancellationRequested();
                 status.Text = response.IsSuccessStatusCode
                     ? "ready"
                     : $"unavailable: HTTP {(int)response.StatusCode}";
@@ -163,6 +167,7 @@ public sealed partial class SettingsPage : Page
             }
             catch
             {
+                if (token.IsCancellationRequested) return;
                 status.Text = "unavailable";
                 status.Foreground = B(0xFF4444);
             }
@@ -182,7 +187,7 @@ public sealed partial class SettingsPage : Page
                     App.Services?.GetService<BackendProcessManager>(),
                     Gateway,
                     target,
-                    TimeSpan.FromSeconds(5));
+                    TimeSpan.FromSeconds(5), token);
                 endpoint.Text = Api.BaseUrl.TrimEnd('/');
                 await RefreshAsync();
             }
@@ -199,24 +204,33 @@ public sealed partial class SettingsPage : Page
         refresh.Click += async (_, _) => await RefreshAsync();
 
         await RefreshAsync();
-        try { await LoadProviderSetupAsync(); }
+        token.ThrowIfCancellationRequested();
+        try { await LoadProviderSetupAsync(token); }
         catch
         {
+            token.ThrowIfCancellationRequested();
             Lbl("Provider setup information is unavailable; retry after checking Runtime status.", 0xFF8800);
         }
     }
 
-    private async Task LoadProviderSetupAsync()
+    private async Task LoadProviderSetupAsync(CancellationToken token)
     {
         Sub("Provider setup");
-        using var response = await Api.GetAsync("/setup/provider");
+        using var response = await Api.GetAsync("/setup/provider", token);
+        token.ThrowIfCancellationRequested();
         if (!response.IsSuccessStatusCode)
         {
             Lbl("Provider setup information is unavailable.", 0xFF8800);
             return;
         }
-        var setup = await response.Content.ReadFromJsonAsync<SharpClawProviderSetup>();
+        var setup = await response.Content.ReadFromJsonAsync<SharpClawProviderSetup>(token);
+        token.ThrowIfCancellationRequested();
         if (setup is null) return;
+        if (setup.Providers.Count == 0)
+        {
+            Lbl("No provider module is available. Return to Boot to install one.", 0x808080);
+            return;
+        }
         Lbl(setup.SetupRequired ? "Choose a provider and model to enable chat." : "Provider configured.", 0xCCCCCC);
         var backend = App.Services!.GetRequiredService<BackendProcessManager>();
         if (!backend.OwnsCurrentTarget || backend.SkipLaunch)
@@ -253,6 +267,28 @@ public sealed partial class SettingsPage : Page
             });
         var model = MakeInput("Model identifier");
         model.Text = setup.Model ?? string.Empty;
+        SharpClawProviderModels? catalog = null;
+        if (!setup.SetupRequired)
+        {
+            using var probe = CancellationTokenSource.CreateLinkedTokenSource(token);
+            probe.CancelAfter(TimeSpan.FromSeconds(5));
+            try { catalog = await StatelessChatReadiness.ReadAsync<SharpClawProviderModels>(Api, "/setup/models", probe.Token); }
+            catch { token.ThrowIfCancellationRequested(); }
+        }
+        token.ThrowIfCancellationRequested();
+        var models = new ComboBox
+        {
+            ItemsSource = catalog?.Models, PlaceholderText = "Available models from the selected provider", MinWidth = 320,
+            SelectedItem = catalog?.Models.FirstOrDefault(value => value == setup.Model),
+            Visibility = catalog is null ? Visibility.Collapsed : Visibility.Visible,
+        };
+        models.SelectionChanged += (_, _) => { if (models.SelectedItem is string selectedModel) model.Text = selectedModel; };
+        provider.SelectionChanged += (_, _) =>
+        {
+            models.Visibility = catalog is not null && provider.SelectedItem is SharpClawProviderSetupOption option &&
+                string.Equals(option.Key, catalog.ProviderKey, StringComparison.OrdinalIgnoreCase)
+                ? Visibility.Visible : Visibility.Collapsed;
+        };
         var endpoint = MakeInput("Optional provider endpoint (HTTP/HTTPS)");
         var credential = new PasswordBox { PlaceholderText = "API key or bearer token (if required)", MinWidth = 320 };
         var apply = TerminalButton("Save provider and restart bundled Runtime");
@@ -263,6 +299,7 @@ public sealed partial class SettingsPage : Page
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(apply, "ProviderSetupApply");
         var status = StatusBlock();
         ContentPanel.Children.Add(provider);
+        ContentPanel.Children.Add(models);
         ContentPanel.Children.Add(model);
         ContentPanel.Children.Add(endpoint);
         ContentPanel.Children.Add(credential);
@@ -281,7 +318,7 @@ public sealed partial class SettingsPage : Page
             {
                 await BundledProviderSetup.ApplyAsync(
                     App.Services!.GetRequiredService<FrontendInstanceService>(), backend,
-                    Gateway, Actions, selected, model.Text, endpoint.Text, credential.Password);
+                    Gateway, Actions, selected, model.Text, endpoint.Text, credential.Password, token);
                 credential.Password = string.Empty;
                 await App.Services!.GetRequiredService<ClientNavigationService>()
                     .NavigateRouteAsync(this, "Boot", Qualifiers.ClearBackStack);
@@ -317,187 +354,6 @@ public sealed partial class SettingsPage : Page
         await api.WaitForReadyAsync(readinessTimeout, cancellationToken);
     }
 
-    private async Task LoadGatewayAsync()
-    {
-        H("Gateway");
-
-        var gateway = Gateway;
-        if (gateway is null)
-        {
-            Lbl("unavailable", 0xFF4444);
-            return;
-        }
-
-        Lbl("Endpoint", 0x808080);
-        Lbl(gateway.ClientUrl, 0xCCCCCC);
-
-        var status = StatusBlock();
-        ContentPanel.Children.Add(status);
-
-        var controls = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-        };
-        var start = TerminalButton("Start");
-        var stop = TerminalButton("Stop");
-        var restart = TerminalButton("Restart");
-        var refresh = TerminalButton("Refresh");
-        controls.Children.Add(start);
-        controls.Children.Add(stop);
-        controls.Children.Add(restart);
-        controls.Children.Add(refresh);
-        ContentPanel.Children.Add(controls);
-
-        var persistent = new ToggleSwitch
-        {
-            IsOn = gateway.Persistent,
-            OnContent = "Keep processes running",
-            OffContent = "Stop processes on exit",
-            FontFamily = Mono,
-            FontSize = 11,
-        };
-        ContentPanel.Children.Add(persistent);
-
-        Sub("Process output");
-        var output = new TextBlock
-        {
-            FontFamily = Mono,
-            FontSize = 10,
-            Foreground = B(0x888888),
-            TextWrapping = TextWrapping.Wrap,
-            IsTextSelectionEnabled = true,
-            MaxWidth = 620,
-        };
-        ContentPanel.Children.Add(output);
-
-        var logControls = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-        };
-        var copy = TerminalButton("Copy");
-        var clear = TerminalButton("Clear");
-        logControls.Children.Add(copy);
-        logControls.Children.Add(clear);
-        ContentPanel.Children.Add(logControls);
-
-        async Task RefreshAsync()
-        {
-            var reachable = await Actions.RunCommandAsync(
-                "client.gateway.status",
-                token => new ValueTask<bool>(gateway.IsGatewayReachableAsync(token)));
-            status.Text = reachable
-                ? "online"
-                : gateway.IsRunning
-                    ? "starting"
-                    : "offline";
-            status.Foreground = B(reachable ? 0x00FF00 : 0xFF8800);
-            output.Text = gateway.ProcessOutput.Count == 0
-                ? "(no output)"
-                : string.Join('\n', gateway.ProcessOutput);
-            start.IsEnabled = !gateway.SkipLaunch && gateway.IsAvailable && !gateway.IsRunning;
-            stop.IsEnabled = gateway.IsRunning && !gateway.IsExternal;
-            restart.IsEnabled = !gateway.SkipLaunch && gateway.IsAvailable;
-        }
-
-        start.Click += async (_, _) =>
-        {
-            try
-            {
-                await Actions.RunCommandAsync(
-                    "client.gateway.start",
-                    async token =>
-                    {
-                        gateway.ApiKey = Api.CachedApiKey;
-                        await gateway.EnsureStartedAsync(token);
-                    });
-            }
-            catch
-            {
-                status.Text = "start failed";
-                status.Foreground = B(0xFF4444);
-            }
-            await RefreshAsync();
-        };
-
-        stop.Click += async (_, _) =>
-        {
-            await Actions.RunCommandAsync(
-                "client.gateway.stop",
-                _ =>
-                {
-                    gateway.Stop();
-                    return ValueTask.CompletedTask;
-                });
-            await RefreshAsync();
-        };
-
-        restart.Click += async (_, _) =>
-        {
-            try
-            {
-                await Actions.RunCommandAsync(
-                    "client.gateway.restart",
-                    async token =>
-                    {
-                        gateway.Stop();
-                        await Task.Delay(250, token);
-                        gateway.ApiKey = Api.CachedApiKey;
-                        await gateway.EnsureStartedAsync(token);
-                    });
-            }
-            catch
-            {
-                status.Text = "restart failed";
-                status.Foreground = B(0xFF4444);
-            }
-            await RefreshAsync();
-        };
-
-        refresh.Click += async (_, _) => await RefreshAsync();
-
-        persistent.Toggled += async (_, _) =>
-        {
-            var value = persistent.IsOn;
-            await Actions.RunCommandAsync(
-                "client.process.persistence",
-                _ =>
-                {
-                    gateway.Persistent = value;
-                    if (App.Services?.GetService<BackendProcessManager>() is { } backend)
-                        backend.Persistent = value;
-                    return ValueTask.CompletedTask;
-                });
-        };
-
-        copy.Click += async (_, _) =>
-        {
-            await Actions.RunCommandAsync(
-                "client.gateway.logs.copy",
-                _ =>
-                {
-                    var package = new DataPackage();
-                    package.SetText(output.Text ?? string.Empty);
-                    Clipboard.SetContent(package);
-                    return ValueTask.CompletedTask;
-                });
-        };
-
-        clear.Click += async (_, _) =>
-        {
-            await Actions.RunCommandAsync(
-                "client.gateway.logs.clear",
-                _ =>
-                {
-                    gateway.ClearOutput();
-                    return ValueTask.CompletedTask;
-                });
-            await RefreshAsync();
-        };
-
-        await RefreshAsync();
-    }
 
     private static string RequireHttpEndpoint(string value)
     {
@@ -578,6 +434,6 @@ public sealed partial class SettingsPage : Page
             return;
 
         _ = services.GetRequiredService<ClientNavigationService>()
-            .NavigateRouteAsync(this, "Main");
+            .NavigateRouteAsync(this, "Boot");
     }
 }

@@ -1157,12 +1157,17 @@ public sealed class ClientActionBoundaryTests
             .Should().Contain("RunCommandAsync");
         var settingsSource = File.ReadAllText(
             Path.Combine(clientRoot, "Presentation", "SettingsPage.xaml.cs"));
-        settingsSource.Should().Contain("client.gateway.restart");
         settingsSource.Should().Contain("client.runtime.target");
         settingsSource.Should().NotContain("/agents");
         settingsSource.Should().NotContain("/roles");
         settingsSource.Should().NotContain("PermissionEditorBuilder");
         settingsSource.Should().NotContain("Assign Role");
+        var moduleSettingsSource = File.ReadAllText(
+            Path.Combine(clientRoot, "Presentation", "SettingsPage.ModuleSettings.cs"));
+        moduleSettingsSource.Should().Contain("Actions.RunCommandAsync");
+        moduleSettingsSource.Should().Contain("client.module.enablement");
+        File.ReadAllText(Path.Combine(clientRoot, "Services", "ModuleSettingsClient.cs"))
+            .Should().Contain("ConsumeStreamAsync");
     }
 
     [Test]
@@ -1195,15 +1200,18 @@ public sealed class ClientActionBoundaryTests
                 "CommitStateAsync",
                 "client.chat.ui",
             ],
-            [Path.Combine("Presentation", "BootPage.xaml.cs")] = [
+            [Path.Combine("Presentation", "BootPage.Modules.cs")] = [
                 "NavigateRouteAsync(this, \"Main\"",
+                "Actions.RunCommandAsync",
+                "client.module.install",
             ],
             [Path.Combine("Presentation", "SettingsPage.xaml.cs")] = [
-                "Actions.RunCommandAsync",
-                "client.gateway.restart",
-                "client.gateway.logs.clear",
-                "client.process.persistence",
+                "actions.RunCommandAsync",
                 "client.runtime.target",
+            ],
+            [Path.Combine("Presentation", "SettingsPage.ModuleSettings.cs")] = [
+                "Actions.RunCommandAsync",
+                "client.module.enablement",
             ],
             [Path.Combine("Services", "SharpClawApiClient.cs")] = [
                 "_clientActions.RunCommandAsync",

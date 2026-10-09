@@ -9,6 +9,7 @@ using SharpClaw.Core.Kernel;
 using SharpClaw.SidecarHost.InProcess;
 using SharpClaw.SidecarHost.OutOfProcess;
 using SharpClaw.Runtime.BLL.Kernel;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Runtime.Host;
 
@@ -156,6 +157,24 @@ internal sealed class PackagedApplicationRegistry
                 route.Path,
                 [route.Method],
                 context => InvokeEndpointRouteAsync(context, route, runtimeKernel));
+        }
+    }
+
+    public void ValidateFrontendSettings(IReadOnlyList<SharpClawModuleSettingsPage> pages)
+    {
+        foreach (var page in pages)
+        {
+            // A manifest cannot borrow another contribution's route, a host route or a WebSocket.
+            foreach (var (path, method) in new[] { (page.ReadPath, "GET"), (page.SavePath, "POST") })
+            {
+                var target = _endpointRoutes.SingleOrDefault(route =>
+                    string.Equals(route.Path, path, StringComparison.Ordinal) &&
+                    string.Equals(route.Method, method, StringComparison.OrdinalIgnoreCase))?.Http;
+                var owner = target?.InProcess?.Manifest.Id ?? target?.Client?.Discovery.SourceId;
+                if (!string.Equals(owner, page.SourceId, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"Settings page '{page.SourceId}/{page.Id}' must use its own compiled {method} endpoint.");
+            }
         }
     }
 

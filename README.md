@@ -37,6 +37,7 @@ A SharpClaw module uses public neutral contracts to declare what it supplies and
 |  | Integrations and operations | Editor bridges, external services, metrics, logging integrations, and observability surfaces. |
 | **Application and data** | Shared services | Typed exported and required contracts between declared modules. |
 |  | Application surfaces | CLI commands and authenticated HTTP or WebSocket endpoints. |
+|  | Frontend settings | Module-declared pages rendered in the minimal Settings menu, using that module's compiled endpoints. |
 |  | Storage | Host-managed documents, indexes, claims, and transactions, or module-owned EF Core contexts. |
 
 ## Bring Your Own Keys
@@ -64,7 +65,7 @@ Storage is completely modular: install one of the packages below or any compatib
 
 ## Getting Started
 
-Download a packaged build from [SharpClaw releases](https://github.com/SharpClaw-NET/SharpClaw/releases), or build the repository with the .NET SDK selected by `global.json` using the commands below. Configure one enabled provider and model in the Runtime environment, use **Chat** for model requests, and use **Settings** to manage the Runtime endpoint and optional Gateway process; install optional packages only for the conversation state, authorization, agent workflows, or integrations your application needs.
+Download a packaged build from [SharpClaw releases](https://github.com/SharpClaw-NET/SharpClaw/releases), or build the repository with the .NET SDK selected by `global.json` using the commands below. The default black/green frontend has only Boot, modular Settings, and stateless debug chat: Boot lets you inspect and explicitly install local module payloads or NuGet/GitHub packages and release assets, Settings exposes Runtime configuration and enabled modules' declared settings, and chat stays unavailable until the selected model appears in an available provider's catalog. No modules means no application features; install only the modules your application needs. See [frontend modularity](docs/Frontend-Modularity.md) for package installation and the settings contract.
 
 ```powershell
 dotnet restore SharpClaw.slnx

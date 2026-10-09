@@ -68,12 +68,18 @@ public static class SharpClawInstalledProbe {
     static long bootUiProbeHandle;
     static readonly Dictionary<string, Task<bool>> visibleProbes = new Dictionary<string, Task<bool>>();
     public static bool HasVisibleElement(long handle, string id) {
-        var key = handle.ToString() + ":" + id;
+        return ProbeElement(handle, id, false);
+    }
+    public static bool HasVisibleEnabledElement(long handle, string id) {
+        return ProbeElement(handle, id, true);
+    }
+    static bool ProbeElement(long handle, string id, bool requireEnabled) {
+        var key = handle.ToString() + ":" + id + ":" + requireEnabled;
         Task<bool> probe;
         if (!visibleProbes.TryGetValue(key, out probe)) {
             visibleProbes[key] = Task.Run(() => {
                 var element = FindElement(handle, id);
-                return element != null && !element.Current.IsOffscreen;
+                return element != null && !element.Current.IsOffscreen && (!requireEnabled || element.Current.IsEnabled);
             });
             return false;
         }
@@ -673,6 +679,7 @@ try {
     # First activation must happen BEFORE any test configuration/template is
     # created. Pre-seeding templates hid the owner's first-launch failure.
     $result['CleanFirstLaunchProcessId'] = [SharpClawInstalledProbe]::Activate($result.Aumid)
+    $cleanSettingsRequested = $false
     $cleanDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     do {
         $cleanClients = @(Get-TestPackageProcesses -AllowTransientTimeout | Where-Object Name -eq 'SharpClaw.Client.Uno.exe')
@@ -703,6 +710,11 @@ try {
                 }
                 $cleanConnection = Get-TestRuntimeConnection
                 $cleanSetup = Get-TestRuntimeSetup $cleanConnection
+                if ($null -ne $cleanSetup -and -not $cleanSettingsRequested -and
+                    [SharpClawInstalledProbe]::HasVisibleEnabledElement($cleanWindows[0].Handle, 'BootSettings')) {
+                    [SharpClawInstalledProbe]::Invoke($cleanWindows[0].Handle, 'BootSettings')
+                    $cleanSettingsRequested = $true
+                }
                 if ($null -eq $cleanSetup -or -not $cleanSetup.setupRequired -or
                     -not [SharpClawInstalledProbe]::HasVisibleElement($cleanWindows[0].Handle, 'ProviderSetupApply')) {
                     Start-Sleep -Milliseconds 200
@@ -740,14 +752,21 @@ try {
     [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupModel', $TestModel)
     [SharpClawInstalledProbe]::SetValue($cleanWindows[0].Handle, 'ProviderSetupEndpoint', $TestProviderEndpoint)
     [SharpClawInstalledProbe]::Invoke($cleanWindows[0].Handle, 'ProviderSetupApply')
+    $statelessChatRequested = $false
     $configuredDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     do {
         $configuredConnection = Get-TestRuntimeConnection
         $configuredSetup = Get-TestRuntimeSetup $configuredConnection
         if ($null -ne $configuredSetup -and -not $configuredSetup.setupRequired -and
+            $configuredConnection.ProcessId -ne $originalRuntimeProcessId -and -not $statelessChatRequested -and
+            [SharpClawInstalledProbe]::HasVisibleEnabledElement($cleanWindows[0].Handle, 'BootStatelessChat')) {
+            [SharpClawInstalledProbe]::Invoke($cleanWindows[0].Handle, 'BootStatelessChat')
+            $statelessChatRequested = $true
+        }
+        if ($null -ne $configuredSetup -and -not $configuredSetup.setupRequired -and
             $configuredSetup.providerKey -eq $TestProviderKey -and $configuredSetup.model -eq $TestModel -and
             $configuredConnection.ProcessId -ne $originalRuntimeProcessId -and
-            [SharpClawInstalledProbe]::HasVisibleElement($cleanWindows[0].Handle, 'ChatMessageInput')) {
+            [SharpClawInstalledProbe]::HasVisibleEnabledElement($cleanWindows[0].Handle, 'ChatSend')) {
             $result.ConfiguredByProductUi = $true
             Save-WindowCapture $cleanWindows[0].Handle 'configured-main.png'
             break

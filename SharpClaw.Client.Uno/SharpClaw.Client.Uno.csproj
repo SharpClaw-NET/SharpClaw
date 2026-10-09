@@ -58,6 +58,7 @@
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
     <PackageReference Include="SharpClaw.Core" />
+    <PackageReference Include="SharpClaw.ModuleSDK" />
     <PackageReference Include="Supprocom.Secrets" />
     <ProjectReference Include="..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
   </ItemGroup>
@@ -169,18 +170,6 @@
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Page Update="Presentation\LegalNoticesPage.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-  </ItemGroup>
-
   <!-- Installer identity is stamped into staging, never into tracked source. -->
-
-  <ItemGroup>
-    <Page Update="Presentation\UserGuidePage.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-  </ItemGroup>
 
 </Project>

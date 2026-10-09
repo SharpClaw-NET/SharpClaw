@@ -542,6 +542,7 @@ try {
         foreach ($required in @('CleanRuntimeReady', 'CleanSetupObserved', 'Get-TestRuntimeSetup',
             "'/echo', '/readyz', '/ping'", "'/setup/provider'", 'ProviderSetupApply',
             'ConfiguredByProductUi', 'originalRuntimeProcessId', 'ChatSend',
+            'BootSettings', 'BootStatelessChat', 'HasVisibleEnabledElement',
             'response.Current.ItemStatus != "complete"', 'RealRequestCompleted', 'completed-request.png')) {
             if (-not $gate.Contains($required)) { throw "Missing actual first-run/request gate: $required" }
         }

@@ -20,7 +20,7 @@ public sealed partial class MainPage
         if (e.Key != Windows.System.VirtualKey.Enter)
             return;
 
-        if (_isSending || string.IsNullOrWhiteSpace(MessageInput.Text))
+        if (!_canChat || _isSending || string.IsNullOrWhiteSpace(MessageInput.Text))
             return;
 
         e.Handled = true;
@@ -29,7 +29,7 @@ public sealed partial class MainPage
 
     private async void OnSendClick(object sender, RoutedEventArgs e)
     {
-        if (!_isSending && !string.IsNullOrWhiteSpace(MessageInput.Text))
+        if (_canChat && !_isSending && !string.IsNullOrWhiteSpace(MessageInput.Text))
             await SendMessageAsync();
     }
 
@@ -56,22 +56,43 @@ public sealed partial class MainPage
 
     private async Task SendMessageAsync()
     {
+        // One owner covers the model check as well as the stream; repeated clicks do not queue sends.
+        if (!_sendGate.Wait(0)) return;
+        try { await SendMessageCoreAsync(); }
+        catch (Exception)
+        {
+            // Action rejection/cancellation must not crash an async UI event handler.
+        }
+        finally { _sendGate.Release(); }
+    }
+
+    private async Task SendMessageCoreAsync()
+    {
         var message = MessageInput.Text.Trim();
-        if (message.Length == 0)
+        if (!_canChat || _isSending || message.Length == 0 ||
+            _pageLifetime is not { IsCancellationRequested: false } lifetime)
             return;
 
-        using var cts = new CancellationTokenSource();
+        // Recheck immediately before transport; a previously ready view is not authority.
+        try
+        {
+            if (!await RefreshChatAvailabilityAsync(lifetime.Token)) return;
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { return; }
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         ChatBubbleRow assistant = default;
         var accepted = false;
 
         await CommitUiStateAsync(_ =>
         {
-            if (_isSending)
+            if (_isSending || !_canChat || lifetime.IsCancellationRequested)
                 return ValueTask.CompletedTask;
 
             accepted = true;
             _isSending = true;
             _streamCts = cts;
+            _streamPageToken = lifetime.Token;
             MessageInput.Text = string.Empty;
             MessageInput.IsEnabled = false;
             SendButton.IsEnabled = false;
@@ -176,11 +197,11 @@ public sealed partial class MainPage
         {
             await CommitUiStateAsync(_ =>
             {
+                if (!ReferenceEquals(_pageLifetime, lifetime)) return ValueTask.CompletedTask;
                 if (ReferenceEquals(_streamCts, cts))
                     _streamCts = null;
                 _isSending = false;
-                MessageInput.IsEnabled = true;
-                SendButton.IsEnabled = true;
+                SetChatAvailability(_canChat && !lifetime.IsCancellationRequested);
                 CancelButton.Visibility = Visibility.Collapsed;
                 MessageInput.Focus(FocusState.Programmatic);
                 ScrollToBottom();
@@ -266,10 +287,11 @@ public sealed partial class MainPage
     {
         var actions = App.Services!.GetRequiredService<ClientActionDispatcher>();
         const string stateKey = "client.chat.stream";
+        var visitToken = _streamPageToken;
         await actions.CommitStateAsync(
             stateKey,
             actions.GetStateVersion(stateKey),
-            mutation,
+            ct => visitToken.IsCancellationRequested ? ValueTask.CompletedTask : mutation(ct),
             cancellationToken);
     }
 }

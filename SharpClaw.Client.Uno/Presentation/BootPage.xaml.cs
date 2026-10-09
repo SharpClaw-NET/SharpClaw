@@ -24,6 +24,7 @@ public sealed partial class BootPage : Page
     {
         this.InitializeComponent();
         Loaded += (_, _) => ClientStartupDiagnostics.Current.Record(ClientStartupStage.BootLoaded);
+        Unloaded += (_, _) => RetireBootWork();
         KeyDown += OnKeyDown;
         Tapped += OnPageTapped;
 
@@ -37,6 +38,8 @@ public sealed partial class BootPage : Page
     }
 
     private BootModel? _model;
+    private readonly SemaphoreSlim _connectionGate = new(1, 1);
+    private bool _isActive;
     private readonly DispatcherTimer _dotsTimer;
     private int _dotsFrame;
     private TextBlock? _activeDots;
@@ -46,6 +49,7 @@ public sealed partial class BootPage : Page
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
+        _isActive = true;
 
         var services = App.Services!;
         _model ??= new BootModel(
@@ -54,6 +58,7 @@ public sealed partial class BootPage : Page
             services.GetRequiredService<SharpClawApiClient>(),
             services.GetRequiredService<FrontendInstanceService>(),
             services.GetRequiredService<ClientActionDispatcher>());
+        _model.IsAwaitingInput = false;
 
         // Cancel any in-flight connection attempt from a previous visit.
         _retryCts?.Cancel();
@@ -63,6 +68,28 @@ public sealed partial class BootPage : Page
         this.Focus(FocusState.Programmatic);
 
         _retryCts = new CancellationTokenSource();
+        var backend = services.GetRequiredService<BackendProcessManager>();
+        if (backend.IsAvailable && !backend.SkipLaunch && !backend.IsExternal &&
+            Uri.TryCreate(backend.ApiUrl, UriKind.Absolute, out var target) && target.IsLoopback)
+        {
+            try
+            {
+                var installed = services.GetRequiredService<ModulePackageStore>().ReadInstalled();
+                var bundled = ModulePackageStore.ReadIdentities(
+                    Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"), true);
+                var frontend = services.GetRequiredService<FrontendInstanceService>();
+                if (!installed.Concat(bundled).Any(module => BundledModuleSetup.IsEnabled(frontend, module.Id, module.DefaultEnabled)))
+                {
+                    Cursor.SetCommand("No modules enabled. Install modules or open Settings.");
+                    return;
+                }
+            }
+            catch
+            {
+                Cursor.SetCommand("Module configuration unavailable. Open Settings or install modules.");
+                return;
+            }
+        }
         await RunConnectionFlowAsync(customUrl: null, _retryCts.Token);
     }
 
@@ -70,6 +97,17 @@ public sealed partial class BootPage : Page
     // Main connection flow — page drives everything sequentially
     // ---------------------------------------------------------------
     private async Task RunConnectionFlowAsync(string? customUrl, CancellationToken ct)
+    {
+        try
+        {
+            await _connectionGate.WaitAsync(ct);
+            try { await RunConnectionCoreAsync(customUrl, ct); }
+            finally { _connectionGate.Release(); }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    private async Task RunConnectionCoreAsync(string? customUrl, CancellationToken ct)
     {
         _model!.IsAwaitingInput = false;
         var diag = ImmutableArray.CreateBuilder<DiagnosticLine>();
@@ -95,6 +133,7 @@ public sealed partial class BootPage : Page
 
                 // -- Step 1: Backend (silent) --
                 var backendResult = await _model.RunBackendStepAsync(ct);
+                ct.ThrowIfCancellationRequested();
                 diag.Add(backendResult.Line);
 
                 if (!backendResult.Ok)
@@ -113,6 +152,7 @@ public sealed partial class BootPage : Page
                 StartDots(DotsBlock);
 
                 var echoResult = await _model.RunEchoStepAsync(ct);
+                ct.ThrowIfCancellationRequested();
                 diag.Add(echoResult.Line);
 
                 StopDots();
@@ -135,6 +175,7 @@ public sealed partial class BootPage : Page
                 StartDots(PingDotsBlock);
 
                 var (pingResult, apiKeyLine) = await _model.RunPingStepAsync(ct);
+                ct.ThrowIfCancellationRequested();
                 if (apiKeyLine is not null) diag.Add(apiKeyLine);
                 diag.Add(pingResult.Line);
 
@@ -148,8 +189,8 @@ public sealed partial class BootPage : Page
                     if (gatewayResult is not null)
                         diag.Add(gatewayResult.Line);
 
-                    await App.Services!.GetRequiredService<ClientNavigationService>()
-                        .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
+                    // Readiness is status, never permission to leave the home page.
+                    _model.IsAwaitingInput = false;
                     return;
                 }
 
@@ -166,6 +207,8 @@ public sealed partial class BootPage : Page
             diag.Add(new DiagnosticLine("Connection", "Connection failed or was denied. Check the service configuration and diagnostics.", true));
         }
         finally { StopDots(); }
+
+        if (!_isActive) return;
 
         // -- All attempts exhausted or cancelled --
         StopDots();
@@ -389,6 +432,7 @@ public sealed partial class BootPage : Page
     // ---------------------------------------------------------------
     private async void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (e.OriginalSource is TextBox or PasswordBox or ComboBox or Button) return;
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
             e.Handled = true;
@@ -423,7 +467,7 @@ public sealed partial class BootPage : Page
 
     private void OnPageTapped(object sender, TappedRoutedEventArgs e)
     {
-        if (_model is { IsAwaitingInput: true })
+        if (ModuleInstallPanel.Visibility != Visibility.Visible && _model is { IsAwaitingInput: true })
             this.Focus(FocusState.Programmatic);
     }
 
