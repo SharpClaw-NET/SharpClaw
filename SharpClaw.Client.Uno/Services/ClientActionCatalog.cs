@@ -53,39 +53,3 @@ public static class ClientActionCatalog
         SharpClawActionCatalog.Kernel.Single(key =>
             string.Equals(key.Value, value, StringComparison.Ordinal));
 }
-
-public sealed partial record ClientActionCoverageEntry(
-    string Id,
-    string Boundary,
-    SharpClawActionKey ActionKey);
-
-public sealed record ClientActionRequestContext(
-    RequestPrincipal Caller,
-    ExtensionFeatureSet Features);
-
-public sealed record ClientCommandInvocation(
-    string Operation,
-    string Method,
-    string Path,
-    Guid CommandId,
-    string? RequestTarget = null)
-{
-    public string EffectiveRequestTarget => RequestTarget ?? Path;
-}
-
-public sealed record ClientCommandSignal(
-    Guid CommandId,
-    string Operation);
-
-public sealed record ClientNavigationInvocation(
-    string Route,
-    string? Qualifier,
-    long ExpectedVersion,
-    Guid NavigationId);
-
-public sealed record ClientStateInvocation(
-    string StateKey,
-    long ExpectedVersion,
-    Guid MutationId);
-
-public sealed class ClientActionConflictException(string message) : InvalidOperationException(message);

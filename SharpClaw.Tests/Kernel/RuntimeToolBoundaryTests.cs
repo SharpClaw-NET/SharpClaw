@@ -57,7 +57,7 @@ internal sealed class RuntimeToolBoundaryTests
     }
 
     [Test]
-    public async Task Packaged_tool_handler_runs_through_core_actions_once()
+    public async Task Packaged_tool_handler_runs_through_core_actions_onceAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new ToolProbe();
@@ -90,7 +90,7 @@ internal sealed class RuntimeToolBoundaryTests
     [TestCase("replace-input")]
     [TestCase("replace-result")]
     [TestCase("repeat")]
-    public async Task Tool_pure_controls_keep_one_handler_execution(string mode)
+    public async Task Tool_pure_controls_keep_one_handler_executionAsync(string mode)
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new ToolProbe { Mode = mode };
@@ -115,7 +115,7 @@ internal sealed class RuntimeToolBoundaryTests
 
     [TestCase("cancel")]
     [TestCase("fail")]
-    public async Task Tool_action_cancellation_or_failure_stops_before_handler(string mode)
+    public async Task Tool_action_cancellation_or_failure_stops_before_handlerAsync(string mode)
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new ToolProbe { Mode = mode };
@@ -136,7 +136,7 @@ internal sealed class RuntimeToolBoundaryTests
     }
 
     [Test]
-    public async Task Tool_actions_preserve_distinct_request_contexts()
+    public async Task Tool_actions_preserve_distinct_request_contextsAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new ToolProbe();

@@ -4,62 +4,6 @@ using SharpClaw.Core.Kernel;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
-internal static class GatewayActionManifest
-{
-    public static IReadOnlyList<SharpClawActionKey> Required { get; } =
-        SharpClawActionCatalog.Kernel
-            .Where(static key => key.Value.StartsWith(
-                "gateway.",
-                StringComparison.Ordinal))
-            .ToArray();
-
-    public static IReadOnlyList<SharpClawActionKey> BackgroundRequired { get; } =
-        SharpClawActionCatalog.Kernel
-            .Where(static key => key.Value.StartsWith(
-                "background.",
-                StringComparison.Ordinal))
-            .ToArray();
-
-    public static IReadOnlyList<SharpClawActionKey> Published { get; } =
-        Required.Concat(BackgroundRequired).ToArray();
-
-    public static void Validate(KernelGraph graph)
-    {
-        ArgumentNullException.ThrowIfNull(graph);
-
-        var missing = Published
-            .Where(key => !graph.ContainsAction(key))
-            .Select(static key => key.Value)
-            .ToArray();
-        if (missing.Length > 0)
-        {
-            throw new InvalidOperationException(
-                "The Gateway action graph is incomplete. Missing actions: " +
-                string.Join(", ", missing));
-        }
-    }
-}
-
-internal static class GatewayBackgroundActionManifest
-{
-    public static IReadOnlyList<SharpClawActionKey> Required =>
-        GatewayActionManifest.BackgroundRequired;
-}
-
-internal sealed record GatewayActionInvocation(
-    string Method,
-    string Path,
-    string Operation,
-    bool IsStream = false,
-    int ByteCount = 0);
-
-internal sealed record GatewayBackgroundServiceInvocation(string ServiceId);
-
-internal sealed record GatewayBackgroundTickInvocation(
-    string ServiceId,
-    string Operation,
-    Guid WorkId);
-
 internal sealed class GatewayBackgroundActionBoundary
 {
     private readonly KernelGraph _graph;

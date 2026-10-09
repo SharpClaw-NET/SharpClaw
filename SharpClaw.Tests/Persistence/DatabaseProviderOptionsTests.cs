@@ -201,10 +201,6 @@ internal sealed class DatabaseProviderOptionsTests
             configuration,
             SharpClawPersistenceOptions.FromConfiguration(configuration));
 
-        // This single-context migration proof intentionally loads another provider
-        // identity after the suite's many isolated graphs. Do not retain its inner
-        // service provider in EF's process-wide cache or weaken production warnings.
-        services.AddDbContext<SharpClawDbContext>(options => options.EnableServiceProviderCaching(false));
         using var serviceProvider = services.BuildServiceProvider();
         using var scope = serviceProvider.CreateScope();
         using var dbContext = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();

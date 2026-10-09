@@ -35,7 +35,7 @@ internal sealed class RuntimeHostCompositionTests
 {
     [Test]
     [NonParallelizable]
-    public async Task PackagedInProcessRegistration_ComposesHostGraphAndServesChat()
+    public async Task PackagedInProcessRegistration_ComposesHostGraphAndServesChatAsync()
     {
         var registrationRoot = AppContext.BaseDirectory;
         Directory.Exists(registrationRoot).Should().BeTrue(
@@ -198,7 +198,7 @@ internal sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task CanonicalJobsHttpPath_SubmitsAndDispatchesThroughProductionGraph()
+    public async Task CanonicalJobsHttpPath_SubmitsAndDispatchesThroughProductionGraphAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
@@ -430,7 +430,7 @@ internal sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task ConcurrentAuthenticatedHttpRequests_UseDistinctKernelRootContexts()
+    public async Task ConcurrentAuthenticatedHttpRequests_UseDistinctKernelRootContextsAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new RequestContextProbe(expected: 2);
@@ -610,7 +610,7 @@ internal sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task NormalHostPayload_ComposesPackagedProviderAndExecutesChat()
+    public async Task NormalHostPayload_ComposesPackagedProviderAndExecutesChatAsync()
     {
         var providerServer = await FakeOpenAiServer.CreateAsync().ConfigureAwait(false);
         await using var providerServerAsyncDisposal = providerServer.ConfigureAwait(false);
@@ -706,7 +706,7 @@ internal sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task NormalHostPayload_RestartRemainsStatelessWithoutContextRegistration()
+    public async Task NormalHostPayload_RestartRemainsStatelessWithoutContextRegistrationAsync()
     {
         var providerServer = await FakeOpenAiServer.CreateAsync().ConfigureAwait(false);
         await using var providerServerAsyncDisposal2 = providerServer.ConfigureAwait(false);
@@ -754,7 +754,7 @@ internal sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task NormalHostPayload_LlamaLocalModelStorePersistsThroughRestart()
+    public async Task NormalHostPayload_LlamaLocalModelStorePersistsThroughRestartAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
@@ -805,7 +805,7 @@ internal sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task NormalHostPayload_MapsLlamaSharpEndpointThroughRuntimeAndGateway()
+    public async Task NormalHostPayload_MapsLlamaSharpEndpointThroughRuntimeAndGatewayAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
@@ -890,7 +890,7 @@ internal sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task ProductionJsonColdStore_RestartHasNoHistoryWithoutContextRegistration()
+    public async Task ProductionJsonColdStore_RestartHasNoHistoryWithoutContextRegistrationAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
@@ -938,7 +938,7 @@ internal sealed class RuntimeHostCompositionTests
     }
 
     [Test]
-    public async Task MissingConfiguredProviderAllowsGraphStartupForSetup()
+    public async Task MissingConfiguredProviderAllowsGraphStartupForSetupAsync()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())

@@ -33,7 +33,7 @@ internal class InternalApiClientResolutionTests
     }
 
     [Test]
-    public async Task GetAsync_WhenExplicitApiKeyFilePathConfigured_UsesThatFile()
+    public async Task GetAsync_WhenExplicitApiKeyFilePathConfigured_UsesThatFileAsync()
     {
         var gatewayRoot = CreateTempDirectory();
         var sharedRoot = CreateTempDirectory();
@@ -74,7 +74,7 @@ internal class InternalApiClientResolutionTests
     }
 
     [Test]
-    public async Task GetAsync_WhenDiscoveryMatchesSelectedBackend_UsesDiscoveryRuntimeFiles()
+    public async Task GetAsync_WhenDiscoveryMatchesSelectedBackend_UsesDiscoveryRuntimeFilesAsync()
     {
         var gatewayRoot = CreateTempDirectory();
         var sharedRoot = CreateTempDirectory();

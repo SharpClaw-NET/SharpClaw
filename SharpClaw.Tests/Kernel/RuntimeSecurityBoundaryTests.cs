@@ -32,7 +32,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Security_actions_use_published_descriptors_and_isolate_request_contexts()
+    public async Task Security_actions_use_published_descriptors_and_isolate_request_contextsAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new SecurityProbe();
@@ -68,7 +68,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Api_key_middleware_allows_valid_keys_and_denies_missing_keys_through_security_action()
+    public async Task Api_key_middleware_allows_valid_keys_and_denies_missing_keys_through_security_actionAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new SecurityProbe();
@@ -113,7 +113,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Api_key_repeat_does_not_repeat_the_protected_pipeline()
+    public async Task Api_key_repeat_does_not_repeat_the_protected_pipelineAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new SecurityProbe { RepeatAction = "security.api_key.resolve" };
@@ -147,7 +147,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Api_key_result_replacement_cannot_grant_invalid_base_authority()
+    public async Task Api_key_result_replacement_cannot_grant_invalid_base_authorityAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new SecurityProbe
@@ -179,7 +179,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Api_key_input_replacement_cannot_grant_invalid_base_authority()
+    public async Task Api_key_input_replacement_cannot_grant_invalid_base_authorityAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new SecurityProbe
@@ -210,7 +210,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Security_result_replacement_can_restrict_but_cannot_grant_the_base_decision()
+    public async Task Security_result_replacement_can_restrict_but_cannot_grant_the_base_decisionAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var restrictingProbe = new SecurityProbe
@@ -242,7 +242,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Session_administrator_and_secret_actions_fail_closed()
+    public async Task Session_administrator_and_secret_actions_fail_closedAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var actionKeys = new[]
@@ -279,7 +279,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Security_action_cancellation_does_not_run_the_terminal()
+    public async Task Security_action_cancellation_does_not_run_the_terminalAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var adapter = CreateAdapter(workspace, new SecurityProbe());
@@ -303,7 +303,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Security_action_failure_is_returned_without_running_the_terminal()
+    public async Task Security_action_failure_is_returned_without_running_the_terminalAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new SecurityProbe { FailureAction = "security.secret.delete" };

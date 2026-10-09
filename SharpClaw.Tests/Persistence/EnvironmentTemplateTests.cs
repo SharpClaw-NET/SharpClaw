@@ -14,7 +14,7 @@ namespace SharpClaw.Tests.Persistence;
 internal sealed class EnvironmentTemplateTests
 {
     [Test]
-    public async Task MissingActiveEnvironment_IsCreatedFromDotenvTemplateAndProtected()
+    public async Task MissingActiveEnvironment_IsCreatedFromDotenvTemplateAndProtectedAsync()
     {
         using var workspace = TempWorkspace.Create();
         var template = "Admin__Username=TemplateAdmin\n";
@@ -30,7 +30,7 @@ internal sealed class EnvironmentTemplateTests
     }
 
     [Test]
-    public async Task PlaintextActiveEnvironment_IsProtectedAfterSuccessfulLoad()
+    public async Task PlaintextActiveEnvironment_IsProtectedAfterSuccessfulLoadAsync()
     {
         using var workspace = TempWorkspace.Create();
         var template = "Admin__Username=TemplateAdmin\n";
@@ -46,7 +46,7 @@ internal sealed class EnvironmentTemplateTests
     }
 
     [Test]
-    public async Task WrongKeyProtectedActiveEnvironment_IsQuarantinedAndRestored()
+    public async Task WrongKeyProtectedActiveEnvironment_IsQuarantinedAndRestoredAsync()
     {
         using var workspace = TempWorkspace.Create();
         workspace.Write(".env.template", "Admin__Username=RecoveredAdmin\n");
@@ -64,7 +64,7 @@ internal sealed class EnvironmentTemplateTests
     }
 
     [Test]
-    public async Task InvalidPlaintextActiveEnvironment_IsQuarantinedBeforeConfigurationBuild()
+    public async Task InvalidPlaintextActiveEnvironment_IsQuarantinedBeforeConfigurationBuildAsync()
     {
         using var workspace = TempWorkspace.Create();
         workspace.Write(".env.template", "Admin__Username=RecoveredAdmin\n");
@@ -97,7 +97,7 @@ internal sealed class EnvironmentTemplateTests
     }
 
     [Test]
-    public async Task NonEmptyReadableActiveEnvironment_IsNotOverwrittenByTemplate()
+    public async Task NonEmptyReadableActiveEnvironment_IsNotOverwrittenByTemplateAsync()
     {
         using var workspace = TempWorkspace.Create();
         workspace.Write(".env.template", "Admin__Username=TemplateAdmin\n");
@@ -127,7 +127,7 @@ internal sealed class EnvironmentTemplateTests
     }
 
     [Test]
-    public async Task PlaintextJsonWithComments_IsImportedOnceToProtectedDotenv()
+    public async Task PlaintextJsonWithComments_IsImportedOnceToProtectedDotenvAsync()
     {
         using var workspace = TempWorkspace.Create();
         workspace.Write(".env.template", "Admin__Username=TemplateAdmin\n");
@@ -147,7 +147,7 @@ internal sealed class EnvironmentTemplateTests
     }
 
     [Test]
-    public async Task EncryptedJsonWithComments_IsImportedOnceWithTheExistingInstallationKey()
+    public async Task EncryptedJsonWithComments_IsImportedOnceWithTheExistingInstallationKeyAsync()
     {
         using var workspace = TempWorkspace.Create();
         workspace.Write(".env.template", "Admin__Username=TemplateAdmin\n");
@@ -263,7 +263,7 @@ internal sealed class EnvironmentTemplateTests
     }
 
     [Test]
-    public async Task DocumentStore_ReadReplaceAndRestart_UsesCompletePlaintextDocument()
+    public async Task DocumentStore_ReadReplaceAndRestart_UsesCompletePlaintextDocumentAsync()
     {
         using var workspace = TempWorkspace.Create();
         workspace.Write(".env.template", "Api__Url=http://127.0.0.1:48923\n");
@@ -281,7 +281,7 @@ internal sealed class EnvironmentTemplateTests
     }
 
     [Test]
-    public async Task ProtectionManager_UnprotectsThenNextLoadReprotects()
+    public async Task ProtectionManager_UnprotectsThenNextLoadReprotectsAsync()
     {
         using var workspace = TempWorkspace.Create();
         workspace.Write(".env.template", "Admin__Username=TemplateAdmin\n");

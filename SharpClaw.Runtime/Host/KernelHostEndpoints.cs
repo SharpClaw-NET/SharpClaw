@@ -202,5 +202,3 @@ internal static class KernelHostEndpoints
         return new Guid(digest.AsSpan(0, 16));
     }
 }
-
-internal sealed record DirectChatRequest(string Message, Guid? ConversationId = null);

@@ -27,7 +27,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task ReadAsync_EnforcesRecordAndByteCaps()
+    public async Task ReadAsync_EnforcesRecordAndByteCapsAsync()
     {
         var root = CreateRoot();
         var store = CreateStore(root);
@@ -53,7 +53,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task ReadAsync_RejectsCallerScanBudgetsAboveTheStoreCeiling()
+    public async Task ReadAsync_RejectsCallerScanBudgetsAboveTheStoreCeilingAsync()
     {
         var root = CreateRoot();
         var store = CreateStore(root);
@@ -74,7 +74,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task SealAsync_EvictsIdleStateAndReadsDoNotRetainIt()
+    public async Task SealAsync_EvictsIdleStateAndReadsDoNotRetainItAsync()
     {
         var root = CreateRoot();
         var store = CreateStore(root);
@@ -116,7 +116,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task ReadAsync_EvaluatesTheRecordThatCrossesTheScanBudget()
+    public async Task ReadAsync_EvaluatesTheRecordThatCrossesTheScanBudgetAsync()
     {
         var root = CreateRoot();
         var store = CreateStore(root);
@@ -163,7 +163,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task Reopen_RecoversAFlushedFooterLeftBeforeRename()
+    public async Task Reopen_RecoversAFlushedFooterLeftBeforeRenameAsync()
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());
@@ -198,7 +198,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task IdempotentAppend_SurvivesRestartWithoutDuplicatingTheRecord()
+    public async Task IdempotentAppend_SurvivesRestartWithoutDuplicatingTheRecordAsync()
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());
@@ -229,7 +229,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task AppendModesExposeBufferedAndDurableFlushSemantics()
+    public async Task AppendModesExposeBufferedAndDurableFlushSemanticsAsync()
     {
         var root = CreateRoot();
         var store = CreateStore(root);
@@ -245,7 +245,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task ReadAsync_ReadsLegacyAdditiveRecordBodyWithoutMigration()
+    public async Task ReadAsync_ReadsLegacyAdditiveRecordBodyWithoutMigrationAsync()
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Process("runtime", Guid.NewGuid());
@@ -279,7 +279,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task BufferedIdempotentAppend_SealRebuildsADeletedDerivedIndex()
+    public async Task BufferedIdempotentAppend_SealRebuildsADeletedDerivedIndexAsync()
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());
@@ -316,7 +316,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task ReadAsync_RejectsWrongKeysAndSealedSegmentCorruption()
+    public async Task ReadAsync_RejectsWrongKeysAndSealedSegmentCorruptionAsync()
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Process("runtime", Guid.NewGuid());
@@ -361,7 +361,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task OperationalCatalogEnumeratesTypedBootsAcrossRestartWithoutReadingBodies()
+    public async Task OperationalCatalogEnumeratesTypedBootsAcrossRestartWithoutReadingBodiesAsync()
     {
         var root = CreateRoot();
         var processBoot = Guid.Empty;
@@ -458,7 +458,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task OperationalCatalogSkipsMalformedMetadataAndKeepsValidBoots()
+    public async Task OperationalCatalogSkipsMalformedMetadataAndKeepsValidBootsAsync()
     {
         var root = CreateRoot();
         var invalidKey = DurableStreamKey.Process("invalid", Guid.NewGuid());
@@ -506,7 +506,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task OperationalCatalogReportsLegacyIdentityGapInsteadOfScanningBodies()
+    public async Task OperationalCatalogReportsLegacyIdentityGapInsteadOfScanningBodiesAsync()
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Process("legacy", Guid.NewGuid());
@@ -550,7 +550,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task OperationalCatalogBoundsSummariesAndMetadataScan()
+    public async Task OperationalCatalogBoundsSummariesAndMetadataScanAsync()
     {
         var root = CreateRoot();
         try
@@ -618,7 +618,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task Retention_DeletesOnlyASealedPrefixAndPersistsExpiryWatermarks()
+    public async Task Retention_DeletesOnlyASealedPrefixAndPersistsExpiryWatermarksAsync()
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());
@@ -659,7 +659,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task ArtifactReferenceIndex_TracksRetainedRecordsAndPrunesExpiredPrefixes()
+    public async Task ArtifactReferenceIndex_TracksRetainedRecordsAndPrunesExpiredPrefixesAsync()
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());
@@ -696,7 +696,7 @@ internal sealed class DurableSegmentStoreTests
     }
 
     [Test]
-    public async Task Retention_RecoversAndExpiresAnUntrackedCrashOpenSegment()
+    public async Task Retention_RecoversAndExpiresAnUntrackedCrashOpenSegmentAsync()
     {
         var root = CreateRoot();
         var key = DurableStreamKey.Job(Guid.NewGuid());

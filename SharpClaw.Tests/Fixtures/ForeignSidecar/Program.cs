@@ -866,10 +866,3 @@ static async Task WriteTextAsync(
     await stream.WriteAsync(headers).ConfigureAwait(false);
     await stream.WriteAsync(bytes).ConfigureAwait(false);
 }
-
-internal sealed record SidecarRequest(
-    string Method,
-    string Path,
-    string Query,
-    IReadOnlyDictionary<string, string> Headers,
-    string Body);

@@ -926,7 +926,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
           FileShare.Read,
           4096,
           FileOptions.Asynchronous | FileOptions.WriteThrough);
-        await using var streamAsyncDisposal_ = stream.ConfigureAwait(false);
+        await using var streamAsyncDisposal = stream.ConfigureAwait(false);
         stream.Position = stream.Length;
         await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(authentication, cancellationToken).ConfigureAwait(false);
@@ -949,7 +949,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
           FileShare.ReadWrite,
           4096,
           FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using var streamAsyncDisposal__ = stream.ConfigureAwait(false);
+        await using var streamAsyncDisposal = stream.ConfigureAwait(false);
         if (stream.Length % ArtifactReferenceEntryBytes != 0)
         {
             throw new InvalidDataException(
@@ -1327,7 +1327,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
               FileShare.ReadWrite,
               4096,
               FileOptions.Asynchronous | FileOptions.SequentialScan);
-            await using var streamAsyncDisposal___ = stream.ConfigureAwait(false);
+            await using var streamAsyncDisposal = stream.ConfigureAwait(false);
             var header = await ReadHeaderAsync(stream, cancellationToken)
                 .ConfigureAwait(false);
             var activeCount = 0L;
@@ -2178,7 +2178,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
               FileShare.ReadWrite,
               64 * 1024,
               FileOptions.Asynchronous | FileOptions.SequentialScan);
-            await using var streamAsyncDisposal____ = stream.ConfigureAwait(false);
+            await using var streamAsyncDisposal = stream.ConfigureAwait(false);
             var header = await ReadHeaderAsync(stream, cancellationToken)
                 .ConfigureAwait(false);
             while (stream.Position < stream.Length)
@@ -2251,7 +2251,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
           FileShare.Read,
           4096,
           FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using var streamAsyncDisposal_____ = stream.ConfigureAwait(false);
+        await using var streamAsyncDisposal = stream.ConfigureAwait(false);
         var manifest = await JsonSerializer.DeserializeAsync<StreamManifest>(
                 stream,
                 cancellationToken: cancellationToken)
@@ -2348,7 +2348,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
           FileShare.Read,
           4096,
           FileOptions.Asynchronous | FileOptions.RandomAccess);
-        await using var streamAsyncDisposal______ = stream.ConfigureAwait(false);
+        await using var streamAsyncDisposal = stream.ConfigureAwait(false);
         if (stream.Length < SegmentHeaderBytes + FooterBytes)
             throw new InvalidDataException("Sealed segment is too short.");
         stream.Position = stream.Length - FooterBytes;
@@ -2376,7 +2376,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
           FileShare.ReadWrite,
           64 * 1024,
           FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using var streamAsyncDisposal_______ = stream.ConfigureAwait(false);
+        await using var streamAsyncDisposal = stream.ConfigureAwait(false);
         var buffer = new byte[64 * 1024];
         long remaining = length;
         while (remaining > 0)

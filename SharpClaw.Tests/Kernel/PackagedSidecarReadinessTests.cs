@@ -42,7 +42,7 @@ internal sealed class PackagedSidecarReadinessTests
     }
 
     [Test]
-    public async Task ColdSidecarCanBecomeReadyAfterTheFormerThirtySecondDeadline()
+    public async Task ColdSidecarCanBecomeReadyAfterTheFormerThirtySecondDeadlineAsync()
     {
         var clock = new ElapsedClock();
         var probes = 0;
@@ -63,7 +63,7 @@ internal sealed class PackagedSidecarReadinessTests
     }
 
     [Test]
-    public async Task ExplicitShortBudgetStillRejectsTheSameSlowSidecar()
+    public async Task ExplicitShortBudgetStillRejectsTheSameSlowSidecarAsync()
     {
         var clock = new ElapsedClock();
         var probes = 0;
@@ -82,7 +82,7 @@ internal sealed class PackagedSidecarReadinessTests
     }
 
     [Test]
-    public async Task ExitedProcessFailsWithoutWaitingOrProbing()
+    public async Task ExitedProcessFailsWithoutWaitingOrProbingAsync()
     {
         var probes = 0;
         using var handler = new ProbeHandler((_, _) =>
@@ -100,7 +100,7 @@ internal sealed class PackagedSidecarReadinessTests
     }
 
     [Test]
-    public async Task BootstrapBudgetCancelsAnInFlightProbe()
+    public async Task BootstrapBudgetCancelsAnInFlightProbeAsync()
     {
         using var handler = new ProbeHandler(async (_, token) =>
         {
@@ -117,7 +117,7 @@ internal sealed class PackagedSidecarReadinessTests
     }
 
     [Test]
-    public async Task CallerCancellationIsNotReportedAsStartupTimeout()
+    public async Task CallerCancellationIsNotReportedAsStartupTimeoutAsync()
     {
         using var caller = new CancellationTokenSource();
         using var handler = new ProbeHandler(async (_, token) =>
@@ -134,7 +134,7 @@ internal sealed class PackagedSidecarReadinessTests
     }
 
     [Test]
-    public async Task RejectedReadinessStatusNeverGrantsReadiness()
+    public async Task RejectedReadinessStatusNeverGrantsReadinessAsync()
     {
         var clock = new ElapsedClock();
         using var handler = new ProbeHandler((_, _) =>
@@ -150,7 +150,7 @@ internal sealed class PackagedSidecarReadinessTests
     }
 
     [Test]
-    public async Task LateSuccessfulResponseCannotBypassTheBootstrapDeadline()
+    public async Task LateSuccessfulResponseCannotBypassTheBootstrapDeadlineAsync()
     {
         var clock = new ElapsedClock();
         using var handler = new ProbeHandler((_, _) =>

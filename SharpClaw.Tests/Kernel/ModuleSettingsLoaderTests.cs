@@ -26,7 +26,7 @@ internal sealed class ModuleSettingsLoaderTests
     [TestCase("in-process")]
     [TestCase("sidecar")]
     [NonParallelizable]
-    public async Task ImportedIndependentPackageUsesProductionLoaderAndItsOwnSettingsEndpoints(string mode)
+    public async Task ImportedIndependentPackageUsesProductionLoaderAndItsOwnSettingsEndpointsAsync(string mode)
     {
         using var workspace = new Workspace();
         var source = workspace.CreatePayload(mode);

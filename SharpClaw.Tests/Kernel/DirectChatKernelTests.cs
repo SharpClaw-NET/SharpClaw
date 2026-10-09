@@ -14,7 +14,7 @@ internal sealed class DirectChatKernelTests
     [TestCase(null)]
     [TestCase("")]
     [TestCase(" ")]
-    public async Task MissingModelDoesNotResolveOrInvokeAProvider(string? name)
+    public async Task MissingModelDoesNotResolveOrInvokeAProviderAsync(string? name)
     {
         var resolutions = 0;
         var transport = new ProviderKernelTransport(_ =>
@@ -38,7 +38,7 @@ internal sealed class DirectChatKernelTests
     }
 
     [Test]
-    public async Task Conversation_gate_serializes_reclamation_with_reacquisition()
+    public async Task Conversation_gate_serializes_reclamation_with_reacquisitionAsync()
     {
         var releaseEntered = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -78,7 +78,7 @@ internal sealed class DirectChatKernelTests
     }
 
     [Test]
-    public async Task Direct_kernel_runs_one_canonical_provider_turn_and_persists_history()
+    public async Task Direct_kernel_runs_one_canonical_provider_turn_and_persists_historyAsync()
     {
         var provider = new RecordingProviderClient();
         var conversationId = Guid.NewGuid();
@@ -100,7 +100,7 @@ internal sealed class DirectChatKernelTests
     }
 
     [Test]
-    public async Task Tool_aware_buffered_and_streaming_calls_send_one_combined_system_prompt()
+    public async Task Tool_aware_buffered_and_streaming_calls_send_one_combined_system_promptAsync()
     {
         var provider = new RecordingProviderClient();
         var transport = new ProviderKernelTransport(provider);
@@ -134,7 +134,7 @@ internal sealed class DirectChatKernelTests
     }
 
     [Test]
-    public async Task Direct_kernel_honors_explicit_conversation_and_cancellation()
+    public async Task Direct_kernel_honors_explicit_conversation_and_cancellationAsync()
     {
         var provider = new RecordingProviderClient();
         var store = new InMemoryConversationStore();
@@ -164,7 +164,7 @@ internal sealed class DirectChatKernelTests
     }
 
     [Test]
-    public async Task Direct_kernel_streams_the_complete_turn_and_commits_history()
+    public async Task Direct_kernel_streams_the_complete_turn_and_commits_historyAsync()
     {
         var provider = new RecordingProviderClient();
         var store = new InMemoryConversationStore();
@@ -199,7 +199,7 @@ internal sealed class DirectChatKernelTests
     }
 
     [Test]
-    public async Task Direct_kernel_stream_cancellation_stops_before_commit()
+    public async Task Direct_kernel_stream_cancellation_stops_before_commitAsync()
     {
         var provider = new BlockingProviderClient();
         var store = new InMemoryConversationStore();
@@ -229,7 +229,7 @@ internal sealed class DirectChatKernelTests
     }
 
     [Test]
-    public async Task Direct_kernel_serializes_load_provider_and_commit_for_one_conversation()
+    public async Task Direct_kernel_serializes_load_provider_and_commit_for_one_conversationAsync()
     {
         var conversationId = Guid.NewGuid();
         var provider = new SequencedProviderClient();
@@ -276,7 +276,7 @@ internal sealed class DirectChatKernelTests
         IAsyncEnumerable<ChatStreamChunk> stream,
         CancellationToken cancellationToken)
     {
-        await foreach (var _ in stream.WithCancellation(cancellationToken))
+        await foreach (var _ in stream.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
         }
     }

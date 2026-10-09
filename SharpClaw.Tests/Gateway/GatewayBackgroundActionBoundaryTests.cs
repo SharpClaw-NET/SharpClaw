@@ -30,7 +30,7 @@ internal sealed class GatewayBackgroundActionBoundaryTests
     }
 
     [Test]
-    public async Task Boundary_routes_service_tick_and_stop_through_one_dispatcher()
+    public async Task Boundary_routes_service_tick_and_stop_through_one_dispatcherAsync()
     {
         var probe = new BackgroundProbe();
         var boundary = CreateBoundary(probe);
@@ -58,7 +58,7 @@ internal sealed class GatewayBackgroundActionBoundaryTests
     }
 
     [Test]
-    public async Task ReplaceResult_without_terminal_fails_closed_and_does_not_run_work()
+    public async Task ReplaceResult_without_terminal_fails_closed_and_does_not_run_workAsync()
     {
         var probe = new BackgroundProbe { ReplaceResultAction = "background.tick.execute" };
         var boundary = CreateBoundary(probe);
@@ -82,7 +82,7 @@ internal sealed class GatewayBackgroundActionBoundaryTests
     }
 
     [Test]
-    public async Task Action_cancellation_routes_cancel_without_running_work()
+    public async Task Action_cancellation_routes_cancel_without_running_workAsync()
     {
         var probe = new BackgroundProbe { CancelAction = "background.tick.execute" };
         var boundary = CreateBoundary(probe);
@@ -106,7 +106,7 @@ internal sealed class GatewayBackgroundActionBoundaryTests
     }
 
     [Test]
-    public async Task Work_failure_routes_fail_once_and_does_not_complete()
+    public async Task Work_failure_routes_fail_once_and_does_not_completeAsync()
     {
         var probe = new BackgroundProbe();
         var boundary = CreateBoundary(probe);
@@ -127,7 +127,7 @@ internal sealed class GatewayBackgroundActionBoundaryTests
     }
 
     [Test]
-    public async Task Concurrent_ticks_have_isolated_action_contexts()
+    public async Task Concurrent_ticks_have_isolated_action_contextsAsync()
     {
         var probe = new BackgroundProbe();
         var boundary = CreateBoundary(probe);

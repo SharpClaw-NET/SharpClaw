@@ -4,25 +4,6 @@ using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Services;
 
-internal enum ClientStartupStage
-{
-    DesktopHostStarting,
-    DuplicateActivation,
-    AppInitializing,
-    AppInitialized,
-    LaunchStarting,
-    InstanceReady,
-    BuilderReady,
-    NavigationScheduled,
-    WindowActivated,
-    InitialNavigationStarting,
-    BootLoaded,
-    NavigationReady,
-    StartupFailed,
-    UnhandledException,
-    DesktopHostStopped,
-}
-
 /// <summary>
 /// A synchronous, profile-writable startup journal independent of DI, Serilog and
 /// the native window. Never records exception messages, configuration or secrets.

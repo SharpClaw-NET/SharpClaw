@@ -42,7 +42,7 @@ internal sealed class RuntimeCliBoundaryTests
     }
 
     [Test]
-    public async Task Local_cli_help_runs_parse_select_execute_output_and_complete_once()
+    public async Task Local_cli_help_runs_parse_select_execute_output_and_complete_onceAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new CliProbe();
@@ -75,7 +75,7 @@ internal sealed class RuntimeCliBoundaryTests
     }
 
     [Test]
-    public async Task Local_cli_unknown_command_runs_failure_output_and_completion()
+    public async Task Local_cli_unknown_command_runs_failure_output_and_completionAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new CliProbe();
@@ -114,7 +114,7 @@ internal sealed class RuntimeCliBoundaryTests
     }
 
     [Test]
-    public async Task Local_cli_parse_failure_runs_failure_output_without_exposing_exception_text()
+    public async Task Local_cli_parse_failure_runs_failure_output_without_exposing_exception_textAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new CliProbe();
@@ -149,7 +149,7 @@ internal sealed class RuntimeCliBoundaryTests
     }
 
     [Test]
-    public async Task Local_cli_cancellation_runs_cancel_and_output_with_the_same_context()
+    public async Task Local_cli_cancellation_runs_cancel_and_output_with_the_same_contextAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new CliProbe();
@@ -186,7 +186,7 @@ internal sealed class RuntimeCliBoundaryTests
     }
 
     [Test]
-    public async Task Local_cli_typed_action_cancellation_runs_cancel_and_output_without_failure()
+    public async Task Local_cli_typed_action_cancellation_runs_cancel_and_output_without_failureAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new CliProbe
@@ -228,7 +228,7 @@ internal sealed class RuntimeCliBoundaryTests
     }
 
     [Test]
-    public async Task Local_cli_action_cancellation_reaches_in_flight_chat_without_caller_cancellation()
+    public async Task Local_cli_action_cancellation_reaches_in_flight_chat_without_caller_cancellationAsync()
     {
         using var workspace = new TemporaryWorkspace();
         using var actionCancellation = new CancellationTokenSource();
@@ -278,7 +278,7 @@ internal sealed class RuntimeCliBoundaryTests
     }
 
     [Test]
-    public async Task Concurrent_cli_sessions_use_distinct_root_contexts_without_a_second_dispatcher()
+    public async Task Concurrent_cli_sessions_use_distinct_root_contexts_without_a_second_dispatcherAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new CliProbe();

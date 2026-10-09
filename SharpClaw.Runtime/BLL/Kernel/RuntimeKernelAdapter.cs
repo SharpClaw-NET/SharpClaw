@@ -854,7 +854,7 @@ public sealed class RuntimeKernelAdapter :
                             "Runtime request stream terminal cannot execute more than once.");
                     }
 
-                    await foreach (var item in terminal(effectiveRequest, ct).WithCancellation(ct))
+                    await foreach (var item in terminal(effectiveRequest, ct).WithCancellation(ct).ConfigureAwait(false))
                         await writer.WriteAsync(item, ct).ConfigureAwait(false);
 
                     terminalCompleted = true;

@@ -16,7 +16,7 @@ namespace SharpClaw.Tests.Kernel;
 internal sealed class RuntimeKernelAdapterTests
 {
     [Test]
-    public async Task ProviderModelCatalogUsesTheRegisteredProviderWithoutInference()
+    public async Task ProviderModelCatalogUsesTheRegisteredProviderWithoutInferenceAsync()
     {
         var provider = new RecordingProviderClient();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -34,7 +34,7 @@ internal sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
-    public async Task Adapter_compiles_registration_graph_and_routes_direct_chat_through_registration_provider()
+    public async Task Adapter_compiles_registration_graph_and_routes_direct_chat_through_registration_providerAsync()
     {
         var provider = new RecordingProviderClient();
         var module = new ProviderModule(provider);
@@ -74,7 +74,7 @@ internal sealed class RuntimeKernelAdapterTests
     [TestCase(null)]
     [TestCase("")]
     [TestCase(" ")]
-    public async Task UnconfiguredAdapterStartsAndServesNonChatActionsWithoutCreatingAClient(string? key)
+    public async Task UnconfiguredAdapterStartsAndServesNonChatActionsWithoutCreatingAClientAsync(string? key)
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
@@ -94,7 +94,7 @@ internal sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
-    public async Task CredentialConfigurationIsNotRequiredToConstructOrStartTheHostGraph()
+    public async Task CredentialConfigurationIsNotRequiredToConstructOrStartTheHostGraphAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var provider = new RecordingProviderClient(requiresApiKey: true);
@@ -121,7 +121,7 @@ internal sealed class RuntimeKernelAdapterTests
     }
 
     [TestCase(true), TestCase(false)]
-    public async Task Module_profile_routes_each_turn_and_module_prompt_reaches_each_provider_once(bool hostDefaultConfigured)
+    public async Task Module_profile_routes_each_turn_and_module_prompt_reaches_each_provider_onceAsync(bool hostDefaultConfigured)
     {
         var primary = new RecordingProviderClient();
         var alternate = new RecordingProviderClient("alternate");
@@ -164,7 +164,7 @@ internal sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
-    public async Task Adapter_dispatches_request_ingress_through_the_compiled_action_graph()
+    public async Task Adapter_dispatches_request_ingress_through_the_compiled_action_graphAsync()
     {
         var provider = new RecordingProviderClient();
         var module = new ProviderModule(provider);
@@ -204,7 +204,7 @@ internal sealed class RuntimeKernelAdapterTests
     [TestCase(false), TestCase(true)]
     [Parallelizable]
     [CancelAfter(90_000)]
-    public async Task RequestHandlerOutlivesIngressDeadlineWithoutChangingKernelBudgets(bool streaming)
+    public async Task RequestHandlerOutlivesIngressDeadlineWithoutChangingKernelBudgetsAsync(bool streaming)
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder().Build();
@@ -265,7 +265,7 @@ internal sealed class RuntimeKernelAdapterTests
     [TestCase(false, "cancel-receive"), TestCase(true, "cancel-receive")]
     [TestCase(false, "cancel-handler"), TestCase(true, "cancel-handler")]
     [TestCase(false, "replace-handler-result"), TestCase(true, "replace-handler-result")]
-    public async Task RequestStagesPreserveModuleControlsAndCallerAuthority(bool streaming, string mode)
+    public async Task RequestStagesPreserveModuleControlsAndCallerAuthorityAsync(bool streaming, string mode)
     {
         ArgumentNullException.ThrowIfNull(mode);
         using var workspace = new TemporaryWorkspace();
@@ -344,7 +344,7 @@ internal sealed class RuntimeKernelAdapterTests
     }
 
     [TestCase(false), TestCase(true)]
-    public async Task RequestCancellationBeforeIngressDoesNotInvokeHandler(bool streaming)
+    public async Task RequestCancellationBeforeIngressDoesNotInvokeHandlerAsync(bool streaming)
     {
         using var workspace = new TemporaryWorkspace();
         var adapter = RuntimeKernelAdapterTestFactory.Create(new ConfigurationBuilder().Build(), [],
@@ -408,7 +408,7 @@ internal sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
-    public async Task Adapter_compiles_and_runs_the_complete_published_jobs_catalog()
+    public async Task Adapter_compiles_and_runs_the_complete_published_jobs_catalogAsync()
     {
         var provider = new RecordingProviderClient();
         var configuration = new ConfigurationBuilder()
@@ -457,7 +457,7 @@ internal sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
-    public async Task Jobs_boundary_rejects_cancellation_before_the_terminal()
+    public async Task Jobs_boundary_rejects_cancellation_before_the_terminalAsync()
     {
         var provider = new RecordingProviderClient();
         var configuration = new ConfigurationBuilder()
@@ -513,7 +513,7 @@ internal sealed class RuntimeKernelAdapterTests
             new JobPayloadEnvelope("test", 1, "{}"));
 
     [Test]
-    public async Task Request_stream_replace_result_without_terminal_fails_closed()
+    public async Task Request_stream_replace_result_without_terminal_fails_closedAsync()
     {
         var provider = new RecordingProviderClient();
         var module = new StreamReplacementRegistration(provider);
@@ -598,7 +598,7 @@ internal sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
-    public async Task Adapter_uses_stateless_chat_without_context_registration()
+    public async Task Adapter_uses_stateless_chat_without_context_registrationAsync()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>

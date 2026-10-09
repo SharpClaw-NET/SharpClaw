@@ -6,11 +6,3 @@ public sealed record SharpClawProviderSetup(
     string? ProviderKey,
     string? Model,
     IReadOnlyList<SharpClawProviderSetupOption> Providers);
-
-public sealed record SharpClawProviderSetupOption(
-    string Key,
-    string DisplayName,
-    bool RequiresApiKey,
-    bool RequiresEndpoint);
-
-public sealed record SharpClawProviderModels(string ProviderKey, IReadOnlyList<string> Models);

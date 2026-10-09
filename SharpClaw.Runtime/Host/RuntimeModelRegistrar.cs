@@ -39,7 +39,7 @@ internal sealed class RuntimeModelRegistrar(IServiceScopeFactory scopeFactory) :
         CancellationToken ct = default)
     {
         var scope = scopeFactory.CreateAsyncScope();
-        await using var scopeAsyncDisposal_ = scope.ConfigureAwait(false);
+        await using var scopeAsyncDisposal = scope.ConfigureAwait(false);
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var existing = await db.Models
             .FirstOrDefaultAsync(model => model.Name == modelName && model.ProviderId == providerId, ct).ConfigureAwait(false);
@@ -62,7 +62,7 @@ internal sealed class RuntimeModelRegistrar(IServiceScopeFactory scopeFactory) :
         CancellationToken ct = default)
     {
         var scope = scopeFactory.CreateAsyncScope();
-        await using var scopeAsyncDisposal__ = scope.ConfigureAwait(false);
+        await using var scopeAsyncDisposal = scope.ConfigureAwait(false);
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var model = await db.Models
             .Include(value => value.Provider)
@@ -82,7 +82,7 @@ internal sealed class RuntimeModelRegistrar(IServiceScopeFactory scopeFactory) :
     public async Task<bool> DeleteModelAsync(Guid modelId, CancellationToken ct = default)
     {
         var scope = scopeFactory.CreateAsyncScope();
-        await using var scopeAsyncDisposal___ = scope.ConfigureAwait(false);
+        await using var scopeAsyncDisposal = scope.ConfigureAwait(false);
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var model = await db.Models.FirstOrDefaultAsync(value => value.Id == modelId, ct).ConfigureAwait(false);
         if (model is null)

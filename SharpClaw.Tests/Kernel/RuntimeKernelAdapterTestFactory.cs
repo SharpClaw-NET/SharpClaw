@@ -47,10 +47,3 @@ internal static class RuntimeKernelAdapterTestFactory
             provider.Dispose();
     }
 }
-
-[SetUpFixture]
-internal sealed class RuntimeKernelAdapterTestServices
-{
-    [OneTimeTearDown]
-    public void DisposeProviders() => RuntimeKernelAdapterTestFactory.DisposeProviders();
-}

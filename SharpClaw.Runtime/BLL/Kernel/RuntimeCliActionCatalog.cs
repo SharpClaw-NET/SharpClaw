@@ -34,10 +34,3 @@ internal static class RuntimeCliActionCatalog
         SharpClawActionCatalog.Kernel.Single(key =>
             string.Equals(key.Value, value, StringComparison.Ordinal));
 }
-
-/// <summary>Non-secret metadata carried by one Runtime CLI action.</summary>
-internal sealed record RuntimeCliActionInvocation(
-    string Stage,
-    string? Command,
-    int ArgumentCount,
-    string? FailureType = null);

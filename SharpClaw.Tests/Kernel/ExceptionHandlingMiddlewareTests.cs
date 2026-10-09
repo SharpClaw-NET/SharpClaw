@@ -13,7 +13,7 @@ namespace SharpClaw.Tests.Kernel;
 internal sealed class ExceptionHandlingMiddlewareTests
 {
     [Test]
-    public async Task GenericFailure_ReturnsStableMessageWithoutInternalDetails()
+    public async Task GenericFailure_ReturnsStableMessageWithoutInternalDetailsAsync()
     {
         var body = new MemoryStream();
         await using var bodyAsyncDisposal = body.ConfigureAwait(false);
@@ -32,22 +32,22 @@ internal sealed class ExceptionHandlingMiddlewareTests
     }
 
     [Test]
-    public Task InvalidOperationFailure_ReturnsStable500WithoutInternalDetails()
+    public Task InvalidOperationFailure_ReturnsStable500WithoutInternalDetailsAsync()
         => AssertGeneralFailureIsRedactedAsync(
             new InvalidOperationException("manifest path and provider registration detail"));
 
     [Test]
-    public Task NotSupportedFailure_ReturnsStable500WithoutInternalDetails()
+    public Task NotSupportedFailure_ReturnsStable500WithoutInternalDetailsAsync()
         => AssertGeneralFailureIsRedactedAsync(
             new NotSupportedException("unsupported provider capability detail"));
 
     [Test]
-    public Task HttpRequestFailure_ReturnsStable500WithoutInternalDetails()
+    public Task HttpRequestFailure_ReturnsStable500WithoutInternalDetailsAsync()
         => AssertGeneralFailureIsRedactedAsync(
             new HttpRequestException("upstream address and transport detail"));
 
     [Test]
-    public async Task RequestCancellation_ReturnsClientClosedStatusWithoutServerErrorBody()
+    public async Task RequestCancellation_ReturnsClientClosedStatusWithoutServerErrorBodyAsync()
     {
         var body = new MemoryStream();
         await using var bodyAsyncDisposal_ = body.ConfigureAwait(false);
@@ -67,7 +67,7 @@ internal sealed class ExceptionHandlingMiddlewareTests
     }
 
     [Test]
-    public async Task FailureAfterResponseStarted_IsRethrown()
+    public async Task FailureAfterResponseStarted_IsRethrownAsync()
     {
         var context = new DefaultHttpContext();
         context.Features.Set<IHttpResponseFeature>(new StartedResponseFeature());

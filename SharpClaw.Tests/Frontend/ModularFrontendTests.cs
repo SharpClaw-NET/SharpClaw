@@ -30,7 +30,7 @@ internal sealed class ModularFrontendTests
     }
 
     [Test]
-    public async Task ChatReadinessUsesOnlyMetadataAndRejectsDiscoveryFailure()
+    public async Task ChatReadinessUsesOnlyMetadataAndRejectsDiscoveryFailureAsync()
     {
         var requests = new List<string>();
         var failCatalog = false;

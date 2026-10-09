@@ -11,29 +11,6 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Services;
 
-internal sealed partial record InstalledModuleIdentity(string Id, string DisplayName, string Version,
-    bool DefaultEnabled = true, bool Bundled = false);
-internal sealed record ModulePayloadFile(string Path, long Length, string Sha256);
-internal sealed record InstalledModuleReceipt(
-    int SchemaVersion, string InstallationId, IReadOnlyList<InstalledModuleIdentity> Modules,
-    IReadOnlyList<ModulePayloadFile> Files);
-
-/// <summary>An inspected, non-executed candidate whose owned scratch is retired when the view leaves.</summary>
-internal sealed class PreparedModulePackage : IDisposable
-{
-    internal PreparedModulePackage(string root, IReadOnlyList<InstalledModuleIdentity> modules,
-        IReadOnlyList<ModulePayloadFile> files)
-    { Root = root; Modules = modules; Files = files; }
-
-    internal string Root { get; }
-    public IReadOnlyList<InstalledModuleIdentity> Modules { get; }
-    internal IReadOnlyList<ModulePayloadFile> Files { get; }
-    public void Dispose()
-    {
-        if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
-    }
-}
-
 /// <summary>Imports data only. Activation always goes through ExternalRegistrations and the production loader.</summary>
 internal sealed class ModulePackageStore : IDisposable
 {
@@ -70,9 +47,9 @@ internal sealed class ModulePackageStore : IDisposable
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         var stage = Path.Combine(_root, "inspection-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(stage);
         try
         {
+            Directory.CreateDirectory(stage);
             var payload = Path.Combine(stage, "payload");
             Directory.CreateDirectory(payload);
             if (source.LocalPath is { } local && Directory.Exists(local))
@@ -85,13 +62,13 @@ internal sealed class ModulePackageStore : IDisposable
                 var archivePath = Path.Combine(stage, "source.zip");
                 {
                     var output = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                    await using (output.ConfigureAwait(true))
+                    await using (output.ConfigureAwait(false))
                     {
                         if (source.LocalPath is { } file)
                         {
                             RequireNoLinks(file);
                             var input = File.OpenRead(file);
-                            await using var inputAsyncDisposal = input.ConfigureAwait(true);
+                            await using var inputAsyncDisposal = input.ConfigureAwait(false);
                             await ModulePackageSources.CopyBoundedAsync(input, output, MaximumArchiveBytes, cancellationToken).ConfigureAwait(false);
                         }
                         else await _sources.DownloadAsync(source, output, githubToken, cancellationToken).ConfigureAwait(false);
@@ -229,7 +206,7 @@ internal sealed class ModulePackageStore : IDisposable
     private static async Task ExtractAsync(string archivePath, string destination, CancellationToken cancellationToken)
     {
         var archive = await ZipFile.OpenReadAsync(archivePath, cancellationToken).ConfigureAwait(false);
-        await using var archiveAsyncDisposal = archive.ConfigureAwait(true);
+        await using var archiveAsyncDisposal = archive.ConfigureAwait(false);
         if (archive.Entries.Count > MaximumFiles) throw new InvalidDataException("Too many module archive entries.");
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         long total = 0;
@@ -249,9 +226,9 @@ internal sealed class ModulePackageStore : IDisposable
             if (entry.Length < 0 || total > MaximumExpandedBytes) throw new InvalidDataException("Expanded module exceeds its size limit.");
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
             var output = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            await using var outputAsyncDisposal = output.ConfigureAwait(true);
+            await using var outputAsyncDisposal = output.ConfigureAwait(false);
             var input = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await using var inputAsyncDisposal2 = input.ConfigureAwait(true);
+            await using var inputAsyncDisposal = input.ConfigureAwait(false);
             await ModulePackageSources.CopyBoundedAsync(input, output, entry.Length, cancellationToken).ConfigureAwait(false);
             if (output.Length != entry.Length) throw new InvalidDataException("Module archive entry length mismatch.");
         }
@@ -281,9 +258,9 @@ internal sealed class ModulePackageStore : IDisposable
                 if (total > MaximumExpandedBytes) throw new InvalidDataException("Module directory exceeds its size limit.");
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 var input = File.OpenRead(entry);
-                await using var inputAsyncDisposal_ = input.ConfigureAwait(true);
+                await using var inputAsyncDisposal = input.ConfigureAwait(false);
                 var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                await using var outputAsyncDisposal_ = output.ConfigureAwait(true);
+                await using var outputAsyncDisposal = output.ConfigureAwait(false);
                 await ModulePackageSources.CopyBoundedAsync(input, output, length, cancellationToken).ConfigureAwait(false);
                 if (output.Length != length) throw new InvalidDataException("Module source changed while copying.");
             }
@@ -297,7 +274,7 @@ internal sealed class ModulePackageStore : IDisposable
         {
             RequireNoLinks(path);
             var input = File.OpenRead(path);
-            await using var inputAsyncDisposal__ = input.ConfigureAwait(true);
+            await using var inputAsyncDisposal = input.ConfigureAwait(false);
             result.Add(new(Path.GetRelativePath(root, path), input.Length,
                 Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken).ConfigureAwait(false))));
         }

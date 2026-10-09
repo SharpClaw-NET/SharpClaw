@@ -47,7 +47,7 @@ internal sealed class BundledProviderSetupTests
     }
 
     [Test]
-    public async Task Local_setup_uses_the_existing_protected_document_and_requires_a_new_runtime_generation()
+    public async Task Local_setup_uses_the_existing_protected_document_and_requires_a_new_runtime_generationAsync()
     {
         using var scope = new SetupScope();
         await scope.Backend.EnsureStartedAsync().ConfigureAwait(false);
@@ -66,7 +66,7 @@ internal sealed class BundledProviderSetupTests
     }
 
     [Test]
-    public async Task Invalid_credentials_preserve_the_document_and_do_not_stop_the_running_runtime()
+    public async Task Invalid_credentials_preserve_the_document_and_do_not_stop_the_running_runtimeAsync()
     {
         using var scope = new SetupScope();
         var store = new SupprocomSecretFileStore(RuntimeEnvironment.CreateSecretsOptions(
@@ -83,7 +83,7 @@ internal sealed class BundledProviderSetupTests
     }
 
     [Test]
-    public async Task External_runtime_is_never_written_or_stopped_by_local_setup()
+    public async Task External_runtime_is_never_written_or_stopped_by_local_setupAsync()
     {
         using var scope = new SetupScope();
         using var external = new BackendProcessManager("http://127.0.0.1:48923",
@@ -104,7 +104,7 @@ internal sealed class BundledProviderSetupTests
     }
 
     [Test]
-    public async Task Retargeted_runtime_does_not_gain_write_authority_from_a_still_running_owned_process()
+    public async Task Retargeted_runtime_does_not_gain_write_authority_from_a_still_running_owned_processAsync()
     {
         using var scope = new SetupScope();
         await scope.Backend.EnsureStartedAsync().ConfigureAwait(false);

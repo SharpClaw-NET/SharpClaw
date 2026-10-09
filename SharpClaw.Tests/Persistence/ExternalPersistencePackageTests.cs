@@ -25,7 +25,7 @@ internal sealed class ExternalPersistencePackageTests
     private readonly List<string> _temporaryDirectories = [];
 
     [TearDown]
-    public async Task TearDown()
+    public async Task TearDownAsync()
     {
         try
         {
@@ -39,7 +39,7 @@ internal sealed class ExternalPersistencePackageTests
     }
 
     [Test]
-    public async Task ProductionLoader_UsesIndependentlyPackagedExternalPersistenceProvider()
+    public async Task ProductionLoader_UsesIndependentlyPackagedExternalPersistenceProviderAsync()
     {
         var packagePath = Path.Combine(
             FindSourceRoot(),

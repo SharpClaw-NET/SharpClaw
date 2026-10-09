@@ -6,10 +6,6 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Services;
 
-internal sealed record ModulePackageSource(
-    string Name, string? LocalPath = null, Uri? Download = null,
-    string? PackageId = null, string? Version = null, string? GitHubUsername = null);
-
 /// <summary>Anonymous by default. Explicit package credentials never reach Runtime or redirects.</summary>
 internal sealed class ModulePackageSources : IDisposable
 {
@@ -162,7 +158,7 @@ internal sealed class ModulePackageSources : IDisposable
         using var response = await OpenAsync(uri, owner, token, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using var bodyAsyncDisposal = body.ConfigureAwait(true);
+        await using var bodyAsyncDisposal = body.ConfigureAwait(false);
         using var bounded = new MemoryStream();
         await CopyBoundedAsync(body, bounded, 2 * 1024 * 1024, cancellationToken).ConfigureAwait(false);
         return JsonDocument.Parse(bounded.ToArray(), new JsonDocumentOptions { MaxDepth = 16 });
@@ -175,7 +171,7 @@ internal sealed class ModulePackageSources : IDisposable
         if (response.Content.Headers.ContentLength > ModulePackageStore.MaximumArchiveBytes)
             throw new InvalidDataException("Module archive exceeds the download limit.");
         var body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using var bodyAsyncDisposal2 = body.ConfigureAwait(true);
+        await using var bodyAsyncDisposal = body.ConfigureAwait(false);
         await CopyBoundedAsync(body, destination, ModulePackageStore.MaximumArchiveBytes, cancellationToken).ConfigureAwait(false);
     }
 

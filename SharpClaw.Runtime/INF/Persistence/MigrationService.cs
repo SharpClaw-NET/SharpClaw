@@ -71,14 +71,3 @@ public sealed class MigrationService(
         return new(gate.State, applied, pending);
     }
 }
-
-/// <summary>Result of a migration attempt.</summary>
-public record MigrationResult(bool Applied, bool AlreadyInProgress, IReadOnlyList<string> Migrations, string Message)
-{
-    public static MigrationResult Success(List<string> names) => new(true, false, names, $"Applied {names.Count} migration(s).");
-    public static MigrationResult NoPending() => new(false, false, [], "No pending migrations.");
-    public static MigrationResult AlreadyRunning() => new(false, true, [], "A migration is already in progress.");
-}
-
-/// <summary>Current migration status snapshot.</summary>
-public record MigrationStatusResult(MigrationState State, IReadOnlyList<string> Applied, IReadOnlyList<string> Pending);

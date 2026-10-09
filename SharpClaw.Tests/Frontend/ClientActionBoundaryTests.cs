@@ -44,7 +44,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Command_runs_the_complete_lifecycle_once()
+    public async Task Command_runs_the_complete_lifecycle_onceAsync()
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
@@ -64,7 +64,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Repeat_retries_only_the_repeatable_receive_action()
+    public async Task Repeat_retries_only_the_repeatable_receive_actionAsync()
     {
         var probe = new ClientProbe { RepeatAction = ClientActionCatalog.CommandReceive.Value };
         var dispatcher = CreateDispatcher(
@@ -91,7 +91,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ReplaceInput_changes_only_the_action_payload_seen_by_the_terminal()
+    public async Task ReplaceInput_changes_only_the_action_payload_seen_by_the_terminalAsync()
     {
         var probe = new ClientProbe
         {
@@ -114,7 +114,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ReplaceResult_changes_the_result_without_repeating_the_terminal()
+    public async Task ReplaceResult_changes_the_result_without_repeating_the_terminalAsync()
     {
         var probe = new ClientProbe
         {
@@ -141,7 +141,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Typed_action_cancellation_runs_cancel_without_failure_or_terminal()
+    public async Task Typed_action_cancellation_runs_cancel_without_failure_or_terminalAsync()
     {
         var probe = new ClientProbe { CancelAction = ClientActionCatalog.CommandDispatch.Value };
         var dispatcher = CreateDispatcher(probe);
@@ -161,7 +161,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task In_flight_command_cancellation_reaches_the_terminal_token()
+    public async Task In_flight_command_cancellation_reaches_the_terminal_tokenAsync()
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
@@ -191,7 +191,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Failure_runs_fail_without_completion()
+    public async Task Failure_runs_fail_without_completionAsync()
     {
         var probe = new ClientProbe { FailureAction = ClientActionCatalog.CommandDispatch.Value };
         var dispatcher = CreateDispatcher(probe);
@@ -210,7 +210,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Concurrent_commands_keep_root_contexts_isolated()
+    public async Task Concurrent_commands_keep_root_contexts_isolatedAsync()
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
@@ -232,7 +232,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Completed_cancelled_and_failed_commands_do_not_leak_contexts()
+    public async Task Completed_cancelled_and_failed_commands_do_not_leak_contextsAsync()
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
@@ -262,7 +262,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Navigation_serializes_commits_and_rejects_stale_versions()
+    public async Task Navigation_serializes_commits_and_rejects_stale_versionsAsync()
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
@@ -290,7 +290,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Navigation_repeat_runs_the_host_terminal_once()
+    public async Task Navigation_repeat_runs_the_host_terminal_onceAsync()
     {
         var probe = new ClientProbe
         {
@@ -316,7 +316,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Navigation_result_replacement_cannot_claim_a_host_commit()
+    public async Task Navigation_result_replacement_cannot_claim_a_host_commitAsync()
     {
         var probe = new ClientProbe
         {
@@ -341,7 +341,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task State_commits_serialize_and_reject_stale_versions()
+    public async Task State_commits_serialize_and_reject_stale_versionsAsync()
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
@@ -368,7 +368,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task State_repeat_runs_the_host_terminal_once()
+    public async Task State_repeat_runs_the_host_terminal_onceAsync()
     {
         var probe = new ClientProbe
         {
@@ -395,7 +395,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task State_result_replacement_cannot_claim_a_host_commit()
+    public async Task State_result_replacement_cannot_claim_a_host_commitAsync()
     {
         var probe = new ClientProbe
         {
@@ -421,7 +421,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Repeat_without_host_evidence_fails_before_the_commit_terminal()
+    public async Task Repeat_without_host_evidence_fails_before_the_commit_terminalAsync()
     {
         var probe = new ClientProbe
         {
@@ -446,7 +446,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Production_dispatcher_composes_the_authoritative_client_registration()
+    public async Task Production_dispatcher_composes_the_authoritative_client_registrationAsync()
     {
         var source = new ClientActionContextSource();
         var dispatcher = ClientActionDispatcher.CreateProduction(source);
@@ -464,7 +464,7 @@ internal sealed class ClientActionBoundaryTests
     [TestCase("command")]
     [TestCase("navigation")]
     [TestCase("state")]
-    public async Task ProductionTerminalPreservesCallerUiContext(string operation)
+    public async Task ProductionTerminalPreservesCallerUiContextAsync(string operation)
     {
         using var ui = new TestUiSynchronizationContext();
         var source = new ClientActionContextSource();
@@ -525,7 +525,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ClientTerminalContextCancelsQueuedWorkWithoutLateMutation()
+    public async Task ClientTerminalContextCancelsQueuedWorkWithoutLateMutationAsync()
     {
         var ui = new HeldUiSynchronizationContext();
         var affinity = new ClientTerminalContext(ui);
@@ -546,7 +546,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ClientTerminalContextDoesNotCompleteCancellationAheadOfStartedEffects()
+    public async Task ClientTerminalContextDoesNotCompleteCancellationAheadOfStartedEffectsAsync()
     {
         var ui = new HeldUiSynchronizationContext();
         var affinity = new ClientTerminalContext(ui);
@@ -577,7 +577,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ClientTerminalContextPropagatesFailureWithoutRepeatingEffects()
+    public async Task ClientTerminalContextPropagatesFailureWithoutRepeatingEffectsAsync()
     {
         var ui = new HeldUiSynchronizationContext();
         var affinity = new ClientTerminalContext(ui);
@@ -598,7 +598,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ClientTerminalContextRejectsAnUnavailableUiQueueBeforeMutation()
+    public async Task ClientTerminalContextRejectsAnUnavailableUiQueueBeforeMutationAsync()
     {
         var affinity = new ClientTerminalContext(new RejectedUiSynchronizationContext());
         var calls = 0;
@@ -612,7 +612,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ClientTerminalContextLeavesBackgroundTerminalsOnTheirCallingThread()
+    public async Task ClientTerminalContextLeavesBackgroundTerminalsOnTheirCallingThreadAsync()
     {
         await Task.Run(async () =>
         {
@@ -627,7 +627,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ClientTerminalContextRejectsSuppressedExecutionFlowBeforePosting()
+    public async Task ClientTerminalContextRejectsSuppressedExecutionFlowBeforePostingAsync()
     {
         var ui = new HeldUiSynchronizationContext();
         var affinity = new ClientTerminalContext(ui);
@@ -648,7 +648,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ProductionObserverAllowsATerminalLongerThanFiveSeconds()
+    public async Task ProductionObserverAllowsATerminalLongerThanFiveSecondsAsync()
     {
         var sink = new ProductionContextSink();
         var dispatcher = ClientActionDispatcher.CreateProduction(
@@ -700,7 +700,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task ProductionObserverPreservesCallerCancellationWithoutRepeatingTheTerminal()
+    public async Task ProductionObserverPreservesCallerCancellationWithoutRepeatingTheTerminalAsync()
     {
         var sink = new ProductionContextSink();
         var dispatcher = ClientActionDispatcher.CreateProduction(
@@ -732,7 +732,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Production_graph_keeps_callers_and_features_isolated()
+    public async Task Production_graph_keeps_callers_and_features_isolatedAsync()
     {
         var source = new ClientActionContextSource();
         var sink = new ProductionContextSink();
@@ -777,7 +777,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Api_client_sends_the_accepted_effective_method_and_path()
+    public async Task Api_client_sends_the_accepted_effective_method_and_pathAsync()
     {
         var probe = new ClientProbe
         {
@@ -812,7 +812,7 @@ internal sealed class ClientActionBoundaryTests
     [TestCase("supplied", true)]
     [TestCase("stream", false)]
     [TestCase("stream", true)]
-    public async Task Authority_bearing_request_target_is_rejected_before_transport(
+    public async Task Authority_bearing_request_target_is_rejected_before_transportAsync(
         string sendKind,
         bool replaceInput)
     {
@@ -878,7 +878,7 @@ internal sealed class ClientActionBoundaryTests
     [TestCase("https://attacker.example/steal")]
     [TestCase("file:///tmp/steal")]
     [TestCase("custom:steal")]
-    public async Task Scheme_bearing_request_target_is_rejected_before_transport(string hostileTarget)
+    public async Task Scheme_bearing_request_target_is_rejected_before_transportAsync(string hostileTarget)
     {
         var dispatcher = CreateDispatcher(new ClientProbe());
         var handler = new CapturingHandler();
@@ -904,7 +904,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Concurrent_retarget_keeps_each_request_key_bound_to_its_target()
+    public async Task Concurrent_retarget_keeps_each_request_key_bound_to_its_targetAsync()
     {
         const string targetA = "http://runtime-a.test:48923/";
         const string targetB = "http://runtime-b.test:48923/";
@@ -970,7 +970,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Runtime_apply_retargets_after_readiness_with_one_state_transition()
+    public async Task Runtime_apply_retargets_after_readiness_with_one_state_transitionAsync()
     {
         const string targetA = "http://runtime-a.test:48923/";
         const string targetB = "http://runtime-b.test:48923/";
@@ -1012,7 +1012,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Boot_retry_retargets_after_a_failed_probe()
+    public async Task Boot_retry_retargets_after_a_failed_probeAsync()
     {
         const string targetA = "http://runtime-a.test:48923/";
         const string targetB = "http://runtime-b.test:48923/";
@@ -1061,7 +1061,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Stream_command_stays_open_until_consumption_cancellation()
+    public async Task Stream_command_stays_open_until_consumption_cancellationAsync()
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
@@ -1102,7 +1102,7 @@ internal sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Stream_command_failure_is_inside_the_command_boundary()
+    public async Task Stream_command_failure_is_inside_the_command_boundaryAsync()
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
@@ -1260,7 +1260,7 @@ internal sealed class ClientActionBoundaryTests
             Path.Combine(clientRoot, "Presentation", "MainPage.xaml.cs"),
             Path.Combine(clientRoot, "Presentation", "MainPage.Chat.cs"),
             Path.Combine(clientRoot, "Presentation", "MainPage.Navigation.cs"),
-            Path.Combine(clientRoot, "Presentation", "UnoClientState.cs"),
+            Path.Combine(clientRoot, "Presentation", "UnoSseStreamState.cs"),
         })
         {
             var source = File.ReadAllText(path);

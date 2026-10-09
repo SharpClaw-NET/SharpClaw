@@ -5,13 +5,6 @@ using SharpClaw.Runtime.INF.Persistence;
 namespace SharpClaw.Runtime.INF.Persistence;
 
 /// <summary>
-/// Provider-neutral hint for <see cref="IPersistenceEntityResolver"/> queries.
-/// Core services express the FK property name and value; the resolver decides
-/// whether a cold index can satisfy the query more efficiently.
-/// </summary>
-public sealed record PersistenceQueryHint(string PropertyName, Guid Value);
-
-/// <summary>
 /// Provider-neutral abstraction for entity lookup and query that works for
 /// every configured storage provider.
 /// <para>

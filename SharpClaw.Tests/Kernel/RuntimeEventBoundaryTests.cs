@@ -30,7 +30,7 @@ internal sealed class RuntimeEventBoundaryTests
     }
 
     [Test]
-    public async Task Inline_publish_runs_the_declared_event_actions_once()
+    public async Task Inline_publish_runs_the_declared_event_actions_onceAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new EventProbe();
@@ -55,7 +55,7 @@ internal sealed class RuntimeEventBoundaryTests
     }
 
     [Test]
-    public async Task Define_replacement_flows_to_the_committed_event()
+    public async Task Define_replacement_flows_to_the_committed_eventAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new EventProbe
@@ -74,7 +74,7 @@ internal sealed class RuntimeEventBoundaryTests
     }
 
     [Test]
-    public async Task Durable_publish_enqueues_one_runtime_event_after_delivery()
+    public async Task Durable_publish_enqueues_one_runtime_event_after_deliveryAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var sink = new RecordingSink();
@@ -91,7 +91,7 @@ internal sealed class RuntimeEventBoundaryTests
     }
 
     [Test]
-    public async Task Replace_result_without_terminal_fails_closed()
+    public async Task Replace_result_without_terminal_fails_closedAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new EventProbe
@@ -112,7 +112,7 @@ internal sealed class RuntimeEventBoundaryTests
     }
 
     [Test]
-    public async Task Cancellation_dispatches_failure_without_delivery()
+    public async Task Cancellation_dispatches_failure_without_deliveryAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new EventProbe
@@ -131,7 +131,7 @@ internal sealed class RuntimeEventBoundaryTests
     }
 
     [Test]
-    public async Task Delivery_sink_routes_enqueue_mutation_through_the_event_action()
+    public async Task Delivery_sink_routes_enqueue_mutation_through_the_event_actionAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new EventProbe();
@@ -160,7 +160,7 @@ internal sealed class RuntimeEventBoundaryTests
     }
 
     [Test]
-    public async Task Outbox_state_transitions_run_through_the_declared_event_actions_once()
+    public async Task Outbox_state_transitions_run_through_the_declared_event_actions_onceAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new EventProbe();

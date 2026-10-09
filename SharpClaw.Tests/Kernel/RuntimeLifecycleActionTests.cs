@@ -28,7 +28,7 @@ internal sealed class RuntimeLifecycleActionTests
     ];
 
     [Test]
-    public async Task Adapter_routes_the_complete_K01_lifecycle_through_one_action_path()
+    public async Task Adapter_routes_the_complete_K01_lifecycle_through_one_action_pathAsync()
     {
         var probe = new LifecycleProbe();
         using var workspace = new TemporaryWorkspace();
@@ -68,7 +68,7 @@ internal sealed class RuntimeLifecycleActionTests
     }
 
     [Test]
-    public async Task Cancelled_K01_action_does_not_run_its_terminal_or_start_the_host()
+    public async Task Cancelled_K01_action_does_not_run_its_terminal_or_start_the_hostAsync()
     {
         var probe = new LifecycleProbe { CancelAction = "runtime.start.prepare" };
         using var workspace = new TemporaryWorkspace();
@@ -92,7 +92,7 @@ internal sealed class RuntimeLifecycleActionTests
     [TestCase(false), TestCase(true)]
     [Parallelizable]
     [CancelAfter(90_000)]
-    public async Task StartupInitializationOutlivesShortPreparationWithoutRepeating(bool withModule)
+    public async Task StartupInitializationOutlivesShortPreparationWithoutRepeatingAsync(bool withModule)
     {
         var probe = new LifecycleProbe();
         using var workspace = new TemporaryWorkspace();
@@ -127,7 +127,7 @@ internal sealed class RuntimeLifecycleActionTests
     }
 
     [TestCase("cancel"), TestCase("fail"), TestCase("replace-input"), TestCase("replace-result"), TestCase("repeat")]
-    public async Task InitializationModuleCannotSkipOrRepeatRequiredTerminal(string operation)
+    public async Task InitializationModuleCannotSkipOrRepeatRequiredTerminalAsync(string operation)
     {
         var probe = new LifecycleProbe { InitializationOperation = operation };
         using var workspace = new TemporaryWorkspace();
@@ -149,7 +149,7 @@ internal sealed class RuntimeLifecycleActionTests
     }
 
     [TestCase("skip"), TestCase("swallow-failure")]
-    public async Task InitializationCannotReportSuccessWithoutCompletedTerminal(string operation)
+    public async Task InitializationCannotReportSuccessWithoutCompletedTerminalAsync(string operation)
     {
         var probe = new LifecycleProbe { InitializationOperation = operation };
         using var workspace = new TemporaryWorkspace();
@@ -168,7 +168,7 @@ internal sealed class RuntimeLifecycleActionTests
     }
 
     [Test]
-    public async Task ReplacedPreparationSuccessDoesNotAuthorizeInitialization()
+    public async Task ReplacedPreparationSuccessDoesNotAuthorizeInitializationAsync()
     {
         var probe = new LifecycleProbe { SkipPreparation = true };
         using var workspace = new TemporaryWorkspace();
@@ -186,7 +186,7 @@ internal sealed class RuntimeLifecycleActionTests
     }
 
     [TestCase(false), TestCase(true)]
-    public async Task CallerCancellationPreventsInitializationSuccess(bool duringTerminal)
+    public async Task CallerCancellationPreventsInitializationSuccessAsync(bool duringTerminal)
     {
         var probe = new LifecycleProbe();
         using var workspace = new TemporaryWorkspace();
@@ -214,7 +214,7 @@ internal sealed class RuntimeLifecycleActionTests
     }
 
     [Test]
-    public async Task StartupPreparationAndInitializationShareHostIdentityButNotDeadline()
+    public async Task StartupPreparationAndInitializationShareHostIdentityButNotDeadlineAsync()
     {
         var probe = new LifecycleProbe();
         using var workspace = new TemporaryWorkspace();
@@ -232,32 +232,32 @@ internal sealed class RuntimeLifecycleActionTests
     }
 
     [Test]
-    public Task StopPrepareCancellation_still_runs_host_cleanup() =>
+    public Task StopPrepareCancellation_still_runs_host_cleanupAsync() =>
         AssertCleanupAfterStopInterceptionAsync(
             "runtime.stop.prepare",
             cancel: true);
 
     [Test]
-    public Task StopPrepareFailure_still_runs_host_cleanup() =>
+    public Task StopPrepareFailure_still_runs_host_cleanupAsync() =>
         AssertCleanupAfterStopInterceptionAsync(
             "runtime.stop.prepare",
             cancel: false);
 
     [Test]
-    public Task StopCompleteCancellation_still_runs_host_cleanup() =>
+    public Task StopCompleteCancellation_still_runs_host_cleanupAsync() =>
         AssertCleanupAfterStopInterceptionAsync(
             "runtime.stop.complete",
             cancel: true);
 
     [Test]
-    public Task StopCompleteFailure_still_runs_host_cleanup() =>
+    public Task StopCompleteFailure_still_runs_host_cleanupAsync() =>
         AssertCleanupAfterStopInterceptionAsync(
             "runtime.stop.complete",
             cancel: false);
 
     [Test]
     [NonParallelizable]
-    public async Task Shutdown_stops_listener_before_registrations_and_rejects_new_requests()
+    public async Task Shutdown_stops_listener_before_registrations_and_rejects_new_requestsAsync()
     {
         var probe = new LifecycleProbe();
         using var workspace = new TemporaryWorkspace();

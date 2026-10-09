@@ -89,6 +89,3 @@ public sealed class MigrationGate : IDisposable
         public void Dispose() => g.ReleaseMigration();
     }
 }
-
-/// <summary>Migration gate states.</summary>
-public enum MigrationState { Idle, Draining, Migrating }

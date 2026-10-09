@@ -3,23 +3,6 @@ using SharpClaw.Services;
 
 namespace SharpClaw.Presentation;
 
-public sealed record BootState(
-    string Icon,
-    Windows.UI.Color IconColor,
-    string Text,
-    Windows.UI.Color TextColor,
-    bool IsRetryVisible,
-    ImmutableArray<DiagnosticLine> DiagnosticLog = default);
-
-/// <summary>A single diagnostic probe result shown on the boot page.</summary>
-public sealed record DiagnosticLine(
-    string Label,
-    string Result,
-    bool IsError);
-
-/// <summary>Result of a single diagnostic step.</summary>
-public sealed record StepResult(bool Ok, DiagnosticLine Line, bool CanRetry = true);
-
 public sealed class BootModel
 {
     private readonly BackendProcessManager _backend;

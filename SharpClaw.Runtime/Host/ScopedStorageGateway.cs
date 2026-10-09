@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Runtime.INF.Persistence;
@@ -51,7 +52,7 @@ internal sealed class ScopedStorageGateway(
 
         var transactionRunner = transactionRunnerAccessor.GetRequiredRunner();
         var transaction = await transactionRunner.BeginSerializableAsync(ct).ConfigureAwait(false);
-        await using var transactionAsyncDisposal = transaction.ConfigureAwait(false);
+        await using var transactionAsyncDisposal = new OptionalTransactionDisposal(transaction).ConfigureAwait(false);
         try
         {
             var pending = new List<PendingMutation>(request.Mutations.Count);
@@ -188,7 +189,7 @@ internal sealed class ScopedStorageGateway(
         var claim = ReadClaim(contract, parameters.RootElement);
         var transactionRunner = transactionRunnerAccessor.GetRequiredRunner();
         var transaction = await transactionRunner.BeginSerializableAsync(ct).ConfigureAwait(false);
-        await using var transactionAsyncDisposal2 = transaction.ConfigureAwait(false);
+        await using var transactionAsyncDisposal = new OptionalTransactionDisposal(transaction).ConfigureAwait(false);
         try
         {
             var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct).ConfigureAwait(false);
@@ -555,7 +556,7 @@ internal sealed class ScopedStorageGateway(
         var claim = ReadClaim(contract, parameters);
         var transactionRunner = transactionRunnerAccessor.GetRequiredRunner();
         var transaction = await transactionRunner.BeginSerializableAsync(ct).ConfigureAwait(false);
-        await using var transactionAsyncDisposal3 = transaction.ConfigureAwait(false);
+        await using var transactionAsyncDisposal = new OptionalTransactionDisposal(transaction).ConfigureAwait(false);
         try
         {
             var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct).ConfigureAwait(false);
@@ -1442,6 +1443,11 @@ internal sealed class ScopedStorageGateway(
                 $"Registration storage sort direction '{direction}' is not supported.",
                 nameof(direction)),
         };
+
+    private readonly struct OptionalTransactionDisposal(IDbContextTransaction? transaction) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => transaction?.DisposeAsync() ?? ValueTask.CompletedTask;
+    }
 
     private sealed record StorageWrite(
         string Key,

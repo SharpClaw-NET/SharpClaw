@@ -17,8 +17,3 @@ public static class RuntimeSecurityActionManifest
     public static bool Contains(SharpClawActionKey key) =>
         Required.Contains(key);
 }
-
-/// <summary>Redacted input passed to one Runtime security action.</summary>
-public sealed record RuntimeSecurityActionInvocation(
-    string Operation,
-    string Resource);

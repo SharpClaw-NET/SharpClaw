@@ -44,7 +44,7 @@ internal sealed class GatewayActionBoundaryTests
     }
 
     [Test]
-    public async Task Buffered_request_uses_one_root_context_for_all_gateway_actions()
+    public async Task Buffered_request_uses_one_root_context_for_all_gateway_actionsAsync()
     {
         var probe = new GatewayProbe();
         var boundary = CreateBoundary(probe);
@@ -73,7 +73,7 @@ internal sealed class GatewayActionBoundaryTests
     }
 
     [Test]
-    public async Task Concurrent_requests_keep_principal_and_context_authority_isolated()
+    public async Task Concurrent_requests_keep_principal_and_context_authority_isolatedAsync()
     {
         var probe = new GatewayProbe();
         var boundary = CreateBoundary(probe);
@@ -95,7 +95,7 @@ internal sealed class GatewayActionBoundaryTests
     }
 
     [Test]
-    public async Task Replace_result_without_forward_terminal_fails_closed()
+    public async Task Replace_result_without_forward_terminal_fails_closedAsync()
     {
         var probe = new GatewayProbe { ReplaceAction = "gateway.request.forward" };
         var boundary = CreateBoundary(probe);
@@ -115,7 +115,7 @@ internal sealed class GatewayActionBoundaryTests
     }
 
     [Test]
-    public async Task Action_cancellation_stops_forwarding_and_dispatches_cancel()
+    public async Task Action_cancellation_stops_forwarding_and_dispatches_cancelAsync()
     {
         var probe = new GatewayProbe { CancelAction = "gateway.request.forward" };
         var boundary = CreateBoundary(probe);
@@ -135,7 +135,7 @@ internal sealed class GatewayActionBoundaryTests
     }
 
     [Test]
-    public async Task Authorization_replacement_cannot_grant_a_denied_request()
+    public async Task Authorization_replacement_cannot_grant_a_denied_requestAsync()
     {
         var probe = new GatewayProbe { RestrictAction = "gateway.request.authorize" };
         var boundary = CreateBoundary(probe);
@@ -155,7 +155,7 @@ internal sealed class GatewayActionBoundaryTests
     }
 
     [Test]
-    public async Task Stream_chunks_are_dispatched_with_cancellation_and_failure_visibility()
+    public async Task Stream_chunks_are_dispatched_with_cancellation_and_failure_visibilityAsync()
     {
         var probe = new GatewayProbe();
         var boundary = CreateBoundary(probe);

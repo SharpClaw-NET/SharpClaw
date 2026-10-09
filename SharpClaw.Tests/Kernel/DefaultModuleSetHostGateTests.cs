@@ -35,7 +35,7 @@ internal sealed class DefaultModuleSetHostGateTests
     ];
 
     [TestCase(true), TestCase(false), CancelAfter(300000)]
-    public async Task ProductionHost_ComposesDefaultModulesWithoutArchivedAgentOrchestration(bool configured)
+    public async Task ProductionHost_ComposesDefaultModulesWithoutArchivedAgentOrchestrationAsync(bool configured)
     {
         var initialSidecars = FindSidecarProcessIds();
         var provider = await FakeOpenAiServer.CreateAsync().ConfigureAwait(false);

@@ -26,7 +26,7 @@ internal sealed class ModulePackageStoreTests
         Assert.Throws<InvalidDataException>(() => ModulePackageStore.RequireRelativePath(path));
 
     [Test]
-    public async Task LocalPayloadIsCopiedWithoutExecutingAndExplicitCommitUsesOneExternalRoot()
+    public async Task LocalPayloadIsCopiedWithoutExecutingAndExplicitCommitUsesOneExternalRootAsync()
     {
         using var workspace = new Workspace();
         using var store = workspace.Store();
@@ -51,7 +51,37 @@ internal sealed class ModulePackageStoreTests
     }
 
     [Test]
-    public async Task ModifiedInspectedBytesCannotCommitOrStopRuntime()
+    public async Task FailedScratchCreationReleasesAdmissionForTheNextInspectionAsync()
+    {
+        using var workspace = new Workspace();
+        using var store = workspace.Store();
+        var source = new ModulePackageSource("local", LocalPath: workspace.CreatePayload());
+        var storeRoot = workspace.Path("store");
+        var retiredRoot = workspace.Path("store-retired-for-test");
+        Directory.Move(storeRoot, retiredRoot);
+        File.WriteAllText(storeRoot, "owned test obstruction");
+        try
+        {
+            Func<Task> inspect = async () =>
+            {
+                using var candidate = await store.PrepareAsync(source, null, CancellationToken.None)
+                    .ConfigureAwait(false);
+            };
+            await inspect.Should().ThrowAsync<IOException>().ConfigureAwait(false);
+        }
+        finally
+        {
+            File.Delete(storeRoot);
+            Directory.Move(retiredRoot, storeRoot);
+        }
+
+        using var next = await store.PrepareAsync(source, null, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
+        next.Modules.Should().ContainSingle().Which.Id.Should().Be("frontend_fixture");
+    }
+
+    [Test]
+    public async Task ModifiedInspectedBytesCannotCommitOrStopRuntimeAsync()
     {
         using var workspace = new Workspace();
         using var store = workspace.Store();
@@ -66,7 +96,7 @@ internal sealed class ModulePackageStoreTests
     }
 
     [Test]
-    public async Task ExistingIdentityIsNotOverwritten()
+    public async Task ExistingIdentityIsNotOverwrittenAsync()
     {
         using var workspace = new Workspace();
         using var store = workspace.Store();
@@ -82,7 +112,7 @@ internal sealed class ModulePackageStoreTests
     }
 
     [Test]
-    public async Task FailedConfigurationRemovesOnlyNewDestination()
+    public async Task FailedConfigurationRemovesOnlyNewDestinationAsync()
     {
         using var workspace = new Workspace();
         using var store = workspace.Store();
@@ -95,7 +125,7 @@ internal sealed class ModulePackageStoreTests
     }
 
     [Test]
-    public async Task ArchiveTraversalCollisionAndLinksLeaveNoScratch()
+    public async Task ArchiveTraversalCollisionAndLinksLeaveNoScratchAsync()
     {
         using var workspace = new Workspace();
         using var store = workspace.Store();
@@ -115,7 +145,7 @@ internal sealed class ModulePackageStoreTests
     }
 
     [Test]
-    public async Task LocalLinkIsNeverFollowed()
+    public async Task LocalLinkIsNeverFollowedAsync()
     {
         using var workspace = new Workspace();
         using var store = workspace.Store();
@@ -137,7 +167,7 @@ internal sealed class ModulePackageStoreTests
     }
 
     [Test]
-    public async Task NuGetGalleryAndDownloadLinksSelectExactFeedIdentity()
+    public async Task NuGetGalleryAndDownloadLinksSelectExactFeedIdentityAsync()
     {
         using var sources = new ModulePackageSources(new HttpClient(new Handler(request =>
         {
@@ -160,7 +190,7 @@ internal sealed class ModulePackageStoreTests
     }
 
     [Test]
-    public async Task GitHubPackageCredentialsAreExplicitAndDroppedEvenOnRedirectBackToSource()
+    public async Task GitHubPackageCredentialsAreExplicitAndDroppedEvenOnRedirectBackToSourceAsync()
     {
         var requests = new List<(string Host, string? Authorization)>();
         using var sources = new ModulePackageSources(new HttpClient(new Handler(request =>
@@ -197,7 +227,7 @@ internal sealed class ModulePackageStoreTests
     }
 
     [Test]
-    public async Task NupkgMissingOrMismatchedIdentityCannotBecomeAnInspectedCandidate()
+    public async Task NupkgMissingOrMismatchedIdentityCannotBecomeAnInspectedCandidateAsync()
     {
         using var workspace = new Workspace();
         using var store = workspace.Store();
@@ -236,7 +266,7 @@ internal sealed class ModulePackageStoreTests
     }
 
     [Test]
-    public async Task ReleaseAssetsAreExplicitChoicesAndRedirectsCannotCarryCredentialsOrEscapeSources()
+    public async Task ReleaseAssetsAreExplicitChoicesAndRedirectsCannotCarryCredentialsOrEscapeSourcesAsync()
     {
         var requests = new List<(string Host, string? Authorization)>();
         using var sources = new ModulePackageSources(new HttpClient(new Handler(request =>

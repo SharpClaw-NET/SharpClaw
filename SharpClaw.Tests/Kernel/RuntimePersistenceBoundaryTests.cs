@@ -83,7 +83,7 @@ internal sealed class RuntimePersistenceBoundaryTests
             .Where(entry => entry.Text.Contains(
                 "SaveChangesTerminalAsync(",
                 StringComparison.Ordinal))
-            .Where(entry => Path.GetFileName(entry.Path) != "RuntimePersistenceActionBoundary.cs")
+            .Where(entry => Path.GetFileName(entry.Path) != "RuntimePersistenceActionRunner.cs")
             .Select(entry => $"{entry.Path}:{entry.Line}")
             .ToArray();
 
@@ -125,7 +125,7 @@ internal sealed class RuntimePersistenceBoundaryTests
     }
 
     [Test]
-    public async Task Persistence_action_must_run_its_terminal()
+    public async Task Persistence_action_must_run_its_terminalAsync()
     {
         var db = CreateDatabase(new TestPersistenceBoundary(runTerminal: false));
         await using var dbAsyncDisposal = db.ConfigureAwait(false);
@@ -137,7 +137,7 @@ internal sealed class RuntimePersistenceBoundaryTests
     }
 
     [Test]
-    public async Task Async_save_enters_one_action_and_runs_one_terminal_despite_repeated_requests()
+    public async Task Async_save_enters_one_action_and_runs_one_terminal_despite_repeated_requestsAsync()
     {
         var actionBoundary = new TestPersistenceBoundary(runTerminal: true, repeatTerminal: true);
         var db = CreateDatabase(actionBoundary);
@@ -158,7 +158,7 @@ internal sealed class RuntimePersistenceBoundaryTests
     }
 
     [Test]
-    public async Task Persistence_terminal_failure_is_not_repeated_or_hidden()
+    public async Task Persistence_terminal_failure_is_not_repeated_or_hiddenAsync()
     {
         var actionBoundary = new TestPersistenceBoundary(
             runTerminal: true,
@@ -175,7 +175,7 @@ internal sealed class RuntimePersistenceBoundaryTests
     }
 
     [Test]
-    public async Task Persistence_action_cancellation_prevents_the_save_terminal()
+    public async Task Persistence_action_cancellation_prevents_the_save_terminalAsync()
     {
         var actionBoundary = new TestPersistenceBoundary(runTerminal: false)
         {
@@ -204,7 +204,7 @@ internal sealed class RuntimePersistenceBoundaryTests
                 "public async Task<int> SaveChangesAsync(",
                 StringComparison.Ordinal)
                 || line.Contains("_states.SaveChangesAsync(", StringComparison.Ordinal),
-            "RuntimePersistenceActionBoundary.cs" => line.Contains(
+            "RuntimePersistenceActionRunner.cs" => line.Contains(
                 "SaveChangesAsync(",
                 StringComparison.Ordinal),
             _ => line.Contains("_states.SaveChangesAsync(", StringComparison.Ordinal),

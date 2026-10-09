@@ -48,7 +48,7 @@ internal static class StatelessChatReadiness
         {
             response.EnsureSuccessStatusCode();
             var input = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            await using var inputAsyncDisposal = input.ConfigureAwait(true);
+            await using var inputAsyncDisposal = input.ConfigureAwait(false);
             using var output = new MemoryStream();
             await ModulePackageSources.CopyBoundedAsync(input, output, 1024 * 1024, ct).ConfigureAwait(false);
             result = JsonSerializer.Deserialize<T>(Encoding.UTF8.GetString(output.ToArray()), MetadataJson);

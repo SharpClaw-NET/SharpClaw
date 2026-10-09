@@ -51,7 +51,7 @@ internal sealed class RuntimeTransactionBoundaryTests
                 || entry.Text.Contains("current.RollbackAsync(", StringComparison.Ordinal))
             .Where(entry => !string.Equals(
                 Path.GetFileName(entry.Path),
-                "RuntimeTransactionActionBoundary.cs",
+                "RuntimeTransactionActionRunner.cs",
                 StringComparison.Ordinal))
             .Select(entry => $"{entry.Path}:{entry.Line}")
             .ToArray();

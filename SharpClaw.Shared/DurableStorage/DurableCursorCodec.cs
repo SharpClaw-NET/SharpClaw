@@ -107,5 +107,3 @@ public sealed class DurableCursorCodec(byte[] key, DurableStreamPathEncoder path
         long SnapshotLastSequence,
         string FilterFingerprint);
 }
-
-public sealed record DurableCursor(long NextSequence, long SnapshotLastSequence);

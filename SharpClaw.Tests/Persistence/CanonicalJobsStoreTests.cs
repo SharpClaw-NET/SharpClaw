@@ -18,7 +18,7 @@ namespace SharpClaw.Tests.Persistence;
 internal sealed class CanonicalJobsStoreTests
 {
     [Test]
-    public async Task CanonicalJobsStore_PersistsThroughAtomicGatewayAndReopens()
+    public async Task CanonicalJobsStore_PersistsThroughAtomicGatewayAndReopensAsync()
     {
         var dataDirectory = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,

@@ -83,5 +83,3 @@ public static class InfrastructureServiceExtensions
         return Task.CompletedTask;
     }
 }
-
-public sealed record PersistenceProviderSelection(ISharpClawPersistenceProvider Provider);

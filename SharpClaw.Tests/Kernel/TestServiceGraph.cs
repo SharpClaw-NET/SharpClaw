@@ -42,10 +42,3 @@ internal static class TestServiceGraph
             provider.Dispose();
     }
 }
-
-[SetUpFixture]
-internal sealed class TestServiceGraphCleanup
-{
-    [OneTimeTearDown]
-    public void DisposeProviders() => TestServiceGraph.DisposeProviders();
-}

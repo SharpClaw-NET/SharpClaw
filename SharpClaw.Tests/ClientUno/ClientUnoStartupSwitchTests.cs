@@ -14,7 +14,7 @@ namespace SharpClaw.Tests.ClientUno;
 internal sealed class ClientUnoStartupSwitchTests
 {
     [Test]
-    public async Task Backend_enabled_attempts_to_start_bundled_runtime_host()
+    public async Task Backend_enabled_attempts_to_start_bundled_runtime_hostAsync()
     {
         using var scope = TestScope.Create();
         var executable = scope.CreateExecutable(OperatingSystem.IsWindows()
@@ -45,7 +45,7 @@ internal sealed class ClientUnoStartupSwitchTests
     }
 
     [Test]
-    public async Task Backend_disabled_does_not_launch_bundled_runtime_host()
+    public async Task Backend_disabled_does_not_launch_bundled_runtime_hostAsync()
     {
         using var scope = TestScope.Create();
         var executable = scope.CreateExecutable(OperatingSystem.IsWindows()
@@ -75,7 +75,7 @@ internal sealed class ClientUnoStartupSwitchTests
     }
 
     [Test]
-    public async Task Gateway_enabled_attempts_to_start_bundled_gateway()
+    public async Task Gateway_enabled_attempts_to_start_bundled_gatewayAsync()
     {
         using var scope = TestScope.Create();
         var executable = scope.CreateExecutable(OperatingSystem.IsWindows()
@@ -113,7 +113,7 @@ internal sealed class ClientUnoStartupSwitchTests
     }
 
     [Test]
-    public async Task BootModel_skips_gateway_step_when_gateway_launch_is_disabled()
+    public async Task BootModel_skips_gateway_step_when_gateway_launch_is_disabledAsync()
     {
         using var scope = TestScope.Create();
         var launchAttempts = 0;
@@ -155,7 +155,7 @@ internal sealed class ClientUnoStartupSwitchTests
     }
 
     [Test]
-    public async Task ExitedBundledBackendIsNotRetriedAndNeverKeepsARunningDiagnostic()
+    public async Task ExitedBundledBackendIsNotRetriedAndNeverKeepsARunningDiagnosticAsync()
     {
         using var scope = TestScope.Create();
         var launches = 0;
@@ -192,7 +192,7 @@ internal sealed class ClientUnoStartupSwitchTests
     }
 
     [Test]
-    public async Task RetryPolicyOnlyRetriesTransientFailuresWhileTheBackendIsAvailable()
+    public async Task RetryPolicyOnlyRetriesTransientFailuresWhileTheBackendIsAvailableAsync()
     {
         using var scope = TestScope.Create();
         using var backend = new BackendProcessManager("http://127.0.0.1:48923",

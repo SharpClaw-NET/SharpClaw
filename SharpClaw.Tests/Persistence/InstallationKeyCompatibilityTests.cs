@@ -14,7 +14,7 @@ namespace SharpClaw.Tests.Persistence;
 internal sealed class InstallationKeyCompatibilityTests
 {
     [Test]
-    public async Task FreshHostOptions_CreateRawPackageKeyAndShareItWithSharpClawConsumers()
+    public async Task FreshHostOptions_CreateRawPackageKeyAndShareItWithSharpClawConsumersAsync()
     {
         using var environment = EnvironmentOverride.Clear();
         using var workspace = TestWorkspace.Create();
@@ -35,7 +35,7 @@ internal sealed class InstallationKeyCompatibilityTests
     }
 
     [Test]
-    public async Task ExistingBase64KeyAndEncryptedJsonImport_MigrateAndKeepSharedKeyIdentity()
+    public async Task ExistingBase64KeyAndEncryptedJsonImport_MigrateAndKeepSharedKeyIdentityAsync()
     {
         using var environment = EnvironmentOverride.Clear();
         using var workspace = TestWorkspace.Create();
@@ -67,7 +67,7 @@ internal sealed class InstallationKeyCompatibilityTests
     }
 
     [Test]
-    public async Task RawKey_RestartsPackageProtectionAndKeepsTheSameKey()
+    public async Task RawKey_RestartsPackageProtectionAndKeepsTheSameKeyAsync()
     {
         using var environment = EnvironmentOverride.Clear();
         using var workspace = TestWorkspace.Create();
@@ -93,7 +93,7 @@ internal sealed class InstallationKeyCompatibilityTests
     }
 
     [Test]
-    public async Task EnvironmentOnlyKey_DecryptsExistingActiveFileWithoutCreatingAKeyFile()
+    public async Task EnvironmentOnlyKey_DecryptsExistingActiveFileWithoutCreatingAKeyFileAsync()
     {
         using var environment = EnvironmentOverride.Clear();
         using var workspace = TestWorkspace.Create();

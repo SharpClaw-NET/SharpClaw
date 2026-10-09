@@ -9,7 +9,7 @@ namespace SharpClaw.Runtime.Host.Handlers;
 internal static class KernelJobsHandlers
 {
     [MapPost]
-    public static async Task<IResult> Submit(
+    public static async Task<IResult> SubmitAsync(
         KernelJobSubmissionRequest request,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -33,7 +33,7 @@ internal static class KernelJobsHandlers
     }
 
     [MapGet]
-    public static async Task<IResult> List(
+    public static async Task<IResult> ListAsync(
         KernelJobsCoordinator coordinator,
         HttpContext context,
         CancellationToken cancellationToken = default)
@@ -45,7 +45,7 @@ internal static class KernelJobsHandlers
     }
 
     [MapGet("/{jobId:guid}")]
-    public static async Task<IResult> Get(
+    public static async Task<IResult> GetAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -59,7 +59,7 @@ internal static class KernelJobsHandlers
     }
 
     [MapPost("/{jobId:guid}/dispatch")]
-    public static async Task<IResult> Dispatch(
+    public static async Task<IResult> DispatchAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -73,7 +73,7 @@ internal static class KernelJobsHandlers
     }
 
     [MapPost("/{jobId:guid}/cancel")]
-    public static Task<IResult> Cancel(
+    public static Task<IResult> CancelAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -85,7 +85,7 @@ internal static class KernelJobsHandlers
             cancellationToken);
 
     [MapPost("/{jobId:guid}/pause")]
-    public static Task<IResult> Pause(
+    public static Task<IResult> PauseAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -97,7 +97,7 @@ internal static class KernelJobsHandlers
             cancellationToken);
 
     [MapPost("/{jobId:guid}/stop")]
-    public static Task<IResult> Stop(
+    public static Task<IResult> StopAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -109,7 +109,7 @@ internal static class KernelJobsHandlers
             cancellationToken);
 
     [MapPost("/{jobId:guid}/resume")]
-    public static Task<IResult> Resume(
+    public static Task<IResult> ResumeAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -121,7 +121,7 @@ internal static class KernelJobsHandlers
             cancellationToken);
 
     [MapPost("/{jobId:guid}/recover")]
-    public static Task<IResult> Recover(
+    public static Task<IResult> RecoverAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -133,7 +133,7 @@ internal static class KernelJobsHandlers
             cancellationToken);
 
     [MapPost("/{jobId:guid}/resolve-hold")]
-    public static Task<IResult> ResolveHold(
+    public static Task<IResult> ResolveHoldAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -145,7 +145,7 @@ internal static class KernelJobsHandlers
             cancellationToken);
 
     [MapPost("/{jobId:guid}/retry")]
-    public static async Task<IResult> Retry(
+    public static async Task<IResult> RetryAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -159,7 +159,7 @@ internal static class KernelJobsHandlers
     }
 
     [MapDelete("/{jobId:guid}")]
-    public static async Task<IResult> Delete(
+    public static async Task<IResult> DeleteAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -173,7 +173,7 @@ internal static class KernelJobsHandlers
     }
 
     [MapGet("/{jobId:guid}/progress")]
-    public static async Task<IResult> Progress(
+    public static async Task<IResult> ProgressAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -184,7 +184,7 @@ internal static class KernelJobsHandlers
             cancellationToken).ConfigureAwait(false));
 
     [MapGet("/{jobId:guid}/attempts")]
-    public static async Task<IResult> Attempts(
+    public static async Task<IResult> AttemptsAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -195,7 +195,7 @@ internal static class KernelJobsHandlers
             cancellationToken).ConfigureAwait(false));
 
     [MapGet("/{jobId:guid}/artifact")]
-    public static async Task<IResult> Artifact(
+    public static async Task<IResult> ArtifactAsync(
         Guid jobId,
         KernelJobsCoordinator coordinator,
         HttpContext context,
@@ -218,9 +218,3 @@ internal static class KernelJobsHandlers
         return Results.Ok(job);
     }
 }
-
-internal sealed record KernelJobSubmissionRequest(
-    string ActionKey,
-    JobPayloadEnvelope Input,
-    Guid? ConversationId = null,
-    IReadOnlyList<ToolHoldRequirement>? Holds = null);

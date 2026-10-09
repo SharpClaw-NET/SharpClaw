@@ -53,7 +53,7 @@ internal sealed class RuntimeProviderBoundaryTests
     }
 
     [Test]
-    public async Task Buffered_and_streaming_turns_use_the_provider_action_terminals()
+    public async Task Buffered_and_streaming_turns_use_the_provider_action_terminalsAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new ProviderProbe();
@@ -102,7 +102,7 @@ internal sealed class RuntimeProviderBoundaryTests
     }
 
     [Test]
-    public async Task Provider_actions_preserve_root_context_and_nested_parentage()
+    public async Task Provider_actions_preserve_root_context_and_nested_parentageAsync()
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new ProviderProbe { WaitForConcurrentTransport = true };
@@ -143,7 +143,7 @@ internal sealed class RuntimeProviderBoundaryTests
     [TestCase("replace-input")]
     [TestCase("replace-result")]
     [TestCase("repeat")]
-    public async Task Provider_pure_action_controls_remain_inside_one_provider_path(string mode)
+    public async Task Provider_pure_action_controls_remain_inside_one_provider_pathAsync(string mode)
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new ProviderProbe { Mode = mode };
@@ -170,7 +170,7 @@ internal sealed class RuntimeProviderBoundaryTests
 
     [TestCase("cancel")]
     [TestCase("fail")]
-    public async Task Provider_action_cancellation_or_failure_stops_before_transport(string mode)
+    public async Task Provider_action_cancellation_or_failure_stops_before_transportAsync(string mode)
     {
         using var workspace = new TemporaryWorkspace();
         var probe = new ProviderProbe { Mode = mode };

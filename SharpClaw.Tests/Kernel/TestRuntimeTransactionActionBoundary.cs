@@ -12,9 +12,3 @@ internal sealed class TestRuntimeTransactionActionBoundary : IRuntimeTransaction
         CancellationToken cancellationToken = default) =>
         terminal(cancellationToken);
 }
-
-internal sealed class TestRuntimeTransactionActionRunnerAccessor(
-    RuntimeTransactionActionRunner runner) : IRuntimeTransactionActionRunnerAccessor
-{
-    public RuntimeTransactionActionRunner GetRequiredRunner() => runner;
-}

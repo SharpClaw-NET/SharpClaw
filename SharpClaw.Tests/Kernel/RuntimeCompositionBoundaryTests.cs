@@ -18,7 +18,7 @@ namespace SharpClaw.Tests.Kernel;
 internal sealed class RuntimeCompositionBoundaryTests
 {
     [Test]
-    public async Task Discovered_registration_uses_the_host_service_provider_and_lifecycle()
+    public async Task Discovered_registration_uses_the_host_service_provider_and_lifecycleAsync()
     {
         var provider = new TestProvider();
         var contribution = new TestContribution(provider);

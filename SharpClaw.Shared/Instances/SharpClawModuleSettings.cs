@@ -2,17 +2,6 @@ using System.Text.Json;
 
 namespace SharpClaw.Shared.Instances;
 
-/// <summary>Portable settings surfaces declared by a package, not frontend CLR plugins.</summary>
-public sealed record SharpClawModuleSettingsPage(
-    string SourceId, string ModuleName, string Id, string Title, string ReadPath, string SavePath);
-
-public sealed record SharpClawModuleSettingsField(
-    string Key, string Label, string Kind, bool Required = false, IReadOnlyList<string>? Choices = null);
-
-public sealed record SharpClawModuleSettingsDocument(
-    int SchemaVersion, IReadOnlyList<SharpClawModuleSettingsField> Fields,
-    IReadOnlyDictionary<string, JsonElement> Values);
-
 /// <summary>Version 1 of the documented frontend JSON extension to package.json.</summary>
 public static class SharpClawModuleSettings
 {
