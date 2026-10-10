@@ -8,7 +8,7 @@ namespace SharpClaw.Tests.Persistence;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
     Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-internal class SharpClawInstancePathsTests
+internal sealed class SharpClawInstancePathsTests
 {
     [Test]
     public void Manifest_WhenCreated_PersistsBackendIdentityUnderExplicitRoot()

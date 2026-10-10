@@ -239,7 +239,7 @@ public sealed class BootModel
         if (_backend.IsExternal || _backend.IsRunning || log.IsDefaultOrEmpty)
             return log;
 
-        return log.Select(line => line.Label == "Backend" && !line.IsError
+        return log.Select(line => string.Equals(line.Label, "Backend", StringComparison.Ordinal) && !line.IsError
             ? new DiagnosticLine("Backend", _backend.ExitCode is { } code
                 ? $"exited (code {code}) (bundled)"
                 : "stopped (bundled)", true)

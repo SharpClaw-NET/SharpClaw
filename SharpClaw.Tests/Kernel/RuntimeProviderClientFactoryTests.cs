@@ -18,7 +18,7 @@ internal sealed class RuntimeProviderClientFactoryTests
         IProviderPlugin[] plugins = [primary, alternate];
         var factory = new RuntimeProviderClientFactory();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "primary",
                 ["Provider:ApiKey"] = "primary-secret",
@@ -36,7 +36,7 @@ internal sealed class RuntimeProviderClientFactoryTests
 
         var scopedConfiguration = new ConfigurationBuilder()
             .AddConfiguration(configuration)
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Providers:alternate:ApiKey"] = "alternate-secret",
                 ["Providers:alternate:Endpoint"] = "https://alternate.example",

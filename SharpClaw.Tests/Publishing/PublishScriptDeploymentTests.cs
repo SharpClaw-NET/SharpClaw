@@ -65,7 +65,7 @@ internal sealed class PublishScriptDeploymentTests
     {
         var project = XDocument.Load(Path.Combine(FindSolutionRoot(), "SharpClaw.Runtime", "Host", "SharpClaw.Runtime.Host.csproj"));
         var reference = project.Descendants("PackageReference")
-            .Single(node => node.Attribute("Include")?.Value == "SharpClaw.SidecarHost.OutOfProcess");
+            .Single(node => string.Equals(node.Attribute("Include")?.Value, "SharpClaw.SidecarHost.OutOfProcess", StringComparison.Ordinal));
         reference.Attribute("PrivateAssets")?.Value.Should().Be("all");
         reference.Attribute("Publish")?.Value.Should().Be("true",
             "the SDK otherwise removes a private reference from the self-contained dependency manifest");

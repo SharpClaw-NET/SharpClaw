@@ -58,9 +58,9 @@ public sealed class TestHarnessToolHandler(TestHarnessState state) : IToolHandle
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (invocation.ToolName == TestHarnessConstants.ControlTool)
+        if (string.Equals(invocation.ToolName, TestHarnessConstants.ControlTool, StringComparison.Ordinal))
             return ToolResult.Text(ExecuteControl(invocation.Arguments));
-        if (invocation.ToolName == TestHarnessConstants.SnapshotTool)
+        if (string.Equals(invocation.ToolName, TestHarnessConstants.SnapshotTool, StringComparison.Ordinal))
             return ToolResult.Text(JsonSerializer.Serialize(new
             {
                 _state.ProviderRequests,
@@ -68,14 +68,10 @@ public sealed class TestHarnessToolHandler(TestHarnessState state) : IToolHandle
                 _state.ToolCalls,
             }));
 
-        var behavior = invocation.ToolName == TestHarnessConstants.JobStreamingTool
-            ? _state.StreamingJobToolBehavior
-            : invocation.ToolName == TestHarnessConstants.JobPermissionedTool
-                ? _state.PermissionedJobToolBehavior
-                : invocation.ToolName == TestHarnessConstants.JobResourceTool
-                    ? _state.PermissionedJobToolBehavior
-                    : invocation.ToolName == TestHarnessConstants.InlineOpenTool
-                        ? _state.OpenInlineToolBehavior
+        var behavior = string.Equals(invocation.ToolName, TestHarnessConstants.JobStreamingTool, StringComparison.Ordinal) ? _state.StreamingJobToolBehavior
+            : string.Equals(invocation.ToolName, TestHarnessConstants.JobPermissionedTool, StringComparison.Ordinal) ? _state.PermissionedJobToolBehavior
+                : string.Equals(invocation.ToolName, TestHarnessConstants.JobResourceTool, StringComparison.Ordinal) ? _state.PermissionedJobToolBehavior
+                    : string.Equals(invocation.ToolName, TestHarnessConstants.InlineOpenTool, StringComparison.Ordinal) ? _state.OpenInlineToolBehavior
                         : _state.PermissionedInlineToolBehavior;
 
         behavior = ApplyOverrides(behavior, invocation.Arguments);

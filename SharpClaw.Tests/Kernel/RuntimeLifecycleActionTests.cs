@@ -140,7 +140,7 @@ internal sealed class RuntimeLifecycleActionTests
                 return ValueTask.CompletedTask;
             }).ConfigureAwait(false);
 
-        if (operation == "cancel")
+        if (string.Equals(operation, "cancel", StringComparison.Ordinal))
             await prepare.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         else
             await prepare.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
@@ -164,7 +164,7 @@ internal sealed class RuntimeLifecycleActionTests
 
         await prepare.Should().ThrowAsync<KernelActionFailedException>()
             .WithMessage("*this control did not issue*").ConfigureAwait(false);
-        calls.Should().Be(operation == "skip" ? 0 : 1);
+        calls.Should().Be(string.Equals(operation, "skip", StringComparison.Ordinal) ? 0 : 1);
     }
 
     [Test]
@@ -387,7 +387,7 @@ internal sealed class RuntimeLifecycleActionTests
     {
         var provider = new LifecycleProviderClient();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "lifecycle-test",
                 ["Provider:Model"] = "lifecycle-model",
@@ -409,7 +409,7 @@ internal sealed class RuntimeLifecycleActionTests
             {
                 ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
-                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
                 {
                     [SourceId] = grants,
                 },
@@ -505,7 +505,7 @@ internal sealed class RuntimeLifecycleActionTests
             CancellationToken cancellationToken)
         {
             probe.Record(context.ActionKey.Value);
-            if (context.ActionKey.Value == "runtime.start.prepare")
+            if (string.Equals(context.ActionKey.Value, "runtime.start.prepare", StringComparison.Ordinal))
             {
                 probe.PreparationContexts.Enqueue(context);
                 if (probe.SkipPreparation)

@@ -50,7 +50,7 @@ internal sealed class RuntimeEventBoundaryTests
                      "event.deliver",
                  })
         {
-            probe.Actions.Count(value => value == action).Should().Be(1, action);
+            probe.Actions.Count(value => string.Equals(value, action, StringComparison.Ordinal)).Should().Be(1, action);
         }
     }
 
@@ -187,8 +187,8 @@ internal sealed class RuntimeEventBoundaryTests
         await service.FailAsync(record, "temporary delivery failure").ConfigureAwait(false);
         await service.CancelAsync(record).ConfigureAwait(false);
 
-        probe.Actions.Count(value => value == "event.acknowledge").Should().Be(1);
-        probe.Actions.Count(value => value == "event.delivery.fail").Should().Be(2);
+        probe.Actions.Count(value => string.Equals(value, "event.acknowledge", StringComparison.Ordinal)).Should().Be(1);
+        probe.Actions.Count(value => string.Equals(value, "event.delivery.fail", StringComparison.Ordinal)).Should().Be(2);
         store.Acknowledged.Should().ContainSingle().Which.Should().Be(record.RecordKey);
         store.Failures.Should().ContainSingle(item =>
             item.RecordKey == record.RecordKey && item.Error == "temporary delivery failure");
@@ -237,7 +237,7 @@ internal sealed class RuntimeEventBoundaryTests
         var provider = new EventProvider();
         var module = new EventRegistration(provider, probe);
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "event-test",
                 ["Provider:Model"] = "event-model",
@@ -251,7 +251,7 @@ internal sealed class RuntimeEventBoundaryTests
         {
             ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
             {
                 [module.Identity.Id] = actionGrants,
             },
@@ -343,7 +343,7 @@ internal sealed class RuntimeEventBoundaryTests
                 return control.ReplaceResult(true, "Event result replacement.");
 
             if (probe.ReplacementPayload is not null &&
-                context.ActionKey.Value == "event.define" &&
+                string.Equals(context.ActionKey.Value, "event.define", StringComparison.Ordinal) &&
                 context.Action.Payload is RuntimeEventActionInvocation invocation)
             {
                 var replacement = context.Action with

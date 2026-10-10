@@ -751,27 +751,27 @@ internal sealed class ClientActionBoundaryTests
         await Task.WhenAll(
             dispatcher.RunWithContextAsync(
                 new ClientActionRequestContext(
-                    new RequestPrincipal("user-a", "A", new HashSet<string>(), true),
+                    new RequestPrincipal("user-a", "A", new HashSet<string>(StringComparer.Ordinal), true),
                     featureSet),
                 new ClientCommandInvocation("a", "CLIENT", "a", Guid.NewGuid()),
                 static (_, _) => ValueTask.FromResult(true)).AsTask(),
             dispatcher.RunWithContextAsync(
                 new ClientActionRequestContext(
-                    new RequestPrincipal("user-b", "B", new HashSet<string>(), true),
+                    new RequestPrincipal("user-b", "B", new HashSet<string>(StringComparer.Ordinal), true),
                     ExtensionFeatureSet.Empty),
                 new ClientCommandInvocation("b", "CLIENT", "b", Guid.NewGuid()),
                 static (_, _) => ValueTask.FromResult(true)).AsTask()).ConfigureAwait(false);
 
         sink.Observations
-            .Where(static observation => observation.Action == ClientActionCatalog.CommandReceive.Value)
+            .Where(static observation => string.Equals(observation.Action, ClientActionCatalog.CommandReceive.Value, StringComparison.Ordinal))
             .Select(static observation => observation.CallerSubjectId)
             .Should().BeEquivalentTo(["user-a", "user-b"]);
         sink.Observations
-            .Where(static observation => observation.Action == ClientActionCatalog.CommandReceive.Value)
+            .Where(static observation => string.Equals(observation.Action, ClientActionCatalog.CommandReceive.Value, StringComparison.Ordinal))
             .Should().ContainSingle(item => item.CallerSubjectId == "user-a" &&
                 item.FeatureNames.Contains("client.test.feature"));
         sink.Observations
-            .Where(static observation => observation.Action == ClientActionCatalog.CommandReceive.Value)
+            .Where(static observation => string.Equals(observation.Action, ClientActionCatalog.CommandReceive.Value, StringComparison.Ordinal))
             .Should().ContainSingle(item => item.CallerSubjectId == "user-b" &&
                 item.FeatureNames.Count == 0);
     }
@@ -1020,8 +1020,7 @@ internal sealed class ClientActionBoundaryTests
         var handler = new CapturingHandler
         {
             ResponseFactory = request => new HttpResponseMessage(
-                request.RequestUri!.Host == "runtime-a.test"
-                    ? HttpStatusCode.ServiceUnavailable
+                string.Equals(request.RequestUri!.Host, "runtime-a.test", StringComparison.Ordinal) ? HttpStatusCode.ServiceUnavailable
                     : HttpStatusCode.OK),
         };
         using var http = new HttpClient(handler) { BaseAddress = new Uri(targetA) };
@@ -1368,7 +1367,7 @@ internal sealed class ClientActionBoundaryTests
             {
                 ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
-                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
                 {
                     [SourceId] = grants,
                 },
@@ -1429,10 +1428,9 @@ internal sealed class ClientActionBoundaryTests
             Observations.Select(static item => item.Action).ToArray();
 
         public int Attempts(string action) =>
-            Observations.Count(item => item.Action == action);
+            Observations.Count(item => string.Equals(item.Action, action, StringComparison.Ordinal));
 
-        public bool TryClaimPause(string action) =>
-            PauseAction == action &&
+        public bool TryClaimPause(string action) => string.Equals(PauseAction, action, StringComparison.Ordinal) &&
             Interlocked.CompareExchange(ref _pauseClaimed, 1, 0) == 0;
 
         public void Record(ActionContext<KernelActionEnvelope> context) =>
@@ -1656,13 +1654,13 @@ internal sealed class ClientActionBoundaryTests
                 await probe.ReleasePause.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            if (probe.CancelAction == context.ActionKey.Value)
+            if (string.Equals(probe.CancelAction, context.ActionKey.Value, StringComparison.Ordinal))
                 return control.Cancel("K05_TEST_CANCELLED", "The client action was cancelled.");
 
-            if (probe.FailureAction == context.ActionKey.Value)
+            if (string.Equals(probe.FailureAction, context.ActionKey.Value, StringComparison.Ordinal))
                 throw new InvalidOperationException("K05 test failure.");
 
-            if (probe.RepeatAction == context.ActionKey.Value && context.Attempt == 1)
+            if (string.Equals(probe.RepeatAction, context.ActionKey.Value, StringComparison.Ordinal) && context.Attempt == 1)
                 return await control.RepeatAsync(
                     new ActionRepeatRequest<KernelActionEnvelope>(
                         context.Action,
@@ -1670,10 +1668,10 @@ internal sealed class ClientActionBoundaryTests
                         null),
                     cancellationToken).ConfigureAwait(false);
 
-            if (probe.ReplaceResultAction == context.ActionKey.Value)
+            if (string.Equals(probe.ReplaceResultAction, context.ActionKey.Value, StringComparison.Ordinal))
                 return control.ReplaceResult(probe.ReplacementResult!, "K05 result boundary test");
 
-            if (probe.ReplaceInputAction == context.ActionKey.Value && probe.Replacement is { } replacement)
+            if (string.Equals(probe.ReplaceInputAction, context.ActionKey.Value, StringComparison.Ordinal) && probe.Replacement is { } replacement)
                 return await control.ProceedWithInputAsync(
                     new ActionReplacement<KernelActionEnvelope>(
                         context.Action with { Payload = replacement },

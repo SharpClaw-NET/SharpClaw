@@ -51,7 +51,7 @@ internal static class ClientActionServiceSet
         {
             ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
             {
                 [SourceId] = grants,
             },

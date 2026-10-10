@@ -68,7 +68,7 @@ internal static class KernelHostEndpoints
                 cancellationToken).ConfigureAwait(false);
             return Results.Ok(result);
         }
-        catch (KernelActionFailedException error) when (error.Message == RuntimeProviderSetup.RequiredErrorMessage)
+        catch (KernelActionFailedException error) when (string.Equals(error.Message, RuntimeProviderSetup.RequiredErrorMessage, StringComparison.Ordinal))
         {
             return ProviderSetupRequired();
         }
@@ -92,7 +92,7 @@ internal static class KernelHostEndpoints
         return Results.Ok(configuration.AsEnumerable()
             .Where(static pair => pair.Value is not null)
             .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
-            .ToDictionary(static pair => pair.Key, static pair => pair.Value));
+            .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal));
     }
 
     private static async Task StreamChatAsync(
@@ -130,7 +130,7 @@ internal static class KernelHostEndpoints
             }
         }
         catch (KernelActionFailedException error) when (!context.Response.HasStarted &&
-            error.Message == RuntimeProviderSetup.RequiredErrorMessage)
+            string.Equals(error.Message, RuntimeProviderSetup.RequiredErrorMessage, StringComparison.Ordinal))
         {
             await ProviderSetupRequired().ExecuteAsync(context).ConfigureAwait(false);
         }
@@ -176,7 +176,7 @@ internal static class KernelHostEndpoints
         var displayName = user.FindFirst(ClaimTypes.Name)?.Value
             ?? user.Identity.Name;
         var roles = user.Claims
-            .Where(static claim => claim.Type == ClaimTypes.Role || claim.Type == "role")
+            .Where(static claim => string.Equals(claim.Type, ClaimTypes.Role, StringComparison.Ordinal) || string.Equals(claim.Type, "role", StringComparison.Ordinal))
             .Select(static claim => claim.Value)
             .Where(static role => !string.IsNullOrWhiteSpace(role))
             .ToHashSet(StringComparer.Ordinal);

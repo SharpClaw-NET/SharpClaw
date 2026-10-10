@@ -194,8 +194,7 @@ app.Use(async (context, next) =>
         // Cache-Control — short cache for reads, no-store for mutations
         if (!context.Response.Headers.ContainsKey("Cache-Control"))
         {
-            context.Response.Headers.CacheControl = context.Request.Method == "GET"
-                ? "private, max-age=5"
+            context.Response.Headers.CacheControl = string.Equals(context.Request.Method, "GET", StringComparison.Ordinal) ? "private, max-age=5"
                 : "no-store";
         }
 
@@ -248,7 +247,7 @@ app.Use(async (context, next) =>
         var queueSvc = context.RequestServices.GetRequiredService<RequestQueueService>();
         var coreApiClient = context.RequestServices.GetRequiredService<InternalApiClient>();
 
-        var checks = new Dictionary<string, string>
+        var checks = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["queue"] = queueSvc.Enabled ? "ok" : "disabled"
         };

@@ -28,7 +28,7 @@ namespace SharpClaw.Tests.Providers.LlamaSharp;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
     Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-internal class LlamaSharpToolGrammarShapeTests
+internal sealed class LlamaSharpToolGrammarShapeTests
 {
     /// <summary>
     /// Regex matching the specific failure pattern: any line whose first

@@ -12,7 +12,7 @@ internal sealed class SettingsFixtureEndpoint(SettingsFixtureState state) : IHtt
         IHostActionEntry hostActionEntry, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (request.Route.Method == "POST")
+        if (string.Equals(request.Route.Method, "POST", StringComparison.Ordinal))
         {
             using var json = JsonDocument.Parse(request.Body);
             state.Message = json.RootElement.GetProperty("values").GetProperty("message").GetString()!;

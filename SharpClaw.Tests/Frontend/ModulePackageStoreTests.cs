@@ -134,9 +134,9 @@ internal sealed class ModulePackageStoreTests
             var path = workspace.Path(shape + ".zip");
             using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
             {
-                var entry = archive.CreateEntry(shape == "traversal" ? "../escape.dll" : "entry.dll");
-                if (shape == "link") entry.ExternalAttributes = unchecked((int)0xA1FF0000);
-                if (shape == "collision") archive.CreateEntry("ENTRY.dll");
+                var entry = archive.CreateEntry(string.Equals(shape, "traversal", StringComparison.Ordinal) ? "../escape.dll" : "entry.dll");
+                if (string.Equals(shape, "link", StringComparison.Ordinal)) entry.ExternalAttributes = unchecked((int)0xA1FF0000);
+                if (string.Equals(shape, "collision", StringComparison.Ordinal)) archive.CreateEntry("ENTRY.dll");
             }
             Func<Task> inspect = async () => { using var candidate = await store.PrepareAsync(new(shape, LocalPath: path), null, default).ConfigureAwait(false); };
             await inspect.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
@@ -197,20 +197,19 @@ internal sealed class ModulePackageStoreTests
         {
             requests.Add((request.RequestUri!.Host, request.Headers.Authorization?.Scheme));
             var path = request.RequestUri.AbsolutePath;
-            if (path == "/user")
+            if (string.Equals(path, "/user", StringComparison.Ordinal))
                 return new(HttpStatusCode.OK) { Content = new StringContent("""{"login":"token-holder"}""") };
             if (path.EndsWith("/42", StringComparison.Ordinal))
                 return new(HttpStatusCode.OK) { Content = new StringContent("""{"name":"1.0.0"}""") };
             if (path.EndsWith("/index.json", StringComparison.Ordinal))
                 return new(HttpStatusCode.OK)
                 {
-                    Content = new StringContent(path == "/owner/index.json"
-                    ? """{"resources":[{"@type":"PackageBaseAddress/3.0.0","@id":"https://nuget.pkg.github.com/owner/flat/"}]}"""
+                    Content = new StringContent(string.Equals(path, "/owner/index.json", StringComparison.Ordinal) ? """{"resources":[{"@type":"PackageBaseAddress/3.0.0","@id":"https://nuget.pkg.github.com/owner/flat/"}]}"""
                     : """{"versions":["1.0.0"]}""")
                 };
-            if (request.RequestUri.Host == "nuget.pkg.github.com" && path.EndsWith(".nupkg", StringComparison.Ordinal))
+            if (string.Equals(request.RequestUri.Host, "nuget.pkg.github.com", StringComparison.Ordinal) && path.EndsWith(".nupkg", StringComparison.Ordinal))
                 return new(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://objects.githubusercontent.com/asset.zip") } };
-            if (request.RequestUri.Host == "objects.githubusercontent.com")
+            if (string.Equals(request.RequestUri.Host, "objects.githubusercontent.com", StringComparison.Ordinal))
                 return new(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://nuget.pkg.github.com/owner/final.zip") } };
             return new(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) };
         })));
@@ -258,7 +257,7 @@ internal sealed class ModulePackageStoreTests
         Directory.CreateDirectory(root);
         var original = new[] { new SupprocomSecretSetting("Provider:Key", "fixture"), new SupprocomSecretSetting("Secret:Other", "retain") };
         var result = BundledModuleSetup.UpdateSettings(original, root, [new("fixture", "Fixture", "1.0.0")], false)
-            .ToDictionary(item => item.Key, item => item.Value);
+            .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
         result["Secret:Other"].Should().Be("retain");
         result["Provider:Key"].Should().Be("fixture");
         result["Packages:fixture"].Should().Be("false");
@@ -272,8 +271,7 @@ internal sealed class ModulePackageStoreTests
         using var sources = new ModulePackageSources(new HttpClient(new Handler(request =>
         {
             requests.Add((request.RequestUri!.Host, request.Headers.Authorization?.ToString()));
-            return request.RequestUri.Host == "api.github.com"
-                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""
+            return string.Equals(request.RequestUri.Host, "api.github.com", StringComparison.Ordinal) ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""
                     {"assets":[{"name":"module.zip","browser_download_url":"https://github.com/owner/repo/releases/download/v1/module.zip"},
                     {"name":"module.nupkg","browser_download_url":"https://github.com/owner/repo/releases/download/v1/module.nupkg"}]}
                     """) }

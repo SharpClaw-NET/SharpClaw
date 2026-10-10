@@ -166,7 +166,7 @@ internal sealed class PackagedSidecarReadinessTests
     }
 
     private static IConfiguration Configuration(string? value) => new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?>
+        .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             [PackagedSidecarReadiness.TimeoutConfigurationKey] = value,
         }).Build();

@@ -156,7 +156,7 @@ internal static class RuntimeCliSession
             return RuntimeCliResult.Success(
                 "SharpClaw Runtime CLI\n  --cli help\n  --cli chat <message>\n");
         }
-        if (command.Name == "chat")
+        if (string.Equals(command.Name, "chat", StringComparison.Ordinal))
             return await ExecuteChatAsync(command, kernel, cancellationToken).ConfigureAwait(false);
 
         var registrationResult = await applications.TryInvokeCliAsync(

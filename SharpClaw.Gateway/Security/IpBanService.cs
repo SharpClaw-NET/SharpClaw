@@ -8,7 +8,7 @@ namespace SharpClaw.Gateway.Security;
 /// </summary>
 internal sealed class IpBanService
 {
-    private readonly ConcurrentDictionary<string, IpRecord> _records = new();
+    private readonly ConcurrentDictionary<string, IpRecord> _records = new(StringComparer.Ordinal);
 
     /// <summary>Number of violations before an IP is banned.</summary>
     public int ViolationThreshold { get; set; } = 10;

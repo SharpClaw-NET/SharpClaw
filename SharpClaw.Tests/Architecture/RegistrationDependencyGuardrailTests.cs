@@ -15,7 +15,7 @@ namespace SharpClaw.Tests.Architecture;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
     Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-internal class RegistrationDependencyGuardrailTests
+internal sealed class RegistrationDependencyGuardrailTests
 {
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
         Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]

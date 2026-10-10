@@ -430,7 +430,7 @@ internal sealed class RuntimeCliBoundaryTests
             StringComparer.Ordinal);
         return RuntimeKernelAdapterTestFactory.Create(
             new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
+                .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
                 {
                     ["Provider:Key"] = "k04-test",
                     ["Provider:Model"] = "k04-model",
@@ -443,7 +443,7 @@ internal sealed class RuntimeCliBoundaryTests
             {
                 ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
-                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
                 {
                     [SourceId] = grants,
                 },

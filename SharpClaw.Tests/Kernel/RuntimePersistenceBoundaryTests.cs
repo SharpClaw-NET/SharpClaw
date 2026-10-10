@@ -83,7 +83,7 @@ internal sealed class RuntimePersistenceBoundaryTests
             .Where(entry => entry.Text.Contains(
                 "SaveChangesTerminalAsync(",
                 StringComparison.Ordinal))
-            .Where(entry => Path.GetFileName(entry.Path) != "RuntimePersistenceActionRunner.cs")
+            .Where(entry => !string.Equals(Path.GetFileName(entry.Path), "RuntimePersistenceActionRunner.cs", StringComparison.Ordinal))
             .Select(entry => $"{entry.Path}:{entry.Line}")
             .ToArray();
 
@@ -102,9 +102,9 @@ internal sealed class RuntimePersistenceBoundaryTests
         declaredPublicMethods.Should().NotContain(method =>
                 method.Name.Contains("Terminal", StringComparison.Ordinal)
                 || method.Name.Contains("ThroughKernel", StringComparison.Ordinal));
-        declaredPublicMethods.Where(method => method.Name == nameof(DbContext.SaveChanges))
+        declaredPublicMethods.Where(method => string.Equals(method.Name, nameof(DbContext.SaveChanges), StringComparison.Ordinal))
             .Should().HaveCount(2);
-        declaredPublicMethods.Where(method => method.Name == nameof(DbContext.SaveChangesAsync))
+        declaredPublicMethods.Where(method => string.Equals(method.Name, nameof(DbContext.SaveChangesAsync), StringComparison.Ordinal))
             .Should().HaveCount(2);
 
         var terminal = typeof(SharpClawDbContext)

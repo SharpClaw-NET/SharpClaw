@@ -289,7 +289,7 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
                 "Warning",
                 "RecordsDropped",
                 $"Dropped {dropped} operational log record(s) because the bounded dispatcher was full.",
-                Properties: new Dictionary<string, string>
+                Properties: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["DroppedCount"] = dropped.ToString(CultureInfo.InvariantCulture),
                 }),

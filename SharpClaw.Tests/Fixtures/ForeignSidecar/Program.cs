@@ -5,9 +5,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-var mode = args.Length >= 2 && args[0] == "--mode" ? args[1] : "normal";
+var mode = args.Length >= 2 && string.Equals(args[0], "--mode", StringComparison.Ordinal) ? args[1] : "normal";
 
-if (mode == "early-exit")
+if (string.Equals(mode, "early-exit", StringComparison.Ordinal))
 {
     Console.WriteLine("sidecar stdout before early exit");
     Console.Error.WriteLine("sidecar stderr before early exit");
@@ -28,7 +28,7 @@ Console.WriteLine(
     $"ENV|registrationDir={registrationDir}|dataDir={dataDir}|control={controlAddress}|token={token}|SourceId={SourceId}|runtime={runtime}|hostCapabilities={hostCapabilitiesAddress}|hostCapabilitiesToken={hostCapabilitiesToken}");
 Console.Out.Flush();
 
-if (mode == "never-ready")
+if (string.Equals(mode, "never-ready", StringComparison.Ordinal))
 {
     await Task.Delay(Timeout.InfiniteTimeSpan).ConfigureAwait(false);
     return 0;
@@ -397,7 +397,7 @@ async Task HandleAsync(TcpClient client)
                     accepted = true,
                     message = "stopping",
                 }).ConfigureAwait(false);
-                if (mode != "ignore-shutdown")
+                if (!string.Equals(mode, "ignore-shutdown", StringComparison.Ordinal))
                     stop.TrySetResult();
                 break;
 

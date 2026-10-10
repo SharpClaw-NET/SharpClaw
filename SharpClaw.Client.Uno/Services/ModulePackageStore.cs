@@ -192,10 +192,10 @@ internal sealed class ModulePackageStore : IDisposable
         if (specs.Length != 1) throw new InvalidDataException("A NuGet module must have one root nuspec.");
         using var reader = XmlReader.Create(specs[0], new XmlReaderSettings
         { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 512 * 1024 });
-        var metadata = XDocument.Load(reader).Root?.Elements().Single(element => element.Name.LocalName == "metadata")
+        var metadata = XDocument.Load(reader).Root?.Elements().Single(element => string.Equals(element.Name.LocalName, "metadata", StringComparison.Ordinal))
             ?? throw new InvalidDataException("Missing NuGet metadata.");
-        var id = metadata.Elements().Single(element => element.Name.LocalName == "id").Value;
-        var version = metadata.Elements().Single(element => element.Name.LocalName == "version").Value;
+        var id = metadata.Elements().Single(element => string.Equals(element.Name.LocalName, "id", StringComparison.Ordinal)).Value;
+        var version = metadata.Elements().Single(element => string.Equals(element.Name.LocalName, "version", StringComparison.Ordinal)).Value;
         if (source.PackageId is not null && (!string.Equals(source.PackageId, id, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(source.Version, version, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("The downloaded NuGet identity does not match the selected package/version.");

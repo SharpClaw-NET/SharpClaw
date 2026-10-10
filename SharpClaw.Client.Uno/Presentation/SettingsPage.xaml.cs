@@ -120,7 +120,7 @@ public sealed partial class SettingsPage : Page
                 continue;
             }
 
-            var selected = tag == _activeTab;
+            var selected = string.Equals(tag, _activeTab, StringComparison.Ordinal);
             if (panel.Children[0] is TextBlock marker)
                 marker.Foreground = B(selected ? 0x00FF00 : 0x555555);
             if (panel.Children[1] is TextBlock label)
@@ -242,7 +242,7 @@ public sealed partial class SettingsPage : Page
         {
             ItemsSource = setup.Providers,
             DisplayMemberPath = nameof(SharpClawProviderSetupOption.DisplayName),
-            SelectedItem = setup.Providers.FirstOrDefault(item => item.Key == setup.ProviderKey),
+            SelectedItem = setup.Providers.FirstOrDefault(item => string.Equals(item.Key, setup.ProviderKey, StringComparison.Ordinal)),
             PlaceholderText = "Select an enabled provider",
             MinWidth = 320,
         };
@@ -281,7 +281,7 @@ public sealed partial class SettingsPage : Page
             ItemsSource = catalog?.Models,
             PlaceholderText = "Available models from the selected provider",
             MinWidth = 320,
-            SelectedItem = catalog?.Models.FirstOrDefault(value => value == setup.Model),
+            SelectedItem = catalog?.Models.FirstOrDefault(value => string.Equals(value, setup.Model, StringComparison.Ordinal)),
             Visibility = catalog is null ? Visibility.Collapsed : Visibility.Visible,
         };
         models.SelectionChanged += (_, _) => { if (models.SelectedItem is string selectedModel) model.Text = selectedModel; };
@@ -361,7 +361,7 @@ public sealed partial class SettingsPage : Page
     {
         var candidate = value.Trim();
         if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            || (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)))
         {
             throw new FormatException("The Runtime endpoint must use HTTP or HTTPS.");
         }

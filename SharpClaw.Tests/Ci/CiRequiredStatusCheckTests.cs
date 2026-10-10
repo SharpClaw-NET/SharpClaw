@@ -146,7 +146,7 @@ internal sealed partial class CiRequiredStatusCheckTests
             if (currentJobTemplate is null)
                 continue;
 
-            if (line.Trim() == "include:")
+            if (string.Equals(line.Trim(), "include:", StringComparison.Ordinal))
             {
                 inMatrixInclude = true;
                 continue;

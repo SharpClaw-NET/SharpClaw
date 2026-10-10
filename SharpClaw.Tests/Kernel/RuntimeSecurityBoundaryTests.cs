@@ -108,7 +108,7 @@ internal sealed class RuntimeSecurityBoundaryTests
         await deniedMiddleware.InvokeAsync(denied).ConfigureAwait(false);
 
         denied.Response.StatusCode.Should().Be(StatusCodes.Status423Locked);
-        probe.Observations.Count(observation => observation.Action == "security.api_key.resolve")
+        probe.Observations.Count(observation => string.Equals(observation.Action, "security.api_key.resolve", StringComparison.Ordinal))
             .Should().Be(2);
     }
 
@@ -142,7 +142,7 @@ internal sealed class RuntimeSecurityBoundaryTests
         await middleware.InvokeAsync(context).ConfigureAwait(false);
 
         nextCalls.Should().Be(1);
-        probe.Observations.Count(observation => observation.Action == "security.api_key.resolve")
+        probe.Observations.Count(observation => string.Equals(observation.Action, "security.api_key.resolve", StringComparison.Ordinal))
             .Should().Be(2);
     }
 
@@ -200,8 +200,7 @@ internal sealed class RuntimeSecurityBoundaryTests
             {
                 baseInvocation = invocation;
                 return ValueTask.FromResult(
-                    invocation.Operation == "authorize"
-                    && invocation.Resource == "/allowed");
+                    string.Equals(invocation.Operation, "authorize", StringComparison.Ordinal) && string.Equals(invocation.Resource, "/allowed", StringComparison.Ordinal));
             }).ConfigureAwait(false);
 
         allowed.Should().BeFalse();
@@ -389,7 +388,7 @@ internal sealed class RuntimeSecurityBoundaryTests
             {
                 ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
-                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
                 {
                     [SourceId] = grants,
                 },
@@ -418,7 +417,7 @@ internal sealed class RuntimeSecurityBoundaryTests
     }
 
     private static IConfiguration Configuration() => new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?>
+        .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["Provider:Key"] = "security-test",
             ["Provider:Model"] = "security-test-model",
@@ -539,8 +538,7 @@ internal sealed class RuntimeSecurityBoundaryTests
                 context.Caller.SubjectId,
                 context.Depth));
 
-            if (context.ActionKey.Value == "security.secret.delete"
-                && Interlocked.Exchange(ref probe.NestedDispatches, 1) == 0
+            if (string.Equals(context.ActionKey.Value, "security.secret.delete", StringComparison.Ordinal) && Interlocked.Exchange(ref probe.NestedDispatches, 1) == 0
                 && probe.Dispatcher is { } dispatcher
                 && probe.Snapshot is { } snapshot)
             {

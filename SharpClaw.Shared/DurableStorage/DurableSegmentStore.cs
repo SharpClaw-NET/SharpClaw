@@ -30,8 +30,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
     private const int ArtifactReferenceEntryBytes = sizeof(long) + 16 + 32;
     private readonly DurableStorageOptions _options;
     private readonly DurableStreamPathEncoder _paths;
-    private readonly ConcurrentDictionary<string, StreamState> _states = new();
-    private readonly ConcurrentDictionary<string, byte> _verifiedSegments = new();
+    private readonly ConcurrentDictionary<string, StreamState> _states = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _verifiedSegments = new(StringComparer.Ordinal);
     private readonly FileStream? _writerLease;
     private string? _degradedReason;
     private DateTimeOffset? _lastSuccessfulFlush;

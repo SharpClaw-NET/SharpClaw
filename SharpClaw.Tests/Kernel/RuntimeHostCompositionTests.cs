@@ -43,7 +43,7 @@ internal sealed class RuntimeHostCompositionTests
 
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "sharpclaw-test",
                 ["Provider:Model"] = "test-harness-model",
@@ -202,7 +202,7 @@ internal sealed class RuntimeHostCompositionTests
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "sharpclaw-test",
                 ["Provider:Model"] = "test-harness-model",
@@ -250,7 +250,7 @@ internal sealed class RuntimeHostCompositionTests
         {
             ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
             {
                 [jobRegistration.Identity.Id] = new Dictionary<
                     string,
@@ -436,7 +436,7 @@ internal sealed class RuntimeHostCompositionTests
         var probe = new RequestContextProbe(expected: 2);
         var module = new RequestContextProbeRegistration(probe);
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "context-probe",
                 ["Provider:Model"] = "context-probe-model",
@@ -469,7 +469,7 @@ internal sealed class RuntimeHostCompositionTests
         {
             ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
             {
                 [module.Identity.Id] = new Dictionary<string, ActionInterceptionCapabilities>(
                     StringComparer.Ordinal)
@@ -616,7 +616,7 @@ internal sealed class RuntimeHostCompositionTests
         await using var providerServerAsyncDisposal = providerServer.ConfigureAwait(false);
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "custom",
                 ["Provider:Model"] = "gpt-3.5-turbo",
@@ -712,7 +712,7 @@ internal sealed class RuntimeHostCompositionTests
         await using var providerServerAsyncDisposal2 = providerServer.ConfigureAwait(false);
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "custom",
                 ["Provider:Model"] = "gpt-3.5-turbo",
@@ -758,7 +758,7 @@ internal sealed class RuntimeHostCompositionTests
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "llamasharp",
                 ["Provider:Model"] = "local-model",
@@ -809,7 +809,7 @@ internal sealed class RuntimeHostCompositionTests
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "llamasharp",
                 ["Provider:Model"] = "local-model",
@@ -847,7 +847,7 @@ internal sealed class RuntimeHostCompositionTests
                 }
 
                 var gatewayConfiguration = new ConfigurationBuilder()
-                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
                     {
                         [$"{InternalApiOptions.SectionName}:BaseUrl"] = runtime.Urls.Single(),
                         [$"{InternalApiOptions.SectionName}:ApiKey"] = "scope-test-key",
@@ -894,7 +894,7 @@ internal sealed class RuntimeHostCompositionTests
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "sharpclaw-test",
                 ["Provider:Model"] = "test-harness-model",
@@ -941,7 +941,7 @@ internal sealed class RuntimeHostCompositionTests
     public async Task MissingConfiguredProviderAllowsGraphStartupForSetupAsync()
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal))
             .Build();
         using var workspace = new TemporaryWorkspace();
         using var registrationSet = PackagedDotNetRegistrationSet.Load(
@@ -975,7 +975,7 @@ internal sealed class RuntimeHostCompositionTests
     public void DisabledPackagedInProcessRegistration_IsExcludedBeforeGraphCompilation()
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Packages:sharpclaw_test_harness_in_process"] = "false",
                 ["Packages:sharpclaw_providers_anthropic"] = "false",
@@ -1221,8 +1221,7 @@ internal sealed class RuntimeHostCompositionTests
     {
         var storeType = services
             .Select(descriptor => descriptor.ServiceType)
-            .FirstOrDefault(type => type.FullName ==
-                "SharpClaw.Modules.Providers.LlamaSharp.Services.LocalModelStore");
+            .FirstOrDefault(type => string.Equals(type.FullName, "SharpClaw.Modules.Providers.LlamaSharp.Services.LocalModelStore", StringComparison.Ordinal));
 
         if (storeType is null)
             throw new InvalidOperationException("The LlamaSharp LocalModelStore was not registered.");

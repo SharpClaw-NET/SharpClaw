@@ -8,7 +8,7 @@ namespace SharpClaw.Tests.Frontend;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
     Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-internal class UnoClientStateTests
+internal sealed class UnoClientStateTests
 {
     private static readonly JsonSerializerOptions Json = new()
     {

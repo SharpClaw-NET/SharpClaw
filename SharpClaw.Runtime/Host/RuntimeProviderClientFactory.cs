@@ -19,7 +19,7 @@ internal sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFacto
         var plugin = plugins.FirstOrDefault(value =>
             string.Equals(value.ProviderKey, providerKey, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException(
-                providerKey == "unconfigured" && string.IsNullOrWhiteSpace(
+                string.Equals(providerKey, "unconfigured", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(
                     configuration["Provider:Key"] ?? configuration["Providers:Default"])
                     ? RuntimeProviderSetup.RequiredErrorMessage
                     : $"No enabled provider registration registered provider '{providerKey}'.");

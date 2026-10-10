@@ -36,8 +36,7 @@ internal sealed class GatewayContractsIsolationTests
             .Select(a => a.Name ?? string.Empty)
             .Where(name => !name.StartsWith("System.", StringComparison.Ordinal)
                         && !name.StartsWith("Microsoft.", StringComparison.Ordinal)
-                        && name != "netstandard"
-                        && name != "mscorlib")
+                        && !string.Equals(name, "netstandard", StringComparison.Ordinal) && !string.Equals(name, "mscorlib", StringComparison.Ordinal))
             .ToArray();
 
         nonFrameworkRefs.Should().BeEmpty(

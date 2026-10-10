@@ -14,7 +14,7 @@ namespace SharpClaw.Tests.Providers;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
     Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-internal class CapabilityResolverTests
+internal sealed class CapabilityResolverTests
 {
     private const string Chat = WellKnownCapabilityKeys.Chat;
     private const string Vision = WellKnownCapabilityKeys.Vision;

@@ -159,7 +159,7 @@ internal sealed class DatabaseProviderOptionsTests
 
         using var serviceProvider = services.BuildServiceProvider();
         var provider = serviceProvider.GetServices<ISharpClawPersistenceProvider>()
-            .Single(candidate => candidate.Key == "SQLServer");
+            .Single(candidate => string.Equals(candidate.Key, "SQLServer", StringComparison.Ordinal));
         var moduleLoadContext = AssemblyLoadContext.GetLoadContext(provider.GetType().Assembly);
 
         moduleLoadContext.Should().NotBeNull();

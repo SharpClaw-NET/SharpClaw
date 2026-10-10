@@ -88,7 +88,7 @@ internal sealed class GatewayActionBoundaryTests
         await Task.WhenAll(middleware.InvokeAsync(first), middleware.InvokeAsync(second)).ConfigureAwait(false);
 
         probe.RequestContexts.Should().HaveCount(10);
-        probe.RequestContexts.Select(value => value.SubjectId).Distinct()
+        probe.RequestContexts.Select(value => value.SubjectId).Distinct(StringComparer.Ordinal)
             .Should().BeEquivalentTo(["user-a", "user-b"]);
         probe.RequestContexts.Select(value => value.TraceId).Distinct().Should().HaveCount(2);
         probe.RequestContexts.Select(value => value.IdempotencyKey).Distinct().Should().HaveCount(2);

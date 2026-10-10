@@ -17,7 +17,7 @@ public sealed partial class SettingsPage
         {
             var pages = await ModuleSettingsClient.ReadPagesAsync(Api, token).ConfigureAwait(true);
             token.ThrowIfCancellationRequested();
-            foreach (var group in pages.GroupBy(page => page.SourceId).OrderBy(group => group.Key, StringComparer.Ordinal))
+            foreach (var group in pages.GroupBy(page => page.SourceId, StringComparer.Ordinal).OrderBy(group => group.Key, StringComparer.Ordinal))
             {
                 AddTabSection(group.First().ModuleName);
                 foreach (var page in group)
@@ -41,9 +41,9 @@ public sealed partial class SettingsPage
         try
         {
             if (_modulePages.TryGetValue(tab, out var page)) await LoadModuleSettingsAsync(page, token).ConfigureAwait(true);
-            else if (tab == "Runtime") await LoadRuntimeAsync(token).ConfigureAwait(true);
-            else if (tab == "Modules") LoadInstalledModules(token);
-            else if (tab == "About") await LoadAboutAsync(token).ConfigureAwait(true);
+            else if (string.Equals(tab, "Runtime", StringComparison.Ordinal)) await LoadRuntimeAsync(token).ConfigureAwait(true);
+            else if (string.Equals(tab, "Modules", StringComparison.Ordinal)) LoadInstalledModules(token);
+            else if (string.Equals(tab, "About", StringComparison.Ordinal)) await LoadAboutAsync(token).ConfigureAwait(true);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch
@@ -109,10 +109,10 @@ public sealed partial class SettingsPage
         {
             if (!save.IsEnabled || token.IsCancellationRequested) return;
             var values = readers.ToDictionary(pair => pair.Key, pair => pair.Value(), StringComparer.Ordinal);
-            if (document.Fields.Any(field => field.Required && field.Kind != "secret" &&
+            if (document.Fields.Any(field => field.Required && !string.Equals(field.Kind, "secret", StringComparison.Ordinal) &&
                 (values[field.Key] is null || values[field.Key] is string text && string.IsNullOrWhiteSpace(text))))
             { status.Text = "Complete the required settings."; return; }
-            foreach (var field in document.Fields.Where(field => field.Kind == "secret" && values[field.Key] is null))
+            foreach (var field in document.Fields.Where(field => string.Equals(field.Kind, "secret", StringComparison.Ordinal) && values[field.Key] is null))
                 values.Remove(field.Key);
             save.IsEnabled = false;
             try

@@ -13,7 +13,7 @@ namespace SharpClaw.Tests.Gateway;
     Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
 [NonParallelizable]
-internal class InternalApiClientResolutionTests
+internal sealed class InternalApiClientResolutionTests
 {
     private string? _previousInstanceRoot;
     private string? _previousSharedRoot;

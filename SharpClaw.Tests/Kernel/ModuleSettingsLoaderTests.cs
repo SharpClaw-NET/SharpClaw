@@ -41,7 +41,7 @@ internal sealed class ModuleSettingsLoaderTests
             (_, _, _) => Task.CompletedTask, default).ConfigureAwait(false);
         var bundledRoot = System.IO.Path.Combine(AppContext.BaseDirectory, "contributions");
         const string storageId = "sharpclaw_persistence_jsoncoldstore";
-        var settings = new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["ExternalRegistrations:frontend-modules:Enabled"] = "true",
             ["ExternalRegistrations:frontend-modules:Path"] = store.ActiveRoot,
@@ -50,7 +50,7 @@ internal sealed class ModuleSettingsLoaderTests
         {
             using var json = JsonDocument.Parse(File.ReadAllText(manifest));
             var id = json.RootElement.GetProperty("id").GetString()!;
-            settings[$"Packages:{id}"] = (id == storageId).ToString();
+            settings[$"Packages:{id}"] = (string.Equals(id, storageId, StringComparison.Ordinal)).ToString();
         }
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         var roots = PackagedRegistrationRootResolver.Resolve(bundledRoot, configuration);
@@ -91,7 +91,7 @@ internal sealed class ModuleSettingsLoaderTests
             catalog.Should().Equal(page);
             var document = await ModuleSettingsClient.ReadDocumentAsync(api, page, default).ConfigureAwait(false);
             document.Values["message"].GetString().Should().Be("original");
-            await ModuleSettingsClient.SaveAsync(api, page, new Dictionary<string, object?> { ["message"] = "changed" }, default).ConfigureAwait(false);
+            await ModuleSettingsClient.SaveAsync(api, page, new Dictionary<string, object?>(StringComparer.Ordinal) { ["message"] = "changed" }, default).ConfigureAwait(false);
             var changed = await ModuleSettingsClient.ReadDocumentAsync(api, page, default).ConfigureAwait(false);
             changed.Values["message"].GetString().Should().Be("changed");
         }
@@ -111,7 +111,7 @@ internal sealed class ModuleSettingsLoaderTests
         var path = System.IO.Path.Combine(source, "package.json");
         var json = File.ReadAllText(path).Replace("\"schemaVersion\":1", "\"schemaVersion\":999", StringComparison.Ordinal);
         File.WriteAllText(path, json);
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
         { [$"Packages:{FrontendSettingsFixtureModule.SourceId}"] = "false" }).Build();
         using var loaded = PackagedDotNetRegistrationSet.Load(workspace.Path("packages"), configuration);
         loaded.SourceIds.Should().BeEmpty();

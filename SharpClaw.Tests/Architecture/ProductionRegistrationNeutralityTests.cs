@@ -91,7 +91,7 @@ internal sealed class ProductionRegistrationNeutralityTests
 
             var nuspec = XDocument.Load(nuspecPath);
             foreach (var dependency in nuspec.Descendants()
-                         .Where(element => element.Name.LocalName == "dependency"))
+                         .Where(element => string.Equals(element.Name.LocalName, "dependency", StringComparison.Ordinal)))
             {
                 var dependencyId = (string?)dependency.Attribute("id");
                 var dependencyVersion = (string?)dependency.Attribute("version");

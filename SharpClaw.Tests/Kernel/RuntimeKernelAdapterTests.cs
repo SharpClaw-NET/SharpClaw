@@ -19,7 +19,7 @@ internal sealed class RuntimeKernelAdapterTests
     public async Task ProviderModelCatalogUsesTheRegisteredProviderWithoutInferenceAsync()
     {
         var provider = new RecordingProviderClient();
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
         { ["Provider:Key"] = "test", ["Provider:Model"] = "test-model" }).Build();
         using var workspace = new TemporaryWorkspace();
         var factory = new RecordingProviderClientFactory(provider);
@@ -39,7 +39,7 @@ internal sealed class RuntimeKernelAdapterTests
         var provider = new RecordingProviderClient();
         var module = new ProviderModule(provider);
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "test",
                 ["Provider:Model"] = "test-model",
@@ -78,7 +78,7 @@ internal sealed class RuntimeKernelAdapterTests
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
-            new Dictionary<string, string?> { ["Provider:Key"] = key }).Build();
+            new Dictionary<string, string?>(StringComparer.Ordinal) { ["Provider:Key"] = key }).Build();
         var factory = new RecordingProviderClientFactory(new RecordingProviderClient());
         var adapter = RuntimeKernelAdapterTestFactory.Create(configuration, [], workspace.CreateInstancePaths(), factory);
         await adapter.StartAsync("unconfigured-host").ConfigureAwait(false);
@@ -99,7 +99,7 @@ internal sealed class RuntimeKernelAdapterTests
         using var workspace = new TemporaryWorkspace();
         var provider = new RecordingProviderClient(requiresApiKey: true);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
-            new Dictionary<string, string?> { ["Provider:Key"] = "test" }).Build();
+            new Dictionary<string, string?>(StringComparer.Ordinal) { ["Provider:Key"] = "test" }).Build();
         var adapter = RuntimeKernelAdapterTestFactory.Create(configuration, [new ProviderModule(provider)],
             workspace.CreateInstancePaths(), new RuntimeProviderClientFactory());
         await adapter.StartAsync("missing-credentials-host").ConfigureAwait(false);
@@ -113,7 +113,7 @@ internal sealed class RuntimeKernelAdapterTests
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
-            new Dictionary<string, string?> { ["Provider:Key"] = "not-installed" }).Build();
+            new Dictionary<string, string?>(StringComparer.Ordinal) { ["Provider:Key"] = "not-installed" }).Build();
         Action construct = () => RuntimeKernelAdapterTestFactory.Create(configuration,
             [new ProviderModule(new RecordingProviderClient())], workspace.CreateInstancePaths(),
             new RuntimeProviderClientFactory());
@@ -126,7 +126,7 @@ internal sealed class RuntimeKernelAdapterTests
         var primary = new RecordingProviderClient();
         var alternate = new RecordingProviderClient("alternate");
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = hostDefaultConfigured ? "test" : null,
                 ["Provider:Model"] = hostDefaultConfigured ? "test-model" : null,
@@ -169,7 +169,7 @@ internal sealed class RuntimeKernelAdapterTests
         var provider = new RecordingProviderClient();
         var module = new ProviderModule(provider);
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "test",
                 ["Provider:Model"] = "test-model",
@@ -282,7 +282,7 @@ internal sealed class RuntimeKernelAdapterTests
             features, Guid.NewGuid(), Guid.NewGuid());
         var calls = 0;
         var chunks = new List<string>();
-        var expected = mode == "replace" ? "rewritten-request" : "request";
+        var expected = string.Equals(mode, "replace", StringComparison.Ordinal) ? "rewritten-request" : "request";
         async IAsyncEnumerable<string> Stream(string value,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
@@ -316,7 +316,7 @@ internal sealed class RuntimeKernelAdapterTests
             calls.Should().Be(0);
             chunks.Should().BeEmpty();
         }
-        else if (mode == "replace-handler-result")
+        else if (string.Equals(mode, "replace-handler-result", StringComparison.Ordinal))
         {
             await consume.Should().ThrowAsync<KernelActionExecutionException>()
                 .WithMessage("*without running its terminal*").ConfigureAwait(false);
@@ -330,8 +330,7 @@ internal sealed class RuntimeKernelAdapterTests
             chunks.Should().Equal(expected);
         }
 
-        probe.Contexts.Select(item => item.ActionKey.Value).Should().Equal(mode == "cancel-receive"
-            ? ["runtime.request.receive"] : ["runtime.request.receive", "runtime.request.handler.invoke"]);
+        probe.Contexts.Select(item => item.ActionKey.Value).Should().Equal(string.Equals(mode, "cancel-receive", StringComparison.Ordinal) ? ["runtime.request.receive"] : ["runtime.request.receive", "runtime.request.handler.invoke"]);
         foreach (var observation in probe.Contexts)
         {
             observation.Caller.SubjectId.Should().Be(context.Caller.SubjectId);
@@ -401,7 +400,7 @@ internal sealed class RuntimeKernelAdapterTests
         return new KernelGraphCompileOptions
         {
             ActionRegistrationCapabilityGrants = new Dictionary<string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
             { [moduleId] = grants },
             SensitiveActionApprovals = approvals,
         };
@@ -412,7 +411,7 @@ internal sealed class RuntimeKernelAdapterTests
     {
         var provider = new RecordingProviderClient();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "test",
                 ["Provider:Model"] = "test-model",
@@ -461,7 +460,7 @@ internal sealed class RuntimeKernelAdapterTests
     {
         var provider = new RecordingProviderClient();
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "test",
                 ["Provider:Model"] = "test-model",
@@ -518,7 +517,7 @@ internal sealed class RuntimeKernelAdapterTests
         var provider = new RecordingProviderClient();
         var module = new StreamReplacementRegistration(provider);
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "test",
                 ["Provider:Model"] = "test-model",
@@ -541,7 +540,7 @@ internal sealed class RuntimeKernelAdapterTests
             {
                 ActionRegistrationCapabilityGrants = new Dictionary<
                     string,
-                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
                 {
                     [module.Identity.Id] = new Dictionary<
                         string,
@@ -601,7 +600,7 @@ internal sealed class RuntimeKernelAdapterTests
     public async Task Adapter_uses_stateless_chat_without_context_registrationAsync()
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "test",
                 ["Provider:Model"] = "test-model",
@@ -740,12 +739,12 @@ internal sealed class RuntimeKernelAdapterTests
             IActionControl<KernelActionEnvelope, object> control, CancellationToken cancellationToken)
         {
             Contexts.Add(context);
-            var ingress = context.ActionKey.Value == "runtime.request.receive";
-            if ((mode == "cancel-receive" && ingress) || (mode == "cancel-handler" && !ingress))
+            var ingress = string.Equals(context.ActionKey.Value, "runtime.request.receive", StringComparison.Ordinal);
+            if ((string.Equals(mode, "cancel-receive", StringComparison.Ordinal) && ingress) || (string.Equals(mode, "cancel-handler", StringComparison.Ordinal) && !ingress))
                 return ValueTask.FromResult(control.Cancel("REQUEST_TEST_CANCELLED", "Request stage test cancellation."));
-            if (mode == "replace-handler-result" && !ingress)
+            if (string.Equals(mode, "replace-handler-result", StringComparison.Ordinal) && !ingress)
                 return ValueTask.FromResult(control.ReplaceResult("must-not-accept", "Request stage test replacement."));
-            if (mode == "replace" && ingress)
+            if (string.Equals(mode, "replace", StringComparison.Ordinal) && ingress)
                 return control.ProceedWithInputAsync(new ActionReplacement<KernelActionEnvelope>(
                     context.Action with { Payload = "rewritten-request" }, "Request stage test input replacement."),
                     cancellationToken);
@@ -851,7 +850,7 @@ internal sealed class RuntimeKernelAdapterTests
             ChatOperationContext context,
             CancellationToken ct) =>
             ValueTask.FromResult(new ChatProfile(
-                turn.Input.Message == "alternate" ? "alternate" : "test",
+                string.Equals(turn.Input.Message, "alternate", StringComparison.Ordinal) ? "alternate" : "test",
                 Guid.Empty,
                 "test-model",
                 "profile instructions"));

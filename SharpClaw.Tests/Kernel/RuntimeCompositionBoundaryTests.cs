@@ -152,7 +152,7 @@ internal sealed class RuntimeCompositionBoundaryTests
 
     private static IConfiguration Configuration() =>
         new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = "test",
                 ["Provider:Model"] = "test-model",

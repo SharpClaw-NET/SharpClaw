@@ -52,15 +52,15 @@ public static class SharpClawModuleSettings
         {
             if (field is null || !IsIdentifier(field.Key) || !keys.Add(field.Key) || !IsLabel(field.Label) ||
                 field.Kind is not ("text" or "secret" or "boolean" or "choice") ||
-                (field.Kind == "choice" && (field.Choices is null || field.Choices.Count is 0 or > 64 ||
+                (string.Equals(field.Kind, "choice", StringComparison.Ordinal) && (field.Choices is null || field.Choices.Count is 0 or > 64 ||
                     field.Choices.Any(choice => !IsLabel(choice)) ||
                     field.Choices.Distinct(StringComparer.Ordinal).Count() != field.Choices.Count)))
                 throw new InvalidDataException("Invalid module settings field.");
-            if (document.Values.TryGetValue(field.Key, out var value) && field.Kind != "secret")
+            if (document.Values.TryGetValue(field.Key, out var value) && !string.Equals(field.Kind, "secret", StringComparison.Ordinal))
             {
-                if (field.Kind == "boolean" ? value.ValueKind is not (JsonValueKind.True or JsonValueKind.False) :
+                if (string.Equals(field.Kind, "boolean", StringComparison.Ordinal) ? value.ValueKind is not (JsonValueKind.True or JsonValueKind.False) :
                     value.ValueKind != JsonValueKind.String || value.GetString()!.Length > 4096 ||
-                    (field.Kind == "choice" && !field.Choices!.Contains(value.GetString(), StringComparer.Ordinal)))
+                    (string.Equals(field.Kind, "choice", StringComparison.Ordinal) && !field.Choices!.Contains(value.GetString(), StringComparer.Ordinal)))
                     throw new InvalidDataException("Settings value does not match its declared field.");
             }
         }

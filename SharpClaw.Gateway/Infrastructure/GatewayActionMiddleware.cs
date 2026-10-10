@@ -292,7 +292,7 @@ internal sealed class GatewayActionMiddleware(
         var displayName = context.User.FindFirst(ClaimTypes.Name)?.Value
             ?? context.User.Identity.Name;
         var roles = context.User.Claims
-            .Where(static claim => claim.Type == ClaimTypes.Role || claim.Type == "role")
+            .Where(static claim => string.Equals(claim.Type, ClaimTypes.Role, StringComparison.Ordinal) || string.Equals(claim.Type, "role", StringComparison.Ordinal))
             .Select(static claim => claim.Value)
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .ToHashSet(StringComparer.Ordinal);

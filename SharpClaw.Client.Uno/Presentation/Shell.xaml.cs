@@ -34,7 +34,7 @@ public sealed partial class Shell : UserControl, IContentControlProvider
         for (var i = 0; i < count; i++)
         {
             var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T fe && fe.Name == name)
+            if (child is T fe && string.Equals(fe.Name, name, StringComparison.Ordinal))
                 return fe;
 
             var result = FindChildByName<T>(child, name);

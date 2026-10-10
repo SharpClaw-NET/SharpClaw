@@ -39,7 +39,7 @@ internal sealed class ModularFrontendTests
             request.Method.Should().Be(HttpMethod.Get);
             var path = request.RequestUri!.AbsolutePath;
             requests.Add(path);
-            if (path == "/setup/provider") return new(HttpStatusCode.OK) { Content = new StringContent("""
+            if (string.Equals(path, "/setup/provider", StringComparison.Ordinal)) return new(HttpStatusCode.OK) { Content = new StringContent("""
                 {"setupRequired":false,"providerKey":"arbitrary","model":"model", "providers":[
                   {"key":"arbitrary","displayName":"Third party","requiresApiKey":false,"requiresEndpoint":false}]}
                 """) };

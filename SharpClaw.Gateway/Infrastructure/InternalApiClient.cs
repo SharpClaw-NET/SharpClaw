@@ -261,7 +261,7 @@ internal sealed class InternalApiClient(
         try
         {
             var newKey = ResolveApiKey();
-            return newKey != oldKey;
+            return !string.Equals(newKey, oldKey, StringComparison.Ordinal);
         }
         catch
         {
@@ -285,7 +285,7 @@ internal sealed class InternalApiClient(
         var target = new Uri(baseAddress, pathAndQuery);
         var builder = new UriBuilder(target)
         {
-            Scheme = target.Scheme == Uri.UriSchemeHttps ? "wss" : "ws",
+            Scheme = string.Equals(target.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ? "wss" : "ws",
         };
         return builder.Uri;
     }

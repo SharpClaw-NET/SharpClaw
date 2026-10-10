@@ -99,17 +99,17 @@ internal sealed class RuntimeToolBoundaryTests
             workspace,
             probe,
             provider,
-            mode == "repeat" ? new MatchingRepeatEvidenceAuthority() : null);
+                string.Equals(mode, "repeat", StringComparison.Ordinal) ? new MatchingRepeatEvidenceAuthority() : null);
 
         var result = await adapter.Kernel.RunAsync(new ChatTurnInput("use the tool")).ConfigureAwait(false);
 
         result.Completion.Content.Should().Be(
-            mode == "replace-result" ? "replaced tool result" : "tool completed");
+            string.Equals(mode, "replace-result", StringComparison.Ordinal) ? "replaced tool result" : "tool completed");
         probe.HandlerCalls.Should().Be(1);
-        if (mode == "replace-input")
+        if (string.Equals(mode, "replace-input", StringComparison.Ordinal))
             probe.LastValue.Should().Be(42);
-        if (mode == "repeat")
-            probe.Observations.Count(value => value.Action == "tool.call.input.transform")
+        if (string.Equals(mode, "repeat", StringComparison.Ordinal))
+            probe.Observations.Count(value => string.Equals(value.Action, "tool.call.input.transform", StringComparison.Ordinal))
                 .Should().Be(2);
     }
 
@@ -124,7 +124,7 @@ internal sealed class RuntimeToolBoundaryTests
 
         Func<Task> run = async () => await adapter.Kernel.RunAsync(
             new ChatTurnInput("blocked tool", Guid.NewGuid())).ConfigureAwait(false);
-        if (mode == "cancel")
+        if (string.Equals(mode, "cancel", StringComparison.Ordinal))
             await run.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         else
             await run.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
@@ -186,7 +186,7 @@ internal sealed class RuntimeToolBoundaryTests
     {
         var SourceId = "tool-boundary-test";
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = provider.ProviderKey,
                 ["Provider:Model"] = "tool-model",
@@ -202,7 +202,7 @@ internal sealed class RuntimeToolBoundaryTests
         {
             ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
             {
                 [SourceId] = grants,
             },
@@ -353,22 +353,22 @@ internal sealed class RuntimeToolBoundaryTests
                 context.Depth,
                 context.ParentInvocationId));
 
-            if (context.ActionKey.Value == "tool.call.check")
+            if (string.Equals(context.ActionKey.Value, "tool.call.check", StringComparison.Ordinal))
             {
-                if (probe.Mode == "cancel")
+                if (string.Equals(probe.Mode, "cancel", StringComparison.Ordinal))
                     return control.Cancel(
                         "TOOL_TEST_CANCELLED",
                         "Tool action cancelled.");
-                if (probe.Mode == "fail")
+                if (string.Equals(probe.Mode, "fail", StringComparison.Ordinal))
                     return control.Fail(new ExecutionError(
                         "TOOL_TEST_FAILED",
                         "Tool action failed."));
             }
 
-            if (context.ActionKey.Value == "tool.call.input.transform" &&
+            if (string.Equals(context.ActionKey.Value, "tool.call.input.transform", StringComparison.Ordinal) &&
                 context.Action.Payload is ToolInvocation invocation)
             {
-                if (probe.Mode == "repeat" && context.Attempt == 1)
+                if (string.Equals(probe.Mode, "repeat", StringComparison.Ordinal) && context.Attempt == 1)
                 {
                     return await control.RepeatAsync(
                         new ActionRepeatRequest<KernelActionEnvelope>(
@@ -378,7 +378,7 @@ internal sealed class RuntimeToolBoundaryTests
                         cancellationToken).ConfigureAwait(false);
                 }
 
-                if (probe.Mode == "replace-input")
+                if (string.Equals(probe.Mode, "replace-input", StringComparison.Ordinal))
                 {
                     using var document = JsonDocument.Parse("{\"value\":42}");
                     return await control.ProceedWithInputAsync(
@@ -395,8 +395,8 @@ internal sealed class RuntimeToolBoundaryTests
                 }
             }
 
-            if (probe.Mode == "replace-result" &&
-                context.ActionKey.Value == "tool.result.transform")
+            if (string.Equals(probe.Mode, "replace-result", StringComparison.Ordinal) &&
+                string.Equals(context.ActionKey.Value, "tool.result.transform", StringComparison.Ordinal))
             {
                 return control.ReplaceResult(
                     ToolResult.Text("replaced tool result"),

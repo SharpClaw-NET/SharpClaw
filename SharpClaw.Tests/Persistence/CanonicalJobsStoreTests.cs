@@ -83,7 +83,7 @@ internal sealed class CanonicalJobsStoreTests
     private static SharpClawDbContext CreateDbContext(string dataDirectory)
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Encryption:EncryptDatabase"] = "false",
             })
@@ -128,8 +128,7 @@ internal sealed class CanonicalJobsStoreTests
         public ScopedStorageContractDescriptor? FindStorageContract(
             string SourceId,
             string storageName) =>
-            KernelJobsStorage.Contracts.FirstOrDefault(contract =>
-                contract.SourceId == SourceId && contract.StorageName == storageName);
+            KernelJobsStorage.Contracts.FirstOrDefault(contract => string.Equals(contract.SourceId, SourceId, StringComparison.Ordinal) && string.Equals(contract.StorageName, storageName, StringComparison.Ordinal));
     }
 
     private sealed class TestRuntimeTransactionActionBoundary : IRuntimeTransactionActionBoundary

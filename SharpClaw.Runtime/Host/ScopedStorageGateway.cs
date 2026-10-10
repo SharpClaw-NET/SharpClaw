@@ -71,7 +71,7 @@ internal sealed class ScopedStorageGateway(
 
                 IReadOnlyList<ScopedStorageIndexEntryDB> indexes = [];
                 string? valueJson = null;
-                if (mutation.Operation == ScopedStorageOperations.Upsert)
+                if (string.Equals(mutation.Operation, ScopedStorageOperations.Upsert, StringComparison.Ordinal))
                 {
                     if (mutation.Value is not { } value || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
                         throw new ArgumentException("Atomic registration storage upsert requires a value.", nameof(request));
@@ -99,7 +99,7 @@ internal sealed class ScopedStorageGateway(
             var writtenRecords = new Dictionary<string, ScopedStorageRecordDB>(StringComparer.Ordinal);
             foreach (var item in pending)
             {
-                if (item.Mutation.Operation == ScopedStorageOperations.Delete)
+                if (string.Equals(item.Mutation.Operation, ScopedStorageOperations.Delete, StringComparison.Ordinal))
                 {
                     if (item.Record is not null)
                         db.ScopedStorageRecords.Remove(item.Record);
@@ -129,8 +129,7 @@ internal sealed class ScopedStorageGateway(
             var revisions = pending
                 .Select(item => new ScopedStorageRevision(
                     item.Key,
-                    item.Mutation.Operation == ScopedStorageOperations.Delete
-                        ? item.ActualRevision + 1
+                        string.Equals(item.Mutation.Operation, ScopedStorageOperations.Delete, StringComparison.Ordinal) ? item.ActualRevision + 1
                         : Revision(writtenRecords[item.Key])))
                 .ToArray();
 
@@ -144,7 +143,7 @@ internal sealed class ScopedStorageGateway(
                 revisions.Max(revision => revision.Revision));
             CommitResults.TryAdd(commitKey, result);
             foreach (var item in pending)
-                AdvanceClaim(SourceId, storageName, item.Key, item.Mutation.Authority, revisions.First(value => value.Key == item.Key).Revision);
+                AdvanceClaim(SourceId, storageName, item.Key, item.Mutation.Authority, revisions.First(value => string.Equals(value.Key, item.Key, StringComparison.Ordinal)).Revision);
             return result;
         }
         catch
@@ -1189,7 +1188,7 @@ internal sealed class ScopedStorageGateway(
             ScopedStorageComparisonOperators.LessThanOrEqual or
             ScopedStorageComparisonOperators.GreaterThanOrEqual;
 
-        if (comparisonOperator == ScopedStorageComparisonOperators.EqualTo && !descriptor.AllowsEquality)
+        if (string.Equals(comparisonOperator, ScopedStorageComparisonOperators.EqualTo, StringComparison.Ordinal) && !descriptor.AllowsEquality)
             throw new NotSupportedException(
                 $"Registration storage index '{descriptor.Name}' does not allow equality comparisons.");
 

@@ -206,8 +206,7 @@ internal sealed class GatewayBackgroundActionBoundaryTests
     {
         var actionGrants = GatewayBackgroundActionManifest.Required.ToDictionary(
             static key => key.Value,
-            static key => key.Value == "background.tick.execute"
-                ? ActionInterceptionCapabilities.Inspect |
+            static key => string.Equals(key.Value, "background.tick.execute", StringComparison.Ordinal) ? ActionInterceptionCapabilities.Inspect |
                     ActionInterceptionCapabilities.Wrap |
                     ActionInterceptionCapabilities.ReplaceResult |
                     ActionInterceptionCapabilities.Cancel
@@ -276,7 +275,7 @@ internal sealed class GatewayBackgroundActionBoundaryTests
             CancellationToken cancellationToken)
         {
             probe.ActionKeys.Enqueue(context.ActionKey.Value);
-            if (context.ActionKey.Value == "background.tick.execute")
+            if (string.Equals(context.ActionKey.Value, "background.tick.execute", StringComparison.Ordinal))
             {
                 probe.ExecuteContexts.Enqueue((context.TraceId, context.IdempotencyKey));
                 if (string.Equals(probe.ReplaceResultAction, context.ActionKey.Value, StringComparison.Ordinal))

@@ -152,19 +152,19 @@ internal sealed class RuntimeProviderBoundaryTests
             workspace,
             probe,
             provider,
-            mode == "repeat" ? new MatchingRepeatEvidenceAuthority() : null);
+                string.Equals(mode, "repeat", StringComparison.Ordinal) ? new MatchingRepeatEvidenceAuthority() : null);
 
         var result = await adapter.Kernel.RunAsync(new ChatTurnInput("controlled")).ConfigureAwait(false);
 
         result.Completion.Content.Should().Be("provider response");
         provider.TransportCalls.Should().Be(1);
-        if (mode == "replace-input")
+        if (string.Equals(mode, "replace-input", StringComparison.Ordinal))
             provider.LastModel.Should().Be("replaced-model");
-        if (mode == "replace-result")
-            probe.Observations.Count(value => value.Action == "provider.request.prepare")
+        if (string.Equals(mode, "replace-result", StringComparison.Ordinal))
+            probe.Observations.Count(value => string.Equals(value.Action, "provider.request.prepare", StringComparison.Ordinal))
                 .Should().Be(1);
-        if (mode == "repeat")
-            probe.Observations.Count(value => value.Action == "provider.request.prepare")
+        if (string.Equals(mode, "repeat", StringComparison.Ordinal))
+            probe.Observations.Count(value => string.Equals(value.Action, "provider.request.prepare", StringComparison.Ordinal))
                 .Should().Be(2);
     }
 
@@ -179,7 +179,7 @@ internal sealed class RuntimeProviderBoundaryTests
 
         Func<Task> run = async () => await adapter.Kernel.RunAsync(
             new ChatTurnInput("blocked", Guid.NewGuid())).ConfigureAwait(false);
-        if (mode == "cancel")
+        if (string.Equals(mode, "cancel", StringComparison.Ordinal))
             await run.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
         else
             await run.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
@@ -197,7 +197,7 @@ internal sealed class RuntimeProviderBoundaryTests
     {
         var SourceId = "provider-boundary-test";
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = provider.ProviderKey,
                 ["Provider:Model"] = "original-model",
@@ -207,7 +207,7 @@ internal sealed class RuntimeProviderBoundaryTests
         {
             ActionRegistrationCapabilityGrants = new Dictionary<
                 string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
             {
                 [SourceId] = RuntimeProviderActionManifest.Required.ToDictionary(
                     key => key.Value,
@@ -352,15 +352,15 @@ internal sealed class RuntimeProviderBoundaryTests
                 context.Depth,
                 context.ParentInvocationId));
 
-            if (context.ActionKey.Value == "provider.request.prepare")
+            if (string.Equals(context.ActionKey.Value, "provider.request.prepare", StringComparison.Ordinal))
             {
-                if (probe.Mode == "cancel")
+                if (string.Equals(probe.Mode, "cancel", StringComparison.Ordinal))
                     return control.Cancel("PROVIDER_TEST_CANCELLED", "Provider action cancelled.");
-                if (probe.Mode == "fail")
+                if (string.Equals(probe.Mode, "fail", StringComparison.Ordinal))
                     return control.Fail(new ExecutionError(
                         "PROVIDER_TEST_FAILED",
                         "Provider action failed."));
-                if (probe.Mode == "repeat" && context.Attempt == 1)
+                if (string.Equals(probe.Mode, "repeat", StringComparison.Ordinal) && context.Attempt == 1)
                 {
                     return await control.RepeatAsync(
                         new ActionRepeatRequest<KernelActionEnvelope>(
@@ -371,7 +371,7 @@ internal sealed class RuntimeProviderBoundaryTests
                 }
                 if (context.Action.Payload is KernelProviderRequestEnvelope request)
                 {
-                    if (probe.Mode == "replace-input")
+                    if (string.Equals(probe.Mode, "replace-input", StringComparison.Ordinal))
                     {
                         var replacement = request with
                         {
@@ -389,7 +389,7 @@ internal sealed class RuntimeProviderBoundaryTests
                                 "Replace provider request input."),
                             cancellationToken).ConfigureAwait(false);
                     }
-                    if (probe.Mode == "replace-result")
+                    if (string.Equals(probe.Mode, "replace-result", StringComparison.Ordinal))
                         return control.ReplaceResult(request, "Replace pure provider preparation result.");
                 }
             }

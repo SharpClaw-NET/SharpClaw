@@ -168,7 +168,7 @@ internal sealed class DefaultModuleSetHostGateTests
 
     private static IConfiguration CreateConfiguration(string providerEndpoint, bool configured) =>
         new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
             {
                 ["Provider:Key"] = configured ? "custom" : null,
                 ["Provider:Model"] = configured ? "default-gate-model" : null,

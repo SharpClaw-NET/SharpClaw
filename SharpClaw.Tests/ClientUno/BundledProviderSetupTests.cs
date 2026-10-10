@@ -23,7 +23,7 @@ internal sealed class BundledProviderSetupTests
          new("Provider:Endpoint", "https://primary.example"), new("Database:Provider", "ThirdParty")];
         var selected = new SharpClawProviderSetupOption("alternate", "Alternate", true, true);
         var result = BundledProviderSetup.UpdateSettings(original, selected, "alternate-model",
-            "https://alternate.example", "alternate-secret").ToDictionary(item => item.Key, item => item.Value);
+            "https://alternate.example", "alternate-secret").ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
         result["Providers:primary:ApiKey"].Should().Be("primary-secret");
         result["Providers:primary:Endpoint"].Should().Be("https://primary.example");
         result["Providers:alternate:ApiKey"].Should().Be("alternate-secret");

@@ -51,7 +51,7 @@ public sealed class ManagedPublishIdentityTests
             var metadata = pe.GetMetadataReader();
             var method = metadata.MethodDefinitions
                 .Select(metadata.GetMethodDefinition)
-                .Single(definition => metadata.GetString(definition.Name) == nameof(IdentityFixtureMethod));
+                .Single(definition => string.Equals(metadata.GetString(definition.Name), nameof(IdentityFixtureMethod), StringComparison.Ordinal));
             var offset = FileOffset(pe, method.RelativeVirtualAddress);
             var headerSize = (changed[offset] & 3) == 2 ? 1 : (changed[offset + 1] >> 4) * 4;
             // Change a ldc.i4 operand, leaving the instruction and PE valid.

@@ -140,7 +140,7 @@ internal sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db
         var replacement = current with
         {
             State = state,
-            Attempts = state == Failed ? current.Attempts + 1 : current.Attempts,
+            Attempts = string.Equals(state, Failed, StringComparison.Ordinal) ? current.Attempts + 1 : current.Attempts,
             LastError = error,
             UpdatedAt = DateTimeOffset.UtcNow,
         };
