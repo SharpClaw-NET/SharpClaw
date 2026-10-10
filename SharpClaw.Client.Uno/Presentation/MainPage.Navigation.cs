@@ -18,4 +18,11 @@ public sealed partial class MainPage
         await services.GetRequiredService<ClientNavigationService>()
             .NavigateRouteAsync(this, "Boot", cancellationToken: CancellationToken.None).ConfigureAwait(true);
     });
+
+    private void OnRemoteConnectionClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
+    {
+        if (App.Services is not { } services) return;
+        await services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "RemoteConnection", cancellationToken: CancellationToken.None).ConfigureAwait(true);
+    });
 }

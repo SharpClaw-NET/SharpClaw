@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using SharpClaw.Configuration;
 using SharpClaw.Services;
 using SharpClaw.Client.Uno;
@@ -193,6 +194,7 @@ public partial class App : Application
                 sp.GetRequiredService<ILogger<SharpClawApiClient>>(),
                 frontendInstance,
                 sp.GetRequiredService<ClientActionDispatcher>()));
+        services.AddSingleton<RemoteBackendConnectionService>();
     }
 
     private static string RegisterProcesses(
@@ -249,30 +251,62 @@ public partial class App : Application
             var services = Host?.Services;
             var actions = services?.GetService<ClientActionDispatcher>();
             if (services is null || actions is null) return;
-            await actions.RunCommandAsync("client.app.close", async _ =>
-            {
-                var gateway = services.GetService<GatewayProcessManager>();
-                var backend = services.GetService<BackendProcessManager>();
-                var api = services.GetService<SharpClawApiClient>();
-                WindowsStartupManager.RefreshIfNeeded(
-                    backend?.ExecutablePath, backend?.ApiUrl,
-                    gateway?.ExecutablePath, gateway?.GatewayUrl);
-                try { gateway?.Dispose(); }
-                finally
-                {
-                    try { backend?.Dispose(); }
-                    finally
-                    {
-                        try { if (api is not null) await api.DisposeAsync().ConfigureAwait(true); }
-                        finally { if (_logging is not null) await _logging.DisposeAsync().ConfigureAwait(true); }
-                    }
-                }
-            }, CancellationToken.None).ConfigureAwait(true);
+            await actions.RunCommandAsync("client.app.close",
+                async _ => await CloseResourcesAsync(services).ConfigureAwait(false),
+                CancellationToken.None).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
             ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
         }
+    }
+
+    private async Task CloseResourcesAsync(IServiceProvider services)
+    {
+        // Join a committed restart before disposing its process/HTTP owners.
+        // Every later cleanup is attempted, retaining the first failure.
+        ExceptionDispatchInfo? failure = null;
+        failure = await AttemptShutdownStepAsync(
+            () => services.GetService<RemoteBackendConnectionService>()?.DisposeAsync() ?? ValueTask.CompletedTask,
+            failure).ConfigureAwait(false);
+        failure = await AttemptShutdownStepAsync(() =>
+        {
+            var backend = services.GetService<BackendProcessManager>();
+            var gateway = services.GetService<GatewayProcessManager>();
+            WindowsStartupManager.RefreshIfNeeded(backend?.ExecutablePath, backend?.ApiUrl,
+                gateway?.ExecutablePath, gateway?.GatewayUrl);
+            return ValueTask.CompletedTask;
+        }, failure).ConfigureAwait(false);
+        failure = await AttemptShutdownStepAsync(() =>
+        {
+            services.GetService<GatewayProcessManager>()?.Dispose();
+            return ValueTask.CompletedTask;
+        }, failure).ConfigureAwait(false);
+        failure = await AttemptShutdownStepAsync(() =>
+        {
+            services.GetService<BackendProcessManager>()?.Dispose();
+            return ValueTask.CompletedTask;
+        }, failure).ConfigureAwait(false);
+        failure = await AttemptShutdownStepAsync(
+            () => services.GetService<SharpClawApiClient>()?.DisposeAsync() ?? ValueTask.CompletedTask,
+            failure).ConfigureAwait(false);
+        failure = await AttemptShutdownStepAsync(
+            () => _logging?.DisposeAsync() ?? ValueTask.CompletedTask, failure).ConfigureAwait(false);
+        failure?.Throw();
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "Each owned shutdown step is attempted even if an earlier step failed. Secondary faults are journalled using bounded metadata and the first fault retains its original stack for the final shutdown boundary.")]
+    private static async Task<ExceptionDispatchInfo?> AttemptShutdownStepAsync(
+        Func<ValueTask> step, ExceptionDispatchInfo? firstFailure)
+    {
+        try { await step().ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            if (firstFailure is null) return ExceptionDispatchInfo.Capture(exception);
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+        }
+        return firstFailure;
     }
 
     private static void RegisterGlobalExceptionLogging(Serilog.ILogger logger)
@@ -299,7 +333,8 @@ public partial class App : Application
             new ViewMap(ViewModel: typeof(ShellModel)),
             new ViewMap<BootPage>(),
             new ViewMap<MainPage>(),
-            new ViewMap<SettingsPage>()
+            new ViewMap<SettingsPage>(),
+            new ViewMap<RemoteConnectionPage>()
         );
 
         routes.Register(
@@ -308,7 +343,8 @@ public partial class App : Application
                 [
                     new ("Boot", View: views.FindByView<BootPage>(), IsDefault:true),
                     new ("Main", View: views.FindByView<MainPage>()),
-                    new ("Settings", View: views.FindByView<SettingsPage>())
+                    new ("Settings", View: views.FindByView<SettingsPage>()),
+                    new ("RemoteConnection", View: views.FindByView<RemoteConnectionPage>())
                 ]
             )
         );

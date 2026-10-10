@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -22,6 +23,12 @@ internal sealed class InternalApiClient(
     IHttpContextAccessor httpContextAccessor,
     ILogger<InternalApiClient> logger) : IGatewayInternalApi
 {
+    // A selected transport and its discovery credentials remain one target.
+    private readonly Uri _targetAddress = httpClient.BaseAddress ?? new Uri(options.Value.BaseUrl);
+    private static readonly HashSet<string> ExcludedWebSocketResponseHeaders = new(
+        ["Connection", "Content-Length", "Transfer-Encoding", "Upgrade", "Set-Cookie", "Cookie",
+         "Keep-Alive", "Proxy-Connection", "TE", "Trailer", "Proxy-Authorization", "Proxy-Authenticate",
+         "Authorization", "X-Api-Key", "X-Gateway-Token", "X-SharpClaw-Proxy-Hop"], StringComparer.OrdinalIgnoreCase);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -165,7 +172,7 @@ internal sealed class InternalApiClient(
         HttpRequestMessage request, CancellationToken ct = default)
     {
         AttachApiKey(request);
-        return await httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        return await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
 
     public async Task ForwardWebSocketAsync(
@@ -177,6 +184,7 @@ internal sealed class InternalApiClient(
         ArgumentException.ThrowIfNullOrWhiteSpace(pathAndQuery);
 
         using var upstream = new ClientWebSocket();
+        upstream.Options.CollectHttpResponseDetails = true;
         upstream.Options.SetRequestHeader("X-Api-Key", ResolveApiKey());
         var gatewayToken = ResolveGatewayToken();
         if (gatewayToken is not null)
@@ -186,30 +194,85 @@ internal sealed class InternalApiClient(
         if (!string.IsNullOrEmpty(authorization))
             upstream.Options.SetRequestHeader("Authorization", authorization);
 
+        if (context.Request.Headers.TryGetValue("X-SharpClaw-Proxy-Hop", out var proxyHop))
+            upstream.Options.SetRequestHeader("X-SharpClaw-Proxy-Hop", proxyHop.ToString());
+
         foreach (var protocol in context.WebSockets.WebSocketRequestedProtocols)
             upstream.Options.AddSubProtocol(protocol);
 
-        await upstream.ConnectAsync(CreateWebSocketUri(pathAndQuery), cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await upstream.ConnectAsync(CreateWebSocketUri(pathAndQuery), httpClient, cancellationToken).ConfigureAwait(false);
+        }
+        catch (WebSocketException) when ((int)upstream.HttpStatusCode is >= 300 and <= 599)
+        {
+            context.Response.StatusCode = (int)upstream.HttpStatusCode;
+            if (upstream.HttpResponseHeaders is { } headers)
+            {
+                var excluded = new HashSet<string>(ExcludedWebSocketResponseHeaders, StringComparer.OrdinalIgnoreCase);
+                foreach (var header in headers)
+                {
+                    if (!string.Equals(header.Key, "Connection", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    foreach (var value in header.Value)
+                    {
+                        foreach (var token in value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                            excluded.Add(token);
+                    }
+                }
+                foreach (var header in headers)
+                {
+                    if (!excluded.Contains(header.Key))
+                        context.Response.Headers[header.Key] = header.Value.ToArray();
+                }
+            }
+            return;
+        }
         using var downstream = await context.WebSockets.AcceptWebSocketAsync(upstream.SubProtocol).ConfigureAwait(false);
         using var relayCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        await RunWebSocketRelaysAsync(downstream, upstream, relayCancellation).ConfigureAwait(false);
+        await RunWebSocketRelaysAsync(downstream, upstream, relayCancellation, cancellationToken).ConfigureAwait(false);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "Both owned relays and cancellation callbacks must settle before socket disposal. The first relay/caller failure is rethrown after cleanup; a cleanup failure cannot replace it.")]
     private static async Task RunWebSocketRelaysAsync(
-        WebSocket downstream, WebSocket upstream, CancellationTokenSource relayCancellation)
+        WebSocket downstream, WebSocket upstream, CancellationTokenSource relayCancellation,
+        CancellationToken cancellationToken)
     {
         var toRuntime = RelayWebSocketAsync(downstream, upstream, relayCancellation.Token);
         var toClient = RelayWebSocketAsync(upstream, downstream, relayCancellation.Token);
-        await Task.WhenAny(toRuntime, toClient).ConfigureAwait(false);
-        var cancellation = relayCancellation.CancelAsync();
-
+        var relays = Task.WhenAll(toRuntime, toClient);
+        ExceptionDispatchInfo? failure = null;
         try
         {
-            await Task.WhenAll(toRuntime, toClient, cancellation).ConfigureAwait(false);
+            var first = await Task.WhenAny(toRuntime, toClient).ConfigureAwait(false);
+            // WhenAny returns one of the two locally owned context-free relays.
+#pragma warning disable VSTHRD003
+            await first.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
+            try
+            {
+                // A forwarded close frame still needs the peer's acknowledgement.
+                await relays.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException) when (!relays.IsFaulted)
+            {
+                // An unresponsive peer is cancelled and physically joined below.
+            }
         }
-        catch (OperationCanceledException) when (relayCancellation.IsCancellationRequested)
+        catch (Exception exception)
         {
+            failure = ExceptionDispatchInfo.Capture(exception);
         }
+        finally
+        {
+            var cancellation = relayCancellation.CancelAsync();
+            try { await Task.WhenAll(relays, cancellation).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (relayCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested) { }
+            catch (Exception exception) { failure ??= ExceptionDispatchInfo.Capture(exception); }
+        }
+        failure?.Throw();
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     /// <summary>
@@ -220,6 +283,7 @@ internal sealed class InternalApiClient(
 
     private void AttachApiKey(HttpRequestMessage request)
     {
+        request.RequestUri = ResolveTargetUri(request.RequestUri);
         var key = ResolveApiKey();
         if (request.Headers.Contains("X-Api-Key"))
             request.Headers.Remove("X-Api-Key");
@@ -282,9 +346,7 @@ internal sealed class InternalApiClient(
 
     private Uri CreateWebSocketUri(string pathAndQuery)
     {
-        var baseAddress = httpClient.BaseAddress
-            ?? throw new InvalidOperationException("The Runtime target address is not configured.");
-        var target = new Uri(baseAddress, pathAndQuery);
+        var target = ResolveTargetUri(new Uri(pathAndQuery, UriKind.RelativeOrAbsolute));
         var builder = new UriBuilder(target)
         {
             Scheme = string.Equals(target.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ? "wss" : "ws",
@@ -341,7 +403,7 @@ internal sealed class InternalApiClient(
             return _cachedGatewayToken;
         }
 
-        var entry = ResolveSelectedBackendDiscoveryEntry(opts);
+        var entry = ResolveSelectedBackendDiscoveryEntry(_targetAddress);
         var tokenFilePath = entry?.GatewayTokenFilePath;
 
         if (string.IsNullOrWhiteSpace(tokenFilePath) || !File.Exists(tokenFilePath))
@@ -370,7 +432,7 @@ internal sealed class InternalApiClient(
             return _cachedApiKey;
         }
 
-        var entry = ResolveSelectedBackendDiscoveryEntry(opts);
+        var entry = ResolveSelectedBackendDiscoveryEntry(_targetAddress);
         var keyFilePath = entry?.ApiKeyFilePath;
 
         if (string.IsNullOrWhiteSpace(keyFilePath) || !File.Exists(keyFilePath))
@@ -382,7 +444,7 @@ internal sealed class InternalApiClient(
         return _cachedApiKey;
     }
 
-    private static SharpClawDiscoveryEntry? ResolveSelectedBackendDiscoveryEntry(InternalApiOptions opts)
+    private static SharpClawDiscoveryEntry? ResolveSelectedBackendDiscoveryEntry(Uri targetAddress)
     {
         var paths = new SharpClawInstancePaths(
             SharpClawInstanceKind.Gateway,
@@ -390,7 +452,8 @@ internal sealed class InternalApiClient(
             Environment.GetEnvironmentVariable("SHARPCLAW_SHARED_ROOT"));
 
         var manifest = paths.Manifest;
-        var entries = EnumerateBackendDiscoveryEntries(paths.SharedRoot).ToList();
+        var entries = EnumerateBackendDiscoveryEntries(paths.SharedRoot)
+            .Where(entry => MatchesTarget(entry.BaseUrl, targetAddress)).ToList();
 
         var explicitInstanceId = Environment.GetEnvironmentVariable("SharpClawInstance__SelectedBackendInstanceId")
             ?? Environment.GetEnvironmentVariable("SHARPCLAW_SELECTED_BACKEND_INSTANCE_ID");
@@ -408,13 +471,6 @@ internal sealed class InternalApiClient(
                 return byInstanceId;
         }
 
-        if (!string.IsNullOrWhiteSpace(opts.BaseUrl))
-        {
-            var byConfiguredUrl = entries.FirstOrDefault(e => string.Equals(e.BaseUrl, opts.BaseUrl, StringComparison.OrdinalIgnoreCase));
-            if (byConfiguredUrl is not null)
-                return byConfiguredUrl;
-        }
-
         if (!string.IsNullOrWhiteSpace(manifest.SelectedBackendBaseUrl))
         {
             var byManifestUrl = entries.FirstOrDefault(e => string.Equals(e.BaseUrl, manifest.SelectedBackendBaseUrl, StringComparison.OrdinalIgnoreCase));
@@ -423,6 +479,29 @@ internal sealed class InternalApiClient(
         }
 
         return entries.Count == 1 ? entries[0] : null;
+    }
+
+    private static bool MatchesTarget(string baseUrl, Uri targetAddress) =>
+        Uri.TryCreate(baseUrl, UriKind.Absolute, out var discovered) &&
+        Uri.Compare(discovered, targetAddress, UriComponents.SchemeAndServer,
+            UriFormat.UriEscaped, StringComparison.OrdinalIgnoreCase) == 0 &&
+        string.Equals(discovered.AbsolutePath.TrimEnd('/'),
+            targetAddress.AbsolutePath.TrimEnd('/'), StringComparison.Ordinal);
+
+    private Uri ResolveTargetUri(Uri? requestUri)
+    {
+        ArgumentNullException.ThrowIfNull(requestUri);
+        var target = requestUri.IsAbsoluteUri ? requestUri : new Uri(_targetAddress, requestUri);
+        var prefix = _targetAddress.AbsolutePath.TrimEnd('/') + "/";
+        if (Uri.Compare(target, _targetAddress, UriComponents.SchemeAndServer,
+                UriFormat.UriEscaped, StringComparison.OrdinalIgnoreCase) != 0 ||
+            !string.IsNullOrEmpty(target.UserInfo) ||
+            !(target.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal) ||
+              string.Equals(target.AbsolutePath.TrimEnd('/'), prefix.TrimEnd('/'), StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("The request does not belong to the selected Runtime target.");
+        }
+        return target;
     }
 
     private static IEnumerable<SharpClawDiscoveryEntry> EnumerateBackendDiscoveryEntries(string sharedRoot)

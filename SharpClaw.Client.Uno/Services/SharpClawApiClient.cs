@@ -21,6 +21,7 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
     private readonly bool _ownsHttp;
     private readonly string? _fixedApiKey;
     private Uri _targetBaseUri;
+    private int _targetGuards;
     private string? _cachedApiKey;
     private Uri? _cachedApiKeyTarget;
     private readonly Lock _disposeLock = new();
@@ -48,7 +49,7 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
         Justification = "The returned HttpClient owns its handler through disposeHandler: true. Every constructor/configuration failure disposes the acquired handler/client before rethrowing; the analyzer cannot follow this explicit ownership transfer.")]
     private static HttpClient CreateHttpClient(ILogger logger)
     {
-        var inner = new HttpClientHandler();
+        var inner = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false, CheckCertificateRevocationList = true };
         HttpLoggingHandler? loggingHandler = null;
         HttpClient? http = null;
         try
@@ -119,6 +120,11 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
             {
                 lock (_targetLock)
                 {
+                    if (targetBaseUri != _targetBaseUri && (_targetGuards > 0 ||
+                        (_frontendInstance is not null && RemoteBackendConnectionService.IsProxyConfigured(_frontendInstance))))
+                    {
+                        throw new InvalidOperationException("Finish the remote connection change or disconnect before changing the local backend target.");
+                    }
                     _frontendInstance?.RememberBackendBinding(
                         backendInstanceId: null,
                         baseUrl,
@@ -499,6 +505,36 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
     {
         lock (_targetLock)
             return _targetBaseUri;
+    }
+
+    internal IDisposable HoldTarget(Uri expectedTarget)
+    {
+        ArgumentNullException.ThrowIfNull(expectedTarget);
+        lock (_targetLock)
+        {
+            if (_targetBaseUri != expectedTarget)
+                throw new InvalidOperationException("The selected local backend changed before the remote connection was admitted.");
+            var lease = new TargetGuard(ReleaseTargetGuard);
+            _targetGuards++;
+            return lease;
+        }
+    }
+
+    private void ReleaseTargetGuard()
+    {
+        lock (_targetLock)
+            _targetGuards--;
+    }
+
+    private sealed class TargetGuard(Action release) : IDisposable
+    {
+        private Action? _release = release;
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _release, null)?.Invoke();
+            GC.SuppressFinalize(this);
+        }
     }
 
     private static Uri CreateTargetUri(string baseUrl)

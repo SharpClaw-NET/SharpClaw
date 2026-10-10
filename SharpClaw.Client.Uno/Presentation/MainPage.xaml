@@ -49,6 +49,12 @@
           <TextBlock Text="[back to boot]" Style="{StaticResource TerminalText}"
                      FontSize="12" Foreground="#808080" />
         </Button>
+        <Button Background="Transparent" BorderThickness="0" Padding="0"
+                HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                Click="OnRemoteConnectionClick">
+          <TextBlock Text="[remote backend]" Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#808080" />
+        </Button>
       </StackPanel>
     </Grid>
 
@@ -68,7 +74,7 @@
                    FontSize="14" Foreground="#00FF00" />
         <Border Height="1" Background="#1A1A1A" Margin="0,8,0,0" />
         <StackPanel x:Name="ChatSetupPrompt" Spacing="8">
-          <TextBlock Text="Go back to Settings and select a model from an available provider. Install a provider module if none is available."
+          <TextBlock Text="Choose a provider and model on the backend. Use Settings for local setup, or configure the remote backend when connected."
                      Style="{StaticResource TerminalText}" FontSize="12" Foreground="#808080"
                      TextWrapping="Wrap" MaxWidth="620" />
           <StackPanel Orientation="Horizontal" Spacing="8">

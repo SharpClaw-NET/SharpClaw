@@ -74,7 +74,7 @@ internal sealed class RuntimeSecurityBoundaryTests
         var probe = new SecurityProbe();
         var configuration = Configuration();
         var adapter = CreateAdapter(workspace, probe, configuration);
-        var keyProvider = new ApiKeyProvider(workspace.Paths);
+        using var keyProvider = new ApiKeyProvider(workspace.Paths);
 
         var allowedNext = false;
         var allowed = HttpContext("api-user");
@@ -123,7 +123,7 @@ internal sealed class RuntimeSecurityBoundaryTests
             probe,
             configuration,
             new MatchingRepeatEvidenceAuthority());
-        var keyProvider = new ApiKeyProvider(workspace.Paths);
+        using var keyProvider = new ApiKeyProvider(workspace.Paths);
         var context = HttpContext("api-user");
         context.Request.Path = "/protected";
         context.Request.Headers["X-Api-Key"] = keyProvider.ApiKey;
@@ -157,7 +157,7 @@ internal sealed class RuntimeSecurityBoundaryTests
         };
         var configuration = Configuration();
         var adapter = CreateAdapter(workspace, probe, configuration);
-        var keyProvider = new ApiKeyProvider(workspace.Paths);
+        using var keyProvider = new ApiKeyProvider(workspace.Paths);
         var context = HttpContext("api-user");
         context.Request.Path = "/protected";
         context.Response.Body = new MemoryStream();

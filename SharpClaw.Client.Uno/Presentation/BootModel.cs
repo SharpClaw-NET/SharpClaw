@@ -49,17 +49,32 @@ public sealed class BootModel
         if (!string.IsNullOrWhiteSpace(customUrl))
         {
             var url = customUrl.Trim();
+            if (KeepPairedLocalTarget(url)) return;
             await _actions.RunCommandAsync(
                 "client.boot.url",
                 async token =>
                 {
+                    if (KeepPairedLocalTarget(url)) return true;
+                    await _api.UpdateBaseUrlAsync(url, token).ConfigureAwait(true);
                     _backend.UpdateApiUrl(url);
                     _gateway.UpdateBackendBaseUrl(url);
-                    await _api.UpdateBaseUrlAsync(url, token).ConfigureAwait(true);
                     return true;
                 },
                 cancellationToken).ConfigureAwait(true);
         }
+    }
+
+    private bool KeepPairedLocalTarget(string target)
+    {
+        if (_frontendInstance is null || !RemoteBackendConnectionService.IsProxyConfigured(_frontendInstance))
+            return false;
+        if (!Uri.TryCreate(target, UriKind.Absolute, out var requested) ||
+            !Uri.TryCreate(_backend.ApiUrl, UriKind.Absolute, out var local) || !local.IsLoopback ||
+            !string.IsNullOrEmpty(requested.UserInfo) || requested != local ||
+            !Uri.TryCreate(_api.BaseUrl, UriKind.Absolute, out var selected) || selected != local)
+            throw new InvalidOperationException("Disconnect the remote backend before changing this local Runtime target.");
+        // Retrying the current local proxy is allowed without a target mutation.
+        return true;
     }
 
     /// <summary>Step 1 (silent): ensure the backend process is available.</summary>

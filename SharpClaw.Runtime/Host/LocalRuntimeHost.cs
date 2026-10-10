@@ -38,6 +38,13 @@ internal static class LocalRuntimeHost
             .AddEnvironmentVariables()
             .AddLocalEnvironment(isDevelopment: false, instancePaths)
             .Build();
+        var remoteConnection = RemoteGatewayConnection.FromConfiguration(earlyConfiguration);
+        if (remoteConnection is not null)
+        {
+            await RemoteProxyHost.RunAsync(args, earlyConfiguration, instancePaths,
+                remoteConnection, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         var registrationRoots = PackagedRegistrationRootResolver.Resolve(
             Path.Combine(AppContext.BaseDirectory, "contributions"),
             earlyConfiguration);

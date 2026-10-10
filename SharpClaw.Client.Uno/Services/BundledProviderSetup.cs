@@ -18,6 +18,7 @@ internal static class BundledProviderSetup
         string? credential,
         CancellationToken cancellationToken = default)
     {
+        BundledModuleSetup.RequireLocalMode(frontend);
         if (!backend.OwnsCurrentTarget || backend.SkipLaunch)
             throw new InvalidOperationException("Only the running, frontend-owned bundled Runtime can be configured here.");
         if (string.IsNullOrWhiteSpace(provider.Key))

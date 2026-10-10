@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Gateway;
@@ -46,7 +47,8 @@ internal static class GatewayProxyEndpoints
                 request.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
         }
 
-        if (context.Request.ContentLength is > 0)
+        if (context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true ||
+            context.Request.ContentLength is > 0)
         {
             request.Content = new StreamContent(context.Request.Body);
             if (!string.IsNullOrWhiteSpace(context.Request.ContentType))

@@ -85,20 +85,23 @@ public sealed partial class BootPage : Page
         {
             try
             {
-                var installed = services.GetRequiredService<ModulePackageStore>().ReadInstalled();
-                var bundled = ModulePackageStore.ReadIdentities(
-                    Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"), true);
-                var frontend = services.GetRequiredService<FrontendInstanceService>();
-                if (!installed.Concat(bundled).Any(module => BundledModuleSetup.IsEnabled(frontend, module.Id, module.DefaultEnabled)))
+                if (!services.GetRequiredService<RemoteBackendConnectionService>().IsProxyConfigured())
                 {
-                    Cursor.SetCommand("No modules enabled. Install modules or open Settings.");
-                    return;
+                    var installed = services.GetRequiredService<ModulePackageStore>().ReadInstalled();
+                    var bundled = ModulePackageStore.ReadIdentities(
+                        Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"), true);
+                    var frontend = services.GetRequiredService<FrontendInstanceService>();
+                    if (!installed.Concat(bundled).Any(module => BundledModuleSetup.IsEnabled(frontend, module.Id, module.DefaultEnabled)))
+                    {
+                        Cursor.SetCommand("No modules enabled. Install modules, open Settings or connect a remote backend.");
+                        return;
+                    }
                 }
             }
             catch (Exception exception)
             {
                 ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
-                Cursor.SetCommand("Module configuration unavailable. Open Settings or install modules.");
+                Cursor.SetCommand("Backend configuration unavailable. Open Settings or Remote backend.");
                 return;
             }
         }
@@ -185,6 +188,11 @@ public sealed partial class BootPage : Page
         }
 
         PopulateDiagnostics(finalDiag);
+        var proxyConfigured = App.Services!.GetRequiredService<RemoteBackendConnectionService>().IsProxyConfigured();
+        UrlBox.IsEnabled = !proxyConfigured;
+        RetryPromptBlock.Text = proxyConfigured
+            ? "Press Enter to retry the local proxy. Disconnect the remote backend before changing the service URL."
+            : "Press Enter to retry or Escape to exit.";
         RetryPromptBlock.Visibility = Visibility.Visible;
         UrlPanel.Visibility = Visibility.Visible;
         UrlBox.Text = _model.ApiUrl.TrimEnd('/');

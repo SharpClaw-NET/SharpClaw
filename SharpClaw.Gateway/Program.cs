@@ -106,7 +106,12 @@ builder.Services.AddHttpClient<InternalApiClient>(client =>
     client.Timeout = int.TryParse(section["TimeoutSeconds"], CultureInfo.InvariantCulture, out var t) && t > 0
         ? TimeSpan.FromSeconds(t)
         : TimeSpan.FromSeconds(300);
-});
+}).ConfigurePrimaryHttpMessageHandler(static () => new HttpClientHandler
+{
+    AllowAutoRedirect = false,
+    UseCookies = false,
+    CheckCertificateRevocationList = true,
+}).RemoveAllLoggers(); // GatewayLog records sanitized paths; framework client loggers include query values.
 
 // ── Gateway endpoint configuration ──────────────────────────────
 builder.Services.Configure<GatewayEndpointOptions>(

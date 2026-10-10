@@ -7,6 +7,12 @@ namespace SharpClaw.Services;
 
 internal static class BundledModuleSetup
 {
+    internal static void RequireLocalMode(FrontendInstanceService frontend)
+    {
+        if (RemoteBackendConnectionService.IsProxyConfigured(frontend))
+            throw new InvalidOperationException("Disconnect the remote backend before configuring or activating local modules and providers.");
+    }
+
     public static void RequireOwnedTarget(BackendProcessManager backend)
     {
         if (!backend.IsAvailable || backend.SkipLaunch || backend.IsExternal ||
@@ -25,9 +31,17 @@ internal static class BundledModuleSetup
         return Task.CompletedTask;
     }
 
+    internal static Task StopAsync(BackendProcessManager backend, GatewayProcessManager? gateway,
+        FrontendInstanceService frontend, CancellationToken token)
+    {
+        RequireLocalMode(frontend);
+        return StopAsync(backend, gateway, token);
+    }
+
     public static async Task ConfigureAsync(FrontendInstanceService frontend, string root,
         IReadOnlyList<InstalledModuleIdentity> modules, bool enabled, CancellationToken token)
     {
+        RequireLocalMode(frontend);
         var paths = BackendPaths(frontend);
         var store = new SupprocomSecretFileStore(LocalEnvironment.CreateSecretsOptions(
             paths.ConfigDirectory, isDevelopment: false, paths));

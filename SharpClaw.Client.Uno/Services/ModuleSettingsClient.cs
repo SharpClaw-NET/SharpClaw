@@ -6,6 +6,7 @@ namespace SharpClaw.Services;
 
 internal static class ModuleSettingsClient
 {
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
     private static readonly JsonSerializerOptions CatalogJson = new(JsonSerializerDefaults.Web) { MaxDepth = 8 };
     public static async Task<IReadOnlyList<SharpClawModuleSettingsPage>> ReadPagesAsync(
         SharpClawApiClient api, CancellationToken token)
@@ -33,7 +34,7 @@ internal static class ModuleSettingsClient
         if (Encoding.UTF8.GetByteCount(json) > SharpClawModuleSettings.MaximumDocumentBytes)
             throw new InvalidDataException("Settings update exceeds its limit.");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        deadline.CancelAfter(RequestTimeout);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
         await api.ConsumeStreamAsync("POST", page.SavePath, content, (response, _) =>
         {
@@ -45,7 +46,7 @@ internal static class ModuleSettingsClient
     private static async Task<string> ReadAsync(SharpClawApiClient api, string path, CancellationToken token)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        deadline.CancelAfter(RequestTimeout);
         string? result = null;
         await api.ConsumeStreamAsync("GET", path, null, async (response, ct) =>
         {

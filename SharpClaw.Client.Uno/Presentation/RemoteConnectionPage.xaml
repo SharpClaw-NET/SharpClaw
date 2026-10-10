@@ -1,0 +1,63 @@
+<Page x:Class="SharpClaw.Presentation.RemoteConnectionPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:local="using:SharpClaw.Presentation"
+      NavigationCacheMode="Required"
+      AutomationProperties.AutomationId="SharpClawRemoteConnection"
+      AutomationProperties.Name="Remote backend connection"
+      Background="Black">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="24" Spacing="12" MaxWidth="600" HorizontalAlignment="Center">
+      <TextBlock Text="Remote backend" Style="{StaticResource TerminalText}"
+                 FontSize="20" Foreground="#00FF00" />
+      <TextBlock Text="Connect this local backend to a remote SharpClaw Gateway."
+                 Style="{StaticResource TerminalText}" FontSize="12" Foreground="#808080"
+                 TextWrapping="Wrap" />
+      <TextBlock Text="Gateway address" Style="{StaticResource TerminalText}"
+                 FontSize="12" Foreground="#808080" />
+      <TextBox x:Name="GatewayAddressInput" Style="{StaticResource TerminalInput}"
+               PlaceholderText="https://gateway.example" MaxLength="2048"
+               AutomationProperties.AutomationId="RemoteGatewayAddress" />
+      <Button x:Name="AuthenticationButton" Content="Authentication (optional)"
+              Style="{StaticResource TerminalButton}" Foreground="#00FF00"
+              FontFamily="Consolas, Courier New, monospace" Click="OnAuthenticationClick" />
+      <StackPanel x:Name="AuthenticationPanel" Visibility="Collapsed" Spacing="6">
+        <PasswordBox x:Name="AccessTokenInput" Style="{StaticResource TerminalPasswordInput}"
+                     PlaceholderText="Gateway bearer access token" MaxLength="8192"
+                     AutomationProperties.AutomationId="RemoteGatewayAccessToken" />
+        <TextBlock Text="Leave blank for anonymous access. Remote access tokens require HTTPS. Saved credentials are never shown here."
+                   Style="{StaticResource TerminalText}" FontSize="11" Foreground="#808080"
+                   TextWrapping="Wrap" />
+      </StackPanel>
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button x:Name="ConnectButton" Content="Connect" Style="{StaticResource TerminalButton}"
+                Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace" Click="OnConnectClick"
+                AutomationProperties.AutomationId="RemoteConnect" />
+        <Button x:Name="RefreshButton" Content="Refresh" Style="{StaticResource TerminalButton}"
+                Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace" Click="OnRefreshClick" />
+        <Button x:Name="DisconnectButton" Content="Disconnect" Style="{StaticResource TerminalButton}"
+                Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace" Click="OnDisconnectClick"
+                IsEnabled="False" AutomationProperties.AutomationId="RemoteDisconnect" />
+      </StackPanel>
+      <TextBlock x:Name="ConnectionStatus" Text="Not connected." Style="{StaticResource TerminalText}"
+                 FontSize="12" Foreground="#808080" TextWrapping="Wrap"
+                 AutomationProperties.AutomationId="RemoteConnectionStatus" />
+      <TextBlock Text="Disconnect to use local modules again. An unavailable remote backend stays configured until you disconnect."
+                 Style="{StaticResource TerminalText}" FontSize="11" Foreground="#808080"
+                 TextWrapping="Wrap" />
+      <Border Height="1" Background="#1A1A1A" Margin="0,8,0,0" />
+      <StackPanel Orientation="Horizontal" Spacing="16">
+        <Button Background="Transparent" BorderThickness="0" Padding="0" Click="OnBootClick">
+          <TextBlock Text="&lt; Back to Boot" Style="{StaticResource TerminalText}" FontSize="12" Foreground="#808080" />
+        </Button>
+        <Button Background="Transparent" BorderThickness="0" Padding="0" Click="OnSettingsClick">
+          <TextBlock Text="[settings]" Style="{StaticResource TerminalText}" FontSize="12" Foreground="#808080" />
+        </Button>
+        <Button Background="Transparent" BorderThickness="0" Padding="0" Click="OnChatClick">
+          <TextBlock Text="[stateless chat]" Style="{StaticResource TerminalText}" FontSize="12" Foreground="#808080" />
+        </Button>
+      </StackPanel>
+      <local:TerminalCursor x:Name="Cursor" Margin="0,4,0,0" />
+    </StackPanel>
+  </ScrollViewer>
+</Page>

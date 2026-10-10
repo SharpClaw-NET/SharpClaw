@@ -36,6 +36,9 @@
         <Button Content="Settings" Style="{StaticResource TerminalButton}"
                 Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace"
                 Click="OnSettingsClick" AutomationProperties.AutomationId="BootSettings" />
+        <Button Content="Connect a remote backend" Style="{StaticResource TerminalButton}"
+                Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace"
+                Click="OnRemoteConnectionClick" AutomationProperties.AutomationId="BootRemoteConnection" />
         <Button Content="Open stateless chat" Style="{StaticResource TerminalButton}"
                 Foreground="#00FF00" FontFamily="Consolas, Courier New, monospace"
                 Click="OnStatelessChatClick" AutomationProperties.AutomationId="BootStatelessChat" />

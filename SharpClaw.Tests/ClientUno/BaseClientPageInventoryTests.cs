@@ -8,10 +8,10 @@ namespace SharpClaw.Tests.ClientUno;
 internal sealed class BaseClientPageInventoryTests
 {
     [Test]
-    public void OnlyThreeDefaultPagesRetainTheExistingBlackTerminalTheme()
+    public void FourDefaultPagesRetainTheExistingBlackTerminalTheme()
     {
         var root = FindSourceRoot();
-        var pages = new[] { "BootPage", "SettingsPage", "MainPage" };
+        var pages = new[] { "BootPage", "SettingsPage", "MainPage", "RemoteConnectionPage" };
         foreach (var page in pages)
         {
             var xml = XDocument.Load(Path.Combine(root, "SharpClaw.Client.Uno", "Presentation", page + ".xaml"));

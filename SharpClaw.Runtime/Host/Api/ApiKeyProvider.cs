@@ -11,7 +11,7 @@ namespace SharpClaw.Runtime.Host.Api;
 /// read these files (i.e., running as the same user) can authenticate with
 /// the localhost API.
 /// </summary>
-internal sealed class ApiKeyProvider
+internal sealed class ApiKeyProvider : IDisposable
 {
     private readonly SharpClawInstancePaths _instancePaths;
 
@@ -38,8 +38,16 @@ internal sealed class ApiKeyProvider
         GatewayTokenFilePath = _instancePaths.GatewayTokenFilePath;
         GatewayToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
-        WriteSecureFile(KeyFilePath, ApiKey);
-        WriteSecureFile(GatewayTokenFilePath, GatewayToken);
+        try
+        {
+            WriteSecureFile(KeyFilePath, ApiKey);
+            WriteSecureFile(GatewayTokenFilePath, GatewayToken);
+        }
+        catch
+        {
+            Cleanup();
+            throw;
+        }
     }
 
     private static void WriteSecureFile(string path, string content)
@@ -54,6 +62,12 @@ internal sealed class ApiKeyProvider
     {
         DeleteFileIfOwned(KeyFilePath, ApiKey);
         DeleteFileIfOwned(GatewayTokenFilePath, GatewayToken);
+    }
+
+    public void Dispose()
+    {
+        Cleanup();
+        GC.SuppressFinalize(this);
     }
 
     private static void DeleteFileIfOwned(string path, string expectedContent)

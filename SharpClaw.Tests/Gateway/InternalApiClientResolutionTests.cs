@@ -126,6 +126,117 @@ internal sealed class InternalApiClientResolutionTests
         }
     }
 
+    [TestCase(false), TestCase(true)]
+    public async Task RemoteTargetCannotBorrowLocalDiscoveryCredentialsAsync(bool selectedInstance)
+    {
+        var gatewayRoot = CreateTempDirectory();
+        var sharedRoot = CreateTempDirectory();
+        try
+        {
+            ConfigureMismatchedDiscovery(gatewayRoot, sharedRoot, selectedInstance);
+            using var handler = new CaptureHandler();
+            using var http = new HttpClient(handler) { BaseAddress = new Uri("https://remote.example/") };
+            var client = CreateRemoteClient(http, apiKey: null);
+
+            Func<Task> send = async () =>
+                _ = await client.GetAsync<object>("/ping", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await send.Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
+            handler.LastRequest.Should().BeNull("an unmatched local key must never reach the remote transport");
+        }
+        finally
+        {
+            DeleteDirectoryIfExists(gatewayRoot);
+            DeleteDirectoryIfExists(sharedRoot);
+        }
+    }
+
+    [TestCase(false), TestCase(true)]
+    public async Task ExplicitRemoteApiKeyDoesNotBorrowLocalGatewayTokenAsync(bool selectedInstance)
+    {
+        var gatewayRoot = CreateTempDirectory();
+        var sharedRoot = CreateTempDirectory();
+        try
+        {
+            ConfigureMismatchedDiscovery(gatewayRoot, sharedRoot, selectedInstance);
+            using var handler = new CaptureHandler();
+            using var http = new HttpClient(handler) { BaseAddress = new Uri("https://remote.example/") };
+            var client = CreateRemoteClient(http, "remote-api-key");
+
+            _ = await client.GetAsync<object>("/ping", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            handler.LastRequest.Should().NotBeNull();
+            var request = handler.LastRequest!;
+            request.RequestUri.Should().Be(new Uri("https://remote.example/ping"));
+            request.Headers.GetValues("X-Api-Key").Should().Equal("remote-api-key");
+            request.Headers.Contains("X-Gateway-Token").Should().BeFalse();
+        }
+        finally
+        {
+            DeleteDirectoryIfExists(gatewayRoot);
+            DeleteDirectoryIfExists(sharedRoot);
+        }
+    }
+
+    private static InternalApiClient CreateRemoteClient(HttpClient http, string? apiKey) => new(
+        http, Options.Create(new InternalApiOptions { BaseUrl = "https://remote.example/", ApiKey = apiKey }),
+        new HttpContextAccessor(), NullLogger<InternalApiClient>.Instance);
+
+    [TestCase("https://other.example/steal")]
+    [TestCase("//other.example/steal")]
+    public async Task ForeignRequestAuthorityCannotReceiveTheConfiguredCredentialAsync(string target)
+    {
+        using var handler = new CaptureHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://remote.example/") };
+        var client = CreateRemoteClient(http, "remote-api-key");
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(target, UriKind.RelativeOrAbsolute));
+        Func<Task> send = async () =>
+        {
+            using var response = await client.SendRawAsync(request, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        };
+
+        await send.Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
+        handler.LastRequest.Should().BeNull();
+        request.Headers.Contains("X-Api-Key").Should().BeFalse();
+    }
+
+    [Test]
+    public async Task RetargetedHttpClientCannotMoveTheClientsBoundCredentialAsync()
+    {
+        var gatewayRoot = CreateTempDirectory();
+        var sharedRoot = CreateTempDirectory();
+        try
+        {
+            ConfigureMismatchedDiscovery(gatewayRoot, sharedRoot, selectedInstance: false);
+            using var handler = new CaptureHandler();
+            using var http = new HttpClient(handler) { BaseAddress = new Uri("https://remote.example/") };
+            var client = CreateRemoteClient(http, "remote-api-key");
+            http.BaseAddress = new Uri("https://other.example/");
+
+            _ = await client.GetAsync<object>("/ping", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            handler.LastRequest.Should().NotBeNull();
+            handler.LastRequest!.RequestUri.Should().Be(new Uri("https://remote.example/ping"));
+            handler.LastRequest.Headers.GetValues("X-Api-Key").Should().Equal("remote-api-key");
+        }
+        finally
+        {
+            DeleteDirectoryIfExists(gatewayRoot);
+            DeleteDirectoryIfExists(sharedRoot);
+        }
+    }
+
+    private static void ConfigureMismatchedDiscovery(string gatewayRoot, string sharedRoot, bool selectedInstance)
+    {
+        Environment.SetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT", gatewayRoot);
+        Environment.SetEnvironmentVariable("SHARPCLAW_SHARED_ROOT", sharedRoot);
+        PublishBackendDiscovery(sharedRoot, "local-backend", "http://127.0.0.1:48923/", "local-api-key", "local-gateway-token");
+        if (!selectedInstance) return;
+        var paths = new SharpClawInstancePaths(SharpClawInstanceKind.Gateway, gatewayRoot, sharedRoot);
+        var manifest = paths.Manifest;
+        manifest.SelectedBackendInstanceId = "local-backend";
+        manifest.SelectedBackendBaseUrl = "http://127.0.0.1:48923/";
+        manifest.SelectedBackendBindingKind = "discovered";
+        paths.SaveManifest(manifest);
+    }
+
     private static void PublishBackendDiscovery(
         string sharedRoot,
         string instanceId,

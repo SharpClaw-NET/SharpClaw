@@ -66,6 +66,20 @@ public sealed partial class BootPage
         }
     });
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI navigation failure is translated into a sanitized status and bounded exception metadata; the action owns navigation and the existing installation guard prevents concurrent activation.")]
+    private void OnRemoteConnectionClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
+    {
+        if (_moduleInstalling) return;
+        if (_retryCts is { } retry) await retry.CancelAsync().ConfigureAwait(true);
+        try { await App.Services!.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "RemoteConnection", cancellationToken: CancellationToken.None).ConfigureAwait(true); }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            ModuleInstallStatus.Text = "Navigation was not accepted. Please retry.";
+        }
+    });
+
     private void OnModuleSourceChanged(object sender, TextChangedEventArgs e)
     {
         if (_moduleBusy || ModuleConfirmButton is null) return;
@@ -169,6 +183,10 @@ public sealed partial class BootPage
             ModuleInstallStatus.Text = string.Join('\n', _moduleCandidate!.Modules.Select(module =>
                 $"{module.DisplayName} / {module.Id} / {module.Version}")) +
                 "\nInstall only code you trust. Confirmation enables it in a new Runtime graph; this is not a signature or safety certification.";
+            var proxyConfigured = App.Services!.GetRequiredService<RemoteBackendConnectionService>().IsProxyConfigured();
+            ModuleConfirmButton.IsEnabled = !proxyConfigured;
+            if (proxyConfigured)
+                ModuleInstallStatus.Text += "\nDisconnect the remote backend before installing and enabling local modules.";
             ModuleConfirmButton.Visibility = Visibility.Visible;
         }
         finally { prepared?.Dispose(); }
@@ -196,6 +214,7 @@ public sealed partial class BootPage
             // Drain the canceled boot probe before stopping/committing; it cannot restart behind this operation.
             await _connectionGate.WaitAsync(deadline.Token).ConfigureAwait(true);
             connectionClaimed = true;
+            BundledModuleSetup.RequireLocalMode(frontend);
             BundledModuleSetup.RequireOwnedTarget(backend);
             await ExecuteConfirmedInstallAsync(candidate, backend, frontend, services,
                 () => committed = true, deadline.Token).ConfigureAwait(true);
@@ -234,7 +253,7 @@ public sealed partial class BootPage
                 throw new InvalidOperationException("The confirmed installation may run only once.");
             await ModuleStore.CommitAsync(candidate,
                 Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"),
-                ct => BundledModuleSetup.StopAsync(backend, services.GetService<GatewayProcessManager>(), ct),
+                ct => BundledModuleSetup.StopAsync(backend, services.GetService<GatewayProcessManager>(), frontend, ct),
                 (root, modules, ct) => BundledModuleSetup.ConfigureAsync(frontend, root, modules, true, ct), token).ConfigureAwait(true);
             onCommitted();
         }, cancellationToken).ConfigureAwait(true);

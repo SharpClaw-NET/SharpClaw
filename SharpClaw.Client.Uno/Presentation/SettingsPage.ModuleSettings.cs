@@ -156,6 +156,9 @@ public sealed partial class SettingsPage
         var store = services.GetRequiredService<ModulePackageStore>();
         var frontend = services.GetRequiredService<FrontendInstanceService>();
         var backend = services.GetRequiredService<BackendProcessManager>();
+        var proxyConfigured = RemoteConnection.IsProxyConfigured();
+        if (proxyConfigured)
+            Lbl("These are local modules. Disconnect the remote backend before installing or changing local enablement. Remote module settings remain available in their own tabs.", 0x808080);
         var modules = store.ReadInstalled().Concat(ModulePackageStore.ReadIdentities(
             Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"), true)).ToArray();
         if (modules.Length == 0) Lbl("No modules installed.", 0x808080);
@@ -164,6 +167,7 @@ public sealed partial class SettingsPage
             Lbl($"{module.DisplayName} / {module.Version} / {(module.Bundled ? "bundled" : "installed")}", 0xCCCCCC);
             var enabled = BundledModuleSetup.IsEnabled(frontend, module.Id, module.DefaultEnabled);
             var toggle = TerminalButton(enabled ? "Disable" : "Enable");
+            toggle.IsEnabled = !proxyConfigured;
             var status = StatusBlock();
             ContentPanel.Children.Add(toggle);
             ContentPanel.Children.Add(status);
@@ -175,7 +179,7 @@ public sealed partial class SettingsPage
                 {
                     await Actions.RunCommandAsync("client.module.enablement", async token =>
                     {
-                        await BundledModuleSetup.StopAsync(backend, Gateway, token).ConfigureAwait(true);
+                        await BundledModuleSetup.StopAsync(backend, Gateway, frontend, token).ConfigureAwait(true);
                         await BundledModuleSetup.ConfigureAsync(frontend, store.ActiveRoot, [module], !enabled, token).ConfigureAwait(true);
                     }, pageToken).ConfigureAwait(true);
                     await services.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Boot", cancellationToken: pageToken).ConfigureAwait(true);
@@ -184,7 +188,7 @@ public sealed partial class SettingsPage
                 {
                     ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception); status.Text = "Enablement update failed or the selected Runtime is not owned by this frontend.";
                 }
-                finally { toggle.IsEnabled = true; }
+                finally { toggle.IsEnabled = !pageToken.IsCancellationRequested && !proxyConfigured; }
             });
         }
     }
@@ -194,7 +198,7 @@ public sealed partial class SettingsPage
     private async Task LoadAboutAsync(CancellationToken token)
     {
         H("SharpClaw");
-        Lbl("Boot, modular Settings and stateless debug chat. All application features belong to modules.", 0x808080);
+        Lbl("Boot, modular Settings, stateless debug chat and remote backend connection. All application features belong to modules.", 0x808080);
         var legal = TerminalButton("Open licences and written source offers");
         ContentPanel.Children.Add(legal);
         legal.Click += (_, _) => ClientUiEvent.Observe(async () =>

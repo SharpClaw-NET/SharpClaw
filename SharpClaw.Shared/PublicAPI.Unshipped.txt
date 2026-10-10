@@ -804,3 +804,9 @@ static SharpClaw.Shared.Security.SharpClawEnvironmentDirectory.Resolve(string! a
 static SharpClaw.Shared.Security.SharpClawInstallationKeyStore.GetConfiguredKeyBase64OrNull() -> string?
 ~override SharpClaw.Shared.DurableStorage.DurableStreamKey.Equals(object obj) -> bool
 ~override SharpClaw.Shared.DurableStorage.DurableStreamKey.ToString() -> string
+
+SharpClaw.Shared.Instances.RemoteGatewayConnection
+SharpClaw.Shared.Instances.RemoteGatewayConnection.AccessToken.get -> string?
+SharpClaw.Shared.Instances.RemoteGatewayConnection.GatewayBaseUri.get -> System.Uri!
+static SharpClaw.Shared.Instances.RemoteGatewayConnection.Create(System.Uri! gatewayUri, string? accessToken) -> SharpClaw.Shared.Instances.RemoteGatewayConnection!
+static SharpClaw.Shared.Instances.RemoteGatewayConnection.FromConfiguration(Microsoft.Extensions.Configuration.IConfiguration! configuration) -> SharpClaw.Shared.Instances.RemoteGatewayConnection?

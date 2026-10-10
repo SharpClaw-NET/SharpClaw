@@ -24,6 +24,9 @@ public sealed partial class SettingsPage : Page
     private static GatewayProcessManager? Gateway =>
         App.Services?.GetService<GatewayProcessManager>();
 
+    private static RemoteBackendConnectionService RemoteConnection =>
+        App.Services!.GetRequiredService<RemoteBackendConnectionService>();
+
     private string _activeTab = "Runtime";
 
     public SettingsPage()
@@ -156,6 +159,12 @@ public sealed partial class SettingsPage : Page
     private async Task LoadRuntimeAsync(CancellationToken token)
     {
         var controls = BuildRuntimeControls();
+        if (RemoteConnection.IsProxyConfigured())
+        {
+            controls.Apply.IsEnabled = false;
+            controls.Endpoint.IsEnabled = false;
+            Lbl("The local backend is connected to a remote Gateway. Disconnect before changing the local Runtime target.", 0x808080);
+        }
         controls.Apply.Click += (_, _) => ClientUiEvent.Observe(() => ApplyRuntimeSelectionAsync(
             controls.Endpoint, controls.Apply, controls.Status, token));
         controls.Refresh.Click += (_, _) => ClientUiEvent.Observe(() => RefreshRuntimeStatusAsync(controls.Status, token));
@@ -220,10 +229,18 @@ public sealed partial class SettingsPage : Page
         apply.IsEnabled = false;
         status.Text = "connecting";
         status.Foreground = B(0xFFCC00);
+        var proxyConfigured = false;
         try
         {
+            proxyConfigured = RemoteConnection.IsProxyConfigured();
+            if (proxyConfigured)
+            {
+                status.Text = "Disconnect the remote backend before changing this local Runtime target.";
+                return;
+            }
             await ApplyRuntimeTargetAsync(Api, Actions, App.Services?.GetService<BackendProcessManager>(),
-                Gateway, RequireHttpEndpoint(endpoint.Text), TimeSpan.FromSeconds(5), token).ConfigureAwait(true);
+                Gateway, RequireHttpEndpoint(endpoint.Text), TimeSpan.FromSeconds(5),
+                App.Services!.GetRequiredService<FrontendInstanceService>(), token).ConfigureAwait(true);
             token.ThrowIfCancellationRequested();
             endpoint.Text = Api.BaseUrl.TrimEnd('/');
             await RefreshRuntimeStatusAsync(status, token).ConfigureAwait(true);
@@ -235,7 +252,7 @@ public sealed partial class SettingsPage : Page
             status.Text = "connection failed";
             status.Foreground = B(0xFF4444);
         }
-        finally { apply.IsEnabled = !token.IsCancellationRequested; }
+        finally { apply.IsEnabled = !token.IsCancellationRequested && !proxyConfigured; }
     }
 
     private async Task LoadProviderSetupAsync(CancellationToken token)
@@ -247,6 +264,12 @@ public sealed partial class SettingsPage : Page
         var setup = await response.Content.ReadFromJsonAsync<SharpClawProviderSetup>(token).ConfigureAwait(true);
         token.ThrowIfCancellationRequested();
         if (setup is null) return;
+        if (RemoteConnection.IsProxyConfigured())
+        {
+            Lbl(setup.SetupRequired ? "The remote backend needs provider setup." : "Provider configured on the remote backend.", 0xCCCCCC);
+            Lbl("Configure provider credentials and the model on the remote backend. Local provider settings do not change the remote backend.", 0x808080);
+            return;
+        }
         if (setup.Providers.Count == 0) { Lbl("No provider module is available. Return to Boot to install one.", 0x808080); return; }
         Lbl(setup.SetupRequired ? "Choose a provider and model to enable chat." : "Provider configured.", 0xCCCCCC);
         var backend = App.Services!.GetRequiredService<BackendProcessManager>();
@@ -377,6 +400,17 @@ public sealed partial class SettingsPage : Page
         finally { apply.IsEnabled = !token.IsCancellationRequested; }
     }
 
+    internal static Task ApplyRuntimeTargetAsync(
+        SharpClawApiClient api,
+        ClientActionDispatcher actions,
+        BackendProcessManager? backend,
+        GatewayProcessManager? gateway,
+        string target,
+        TimeSpan readinessTimeout,
+        CancellationToken cancellationToken = default) =>
+        ApplyRuntimeTargetAsync(api, actions, backend, gateway, target, readinessTimeout,
+            App.Services?.GetService<FrontendInstanceService>(), cancellationToken);
+
     internal static async Task ApplyRuntimeTargetAsync(
         SharpClawApiClient api,
         ClientActionDispatcher actions,
@@ -384,16 +418,19 @@ public sealed partial class SettingsPage : Page
         GatewayProcessManager? gateway,
         string target,
         TimeSpan readinessTimeout,
-        CancellationToken cancellationToken = default)
+        FrontendInstanceService? frontendInstance,
+        CancellationToken cancellationToken)
     {
-        await api.UpdateBaseUrlAsync(target, cancellationToken).ConfigureAwait(true);
+        if (frontendInstance is not null) BundledModuleSetup.RequireLocalMode(frontendInstance);
         await actions.RunCommandAsync(
             "client.runtime.target",
-            _ =>
+            async token =>
             {
+                // Recheck at the admitted transition, including queued UI work.
+                if (frontendInstance is not null) BundledModuleSetup.RequireLocalMode(frontendInstance);
+                await api.UpdateBaseUrlAsync(target, token).ConfigureAwait(true);
                 backend?.UpdateApiUrl(target);
                 gateway?.UpdateBackendBaseUrl(target);
-                return ValueTask.CompletedTask;
             },
             cancellationToken).ConfigureAwait(true);
         await api.WaitForReadyAsync(readinessTimeout, cancellationToken).ConfigureAwait(true);
@@ -478,5 +515,12 @@ public sealed partial class SettingsPage : Page
         if (App.Services is not { } services) return;
         await services.GetRequiredService<ClientNavigationService>()
             .NavigateRouteAsync(this, "Boot", cancellationToken: CancellationToken.None).ConfigureAwait(true);
+    });
+
+    private void OnRemoteConnectionClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
+    {
+        if (App.Services is not { } services) return;
+        await services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "RemoteConnection", cancellationToken: CancellationToken.None).ConfigureAwait(true);
     });
 }

@@ -61,6 +61,7 @@ internal sealed class BaseClientFeatureOwnershipTests
         app.Should().Contain("new (\"Boot\"");
         app.Should().Contain("new (\"Main\"");
         app.Should().Contain("new (\"Settings\"");
+        app.Should().Contain("new (\"RemoteConnection\"");
         app.Should().NotContain("new (\"LegalNotices\"");
         app.Should().NotContain("new (\"UserGuide\"");
         app.Should().Contain("new (\"Boot\", View: views.FindByView<BootPage>(), IsDefault:true)");
