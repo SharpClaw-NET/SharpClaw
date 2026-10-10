@@ -71,14 +71,14 @@ internal sealed class ExceptionHandlingMiddlewareTests
     {
         var context = new DefaultHttpContext();
         context.Features.Set<IHttpResponseFeature>(new StartedResponseFeature());
+        var failure = new IOException("partial response failure");
         var middleware = new ExceptionHandlingMiddleware(
-            _ => throw new IOException("partial response failure"),
+            _ => throw failure,
             NullLogger<ExceptionHandlingMiddleware>.Instance);
 
-        var exception = Assert.ThrowsAsync<Exception>(() => middleware.InvokeAsync(context));
-
-        exception.Should().NotBeNull();
-        exception!.Message.Should().Be("partial response failure");
+        Func<Task> invoke = () => middleware.InvokeAsync(context);
+        var caught = await invoke.Should().ThrowAsync<IOException>().ConfigureAwait(false);
+        caught.Which.Should().BeSameAs(failure);
     }
 
     private static async Task<string> ReadBodyAsync(MemoryStream body)

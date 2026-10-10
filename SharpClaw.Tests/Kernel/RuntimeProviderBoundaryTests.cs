@@ -22,7 +22,7 @@ internal sealed class RuntimeProviderBoundaryTests
     {
         var sourceRoot = FindSourceRoot();
         var kernelRoot = Path.Combine(sourceRoot, "SharpClaw.Runtime", "BLL", "Kernel");
-        var allowed = Path.GetFullPath(Path.Combine(kernelRoot, "DirectChatKernel.cs"));
+        var allowed = Path.GetFullPath(Path.Combine(kernelRoot, "ProviderKernelTransport.cs"));
         var methodNames = new[]
         {
             "ChatCompletionAsync",
