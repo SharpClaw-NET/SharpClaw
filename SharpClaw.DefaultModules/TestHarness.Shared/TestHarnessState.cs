@@ -140,6 +140,8 @@ public sealed partial class TestHarnessState
         return (callNumber, turn, shouldFail);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0016",
+        Justification = "The established harness request recorder uses the Dictionary parameter contract exposed by IProviderApiClient; retain binary compatibility.")]
     public int CaptureProviderRequest(
         string providerKey,
         string surface,
@@ -210,6 +212,7 @@ public sealed partial class TestHarnessState
 
     public static string ExpandPayload(string seed, int payloadBytes)
     {
+        ArgumentNullException.ThrowIfNull(seed);
         if (payloadBytes <= 0)
             return seed;
 
@@ -229,7 +232,7 @@ public sealed partial class TestHarnessState
         if (value is null)
             return null;
 
-        var sanitized = SecretPattern().Replace(value, "$1=[redacted]");
+        var sanitized = SecretPattern().Replace(value, "${name}=[redacted]");
         sanitized = ApiKeyPattern().Replace(sanitized, "[redacted-api-key]");
         sanitized = BearerPattern().Replace(sanitized, "Bearer [redacted]");
 
@@ -251,7 +254,7 @@ public sealed partial class TestHarnessState
             return "";
 
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
-        return Convert.ToHexString(hash[..8]).ToLowerInvariant();
+        return Convert.ToHexStringLower(hash.AsSpan(0, 8));
     }
 
     private static void Drain<T>(ConcurrentQueue<T> queue)
@@ -259,12 +262,12 @@ public sealed partial class TestHarnessState
         while (queue.TryDequeue(out _)) { }
     }
 
-    [GeneratedRegex(@"(?i)\b(api[_-]?key|secret|token|password)\s*[:=]\s*['""]?[^'""\s\]]+")]
+    [GeneratedRegex(@"(?i)\b(?<name>api[_-]?key|secret|token|password)\s*[:=]\s*['""]?[^'""\s\]]+", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex SecretPattern();
 
-    [GeneratedRegex(@"\b(sk|pk|rk)-[A-Za-z0-9_\-]{12,}\b")]
+    [GeneratedRegex(@"\b(?:sk|pk|rk)-[A-Za-z0-9_\-]{12,}\b", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex ApiKeyPattern();
 
-    [GeneratedRegex(@"(?i)\bBearer\s+[A-Za-z0-9_\-\.=]{12,}")]
+    [GeneratedRegex(@"(?i)\bBearer\s+[A-Za-z0-9_\-\.=]{12,}", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex BearerPattern();
 }

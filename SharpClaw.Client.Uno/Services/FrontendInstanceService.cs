@@ -62,6 +62,10 @@ public sealed class FrontendInstanceService
 
     public string BundledBackendInstanceRoot => Path.Combine(Paths.InstanceRoot, "stack", "backend");
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1055",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public string ResolvePreferredBackendBaseUrl(string configuredBaseUrl)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(configuredBaseUrl);
@@ -86,6 +90,8 @@ public sealed class FrontendInstanceService
         return configuredBaseUrl;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public string? ResolveBackendApiKeyPath(string? requestedBaseUrl = null)
     {
         var entry = string.IsNullOrWhiteSpace(requestedBaseUrl)
@@ -99,6 +105,8 @@ public sealed class FrontendInstanceService
         return entry.ApiKeyFilePath;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public string? ResolveBackendGatewayTokenPath(string? requestedBaseUrl = null)
     {
         var entry = string.IsNullOrWhiteSpace(requestedBaseUrl)
@@ -112,6 +120,8 @@ public sealed class FrontendInstanceService
         return entry.GatewayTokenFilePath;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public void RememberBackendBinding(string? backendInstanceId, string? baseUrl, string bindingKind)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(bindingKind);
@@ -204,7 +214,7 @@ public sealed class FrontendInstanceService
                 using var stream = File.OpenRead(filePath);
                 entry = JsonSerializer.Deserialize<SharpClawDiscoveryEntry>(stream, JsonOptions);
             }
-            catch
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
             {
                 continue;
             }

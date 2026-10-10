@@ -2,6 +2,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -16,9 +17,8 @@ namespace SharpClaw.Build;
 // a different managed image. Compare metadata with only relocated RVA columns
 // normalized, all method IL/exception state, initialized static-field data,
 // and managed resources. Never infer initializer length from adjacent RVAs.
-#pragma warning disable CA1515 // PowerShell Add-Type consumers invoke this public entry point from another assembly.
+[SuppressMessage("Design", "CA1515", Justification = "PowerShell Add-Type consumers invoke this public entry point from another assembly.")]
 public static class ManagedPublishIdentity
-#pragma warning restore CA1515
 {
     public static string Fingerprint(Stream stream)
     {
@@ -90,15 +90,19 @@ public static class ManagedPublishIdentity
                 : checked((int)BinaryPrimitives.ReadUInt32LittleEndian(data[sizeof(int)..]));
             if (rva <= 0 || fieldRow <= 0 || fieldRow > metadata.GetTableRowCount(TableIndex.Field) || !fields.Add(fieldRow))
             {
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
                 throw new BadImageFormatException("Invalid or duplicate initialized field RVA.");
+#pragma warning restore MA0012
             }
 
             var handle = MetadataTokens.FieldDefinitionHandle(fieldRow);
             var field = metadata.GetFieldDefinition(handle);
-            if ((field.Attributes & (FieldAttributes.Static | FieldAttributes.HasFieldRVA)) !=
-                (FieldAttributes.Static | FieldAttributes.HasFieldRVA) || (field.Attributes & FieldAttributes.Literal) != 0)
+            if (!field.Attributes.HasFlag(FieldAttributes.Static | FieldAttributes.HasFieldRVA)
+                || field.Attributes.HasFlag(FieldAttributes.Literal))
             {
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
                 throw new BadImageFormatException("RVA initializer requires a static RVA-backed field.");
+#pragma warning restore MA0012
             }
 
             var size = GetInitializerSize(metadata, field);
@@ -111,7 +115,9 @@ public static class ManagedPublishIdentity
                 (rva < (long)metadataArea.RelativeVirtualAddress + metadataArea.Size &&
                  (long)rva + size > metadataArea.RelativeVirtualAddress))
             {
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
                 throw new BadImageFormatException("Initialized field data is not fully inside one file-backed data area.");
+#pragma warning restore MA0012
             }
 
             AppendInt(hash, MetadataTokens.GetToken(handle));
@@ -121,10 +127,12 @@ public static class ManagedPublishIdentity
 
         foreach (var handle in metadata.FieldDefinitions)
         {
-            if ((metadata.GetFieldDefinition(handle).Attributes & FieldAttributes.HasFieldRVA) != 0 &&
+            if (metadata.GetFieldDefinition(handle).Attributes.HasFlag(FieldAttributes.HasFieldRVA) &&
                 !fields.Contains(MetadataTokens.GetRowNumber(handle)))
             {
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
                 throw new BadImageFormatException("RVA-backed field has no initializer row.");
+#pragma warning restore MA0012
             }
         }
     }
@@ -134,7 +142,9 @@ public static class ManagedPublishIdentity
         var signature = metadata.GetBlobReader(field.Signature);
         if (signature.ReadByte() != 0x06)
         {
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
             throw new BadImageFormatException("Initialized field has an invalid field signature.");
+#pragma warning restore MA0012
         }
 
         var code = signature.ReadByte();
@@ -145,11 +155,15 @@ public static class ManagedPublishIdentity
             0x08 or 0x09 or 0x0c => 4, // I4, U4, R4
             0x0a or 0x0b or 0x0d => 8, // I8, U8, R8
             0x11 => GetDeclaredValueTypeSize(metadata, signature.ReadTypeHandle()),
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
             _ => throw new BadImageFormatException("Unsupported RVA field layout; use a verified untransformed image.")
+#pragma warning restore MA0012
         };
         if (signature.RemainingBytes != 0)
         {
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
             throw new BadImageFormatException("Unsupported trailing initialized-field signature data.");
+#pragma warning restore MA0012
         }
 
         return size;
@@ -162,19 +176,24 @@ public static class ManagedPublishIdentity
         // alignment, external/generic types, pointers, or GC references.
         if (handle.Kind != HandleKind.TypeDefinition)
         {
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
             throw new BadImageFormatException("Initialized field uses an unresolved value-type layout.");
+#pragma warning restore MA0012
         }
 
         var type = metadata.GetTypeDefinition((TypeDefinitionHandle)handle);
         var layout = type.GetLayout();
+        var layoutKind = type.Attributes & TypeAttributes.LayoutMask;
         if (type.BaseType.Kind != HandleKind.TypeReference ||
-            (type.Attributes & TypeAttributes.LayoutMask) is not (TypeAttributes.SequentialLayout or TypeAttributes.ExplicitLayout) ||
-            (type.Attributes & TypeAttributes.ClassSemanticsMask) != TypeAttributes.Class ||
+            layoutKind is not (TypeAttributes.SequentialLayout or TypeAttributes.ExplicitLayout) ||
+            type.Attributes.HasFlag(TypeAttributes.Interface) ||
             type.GetGenericParameters().Count != 0 || layout.Size <= 0 || layout.Size >= 0x100000 ||
             layout.PackingSize is not (0 or 1 or 2 or 4 or 8 or 16 or 32 or 64 or 128) ||
-            type.GetFields().Any(field => (metadata.GetFieldDefinition(field).Attributes & FieldAttributes.Static) == 0))
+            type.GetFields().Any(field => !metadata.GetFieldDefinition(field).Attributes.HasFlag(FieldAttributes.Static)))
         {
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
             throw new BadImageFormatException("Initialized value-type size/layout cannot be safely established.");
+#pragma warning restore MA0012
         }
 
         var baseType = metadata.GetTypeReference((TypeReferenceHandle)type.BaseType);
@@ -182,7 +201,9 @@ public static class ManagedPublishIdentity
             !metadata.StringComparer.Equals(baseType.Name, "ValueType") ||
             baseType.ResolutionScope.Kind != HandleKind.AssemblyReference)
         {
+#pragma warning disable MA0012 // Malformed managed-image validation retains the PEReader-compatible exception contract.
             throw new BadImageFormatException("Initialized field is not a declared fixed-size value type.");
+#pragma warning restore MA0012
         }
 
         return layout.Size;

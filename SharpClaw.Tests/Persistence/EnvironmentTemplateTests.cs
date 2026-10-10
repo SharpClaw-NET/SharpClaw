@@ -24,7 +24,7 @@ internal sealed class EnvironmentTemplateTests
         var configuration = BuildLocal(workspace, isDevelopment: false);
 
         configuration["Admin:Username"].Should().Be("TemplateAdmin");
-        File.ReadAllText(workspace.Path(".env.template")).Should().Be(template);
+        (await File.ReadAllTextAsync(workspace.Path(".env.template"), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().Be(template);
         (await GetStateAsync(workspace).ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
         workspace.Files(".unreadable-*").Should().BeEmpty();
     }
@@ -40,7 +40,7 @@ internal sealed class EnvironmentTemplateTests
         var configuration = BuildLocal(workspace, isDevelopment: false);
 
         configuration["Admin:Username"].Should().Be("ActiveAdmin");
-        File.ReadAllText(workspace.Path(".env.template")).Should().Be(template);
+        (await File.ReadAllTextAsync(workspace.Path(".env.template"), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().Be(template);
         (await GetStateAsync(workspace).ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
         (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().Contain("Admin__Username=ActiveAdmin");
     }
@@ -106,7 +106,7 @@ internal sealed class EnvironmentTemplateTests
         var configuration = BuildLocal(workspace, isDevelopment: false);
 
         configuration["Admin:Username"].Should().Be("ActiveAdmin");
-        File.ReadAllText(workspace.Path(".env.template")).Should().Be("Admin__Username=TemplateAdmin\n");
+        (await File.ReadAllTextAsync(workspace.Path(".env.template"), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().Be("Admin__Username=TemplateAdmin\n");
         (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().Contain("ActiveAdmin");
     }
 
@@ -153,22 +153,22 @@ internal sealed class EnvironmentTemplateTests
         workspace.Write(".env.template", "Admin__Username=TemplateAdmin\n");
         var key = ApiKeyEncryptor.GenerateKey();
         Directory.CreateDirectory(Path.GetDirectoryName(workspace.KeyPath)!);
-        File.WriteAllText(workspace.KeyPath, Convert.ToBase64String(key));
+        await File.WriteAllTextAsync(workspace.KeyPath, Convert.ToBase64String(key), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         var legacyJson = Encoding.UTF8.GetBytes(
             "{\n" +
             "  // existing encrypted installation JSONC\n" +
             "  \"Admin\": { \"Username\": \"EncryptedImportedAdmin\" },\n" +
             "}\n");
-        File.WriteAllBytes(
+        await File.WriteAllBytesAsync(
             workspace.Path(".env"),
-            ApiKeyEncryptor.EncryptBytes(legacyJson, key));
+            ApiKeyEncryptor.EncryptBytes(legacyJson, key), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
         var configuration = BuildLocal(workspace, isDevelopment: false);
 
         configuration["Admin:Username"].Should().Be("EncryptedImportedAdmin");
         workspace.Files(".pre-supprocom-import-*").Should().ContainSingle();
         workspace.Files(".unreadable-*").Should().BeEmpty();
-        File.ReadAllBytes(workspace.KeyPath).Should().HaveCount(32);
+        (await File.ReadAllBytesAsync(workspace.KeyPath, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().HaveCount(32);
         (await GetStateAsync(workspace).ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
         (await ReadDocumentAsync(workspace).ConfigureAwait(false)).Should().Contain("Admin__Username=\"EncryptedImportedAdmin\"");
     }
@@ -287,7 +287,7 @@ internal sealed class EnvironmentTemplateTests
         workspace.Write(".env.template", "Admin__Username=TemplateAdmin\n");
         var store = CreateStore(workspace);
         await store.ReplaceDocumentAsync("Admin__Username=ProtectedAdmin\n").ConfigureAwait(false);
-        ISecretFileProtectionManager manager = store;
+        SupprocomSecretFileStore manager = store;
 
         (await manager.GetStateAsync().ConfigureAwait(false)).Should().Be(SecretFileProtectionState.Protected);
         await manager.UnprotectAsync().ConfigureAwait(false);
@@ -387,8 +387,13 @@ internal sealed class EnvironmentTemplateTests
                 if (Directory.Exists(Root))
                     Directory.Delete(Root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }

@@ -26,117 +26,86 @@ internal static class SharpClawLogNormalizer
         "SharpClaw.RegistrationBootId",
     ];
 
-    public static DurableRecordWrite Normalize(
-        LogEvent logEvent,
-        int maxRecordBytes)
+    public static DurableRecordWrite Normalize(LogEvent logEvent, int maxRecordBytes)
     {
         ArgumentNullException.ThrowIfNull(logEvent);
-        if (maxRecordBytes < 1024)
-            throw new ArgumentOutOfRangeException(nameof(maxRecordBytes));
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxRecordBytes, 1024);
+        var text = NormalizeText(logEvent);
+        var properties = CreateRecordProperties(logEvent, text);
+        return FitEncodedBody(CreateRecord(logEvent, text, properties), maxRecordBytes);
+    }
 
-        var message = SharpClawLogRedactor.Redact(logEvent.RenderMessage());
-        var normalizedMessage = SharpClawLogBounds.TruncateUtf8(
-            message,
-            SharpClawLogBounds.MessageBytes,
-            out var originalMessageBytes);
-        var originalExceptionBytes = 0;
-        string? exceptionText = null;
-        if (logEvent.Exception is not null)
-        {
-            exceptionText = SharpClawLogBounds.TruncateUtf8(
-                SharpClawLogRedactor.Redact(logEvent.Exception.ToString()),
-                SharpClawLogBounds.ExceptionBytes,
-                out originalExceptionBytes);
-        }
+    private static NormalizedText NormalizeText(LogEvent logEvent)
+    {
+        var message = SharpClawLogBounds.TruncateUtf8(
+            SharpClawLogRedactor.Redact(logEvent.RenderMessage(CultureInfo.InvariantCulture)),
+            SharpClawLogBounds.MessageBytes, out var originalMessageBytes);
         var template = SharpClawLogBounds.TruncateUtf8(
             SharpClawLogRedactor.Redact(logEvent.MessageTemplate.Text),
-            SharpClawLogBounds.TemplateBytes,
-            out var originalTemplateBytes);
-        var category = Bound(
-            GetString(logEvent, "SourceContext"),
-            SharpClawLogBounds.CategoryBytes);
-        var eventId = GetEventId(logEvent);
-        var eventName = Bound(
-            GetString(logEvent, "EventName") ?? eventId.Name ?? "Log",
-            SharpClawLogBounds.EventNameBytes) ?? "Log";
-        var eventIdName = Bound(
-            eventId.Name,
-            SharpClawLogBounds.EventIdNameBytes);
-        var eventIdId = eventId.Id;
-        var correlationId = Bound(
-            GetString(logEvent, "CorrelationId")
-                ?? GetString(logEvent, "RequestId"),
-            SharpClawLogBounds.CorrelationIdBytes);
-        var traceId = Bound(
-            GetString(logEvent, "TraceId"),
-            SharpClawLogBounds.TraceIdBytes);
-        var spanId = Bound(
-            GetString(logEvent, "SpanId"),
-            SharpClawLogBounds.SpanIdBytes);
-        var exceptionType = Bound(
-            logEvent.Exception?.GetType().FullName,
-            SharpClawLogBounds.ExceptionTypeBytes);
+            SharpClawLogBounds.TemplateBytes, out var originalTemplateBytes);
+        var originalExceptionBytes = 0;
+        var exception = logEvent.Exception is null ? null : SharpClawLogBounds.TruncateUtf8(
+            SharpClawLogRedactor.Redact(logEvent.Exception.ToString()),
+            SharpClawLogBounds.ExceptionBytes, out originalExceptionBytes);
+        return new NormalizedText(message, template, exception,
+            originalMessageBytes, originalTemplateBytes, originalExceptionBytes);
+    }
+
+    private static Dictionary<string, string> CreateRecordProperties(LogEvent logEvent, NormalizedText text)
+    {
         var properties = CollectProperties(logEvent);
         var ownership = SharpClawLogOwnership.Current;
-
         if (ownership is not null)
         {
             AddProperty(properties, "SharpClaw.SourceId", ownership.SourceId, trusted: true);
-            AddProperty(
-                properties,
-                "SharpClaw.RegistrationVersion",
-                ownership.RegistrationVersion ?? "unknown",
-                trusted: true);
-            AddProperty(
-                properties,
-                "SharpClaw.RegistrationHostKind",
-                ownership.HostKind.ToString(),
-                trusted: true);
-            AddProperty(
-                properties,
-                "SharpClaw.RegistrationBootId",
-                ownership.BootId.ToString("D"),
-                trusted: true);
+            AddProperty(properties, "SharpClaw.RegistrationVersion",
+                ownership.RegistrationVersion ?? "unknown", trusted: true);
+            AddProperty(properties, "SharpClaw.RegistrationHostKind",
+                ownership.HostKind.ToString(), trusted: true);
+            AddProperty(properties, "SharpClaw.RegistrationBootId",
+                ownership.BootId.ToString("D"), trusted: true);
         }
-
-        if (originalMessageBytes > SharpClawLogBounds.MessageBytes)
-            AddProperty(properties, "SharpClaw.OriginalBytes.Message", originalMessageBytes.ToString(CultureInfo.InvariantCulture));
-        if (originalTemplateBytes > SharpClawLogBounds.TemplateBytes)
-            AddProperty(properties, "SharpClaw.OriginalBytes.MessageTemplate", originalTemplateBytes.ToString(CultureInfo.InvariantCulture));
-        if (originalExceptionBytes > SharpClawLogBounds.ExceptionBytes)
-            AddProperty(properties, "SharpClaw.OriginalBytes.Exception", originalExceptionBytes.ToString(CultureInfo.InvariantCulture));
+        if (text.OriginalMessageBytes > SharpClawLogBounds.MessageBytes)
+            AddProperty(properties, "SharpClaw.OriginalBytes.Message", text.OriginalMessageBytes.ToString(CultureInfo.InvariantCulture));
+        if (text.OriginalTemplateBytes > SharpClawLogBounds.TemplateBytes)
+            AddProperty(properties, "SharpClaw.OriginalBytes.MessageTemplate", text.OriginalTemplateBytes.ToString(CultureInfo.InvariantCulture));
+        if (text.OriginalExceptionBytes > SharpClawLogBounds.ExceptionBytes)
+            AddProperty(properties, "SharpClaw.OriginalBytes.Exception", text.OriginalExceptionBytes.ToString(CultureInfo.InvariantCulture));
         if (logEvent.Exception is not null)
             AddProperty(properties, "SharpClaw.ExceptionPresent", "true");
-
-        var record = new DurableRecordWrite(
-            Guid.NewGuid(),
-            logEvent.Timestamp,
-            Bound(
-                NormalizeLevel(logEvent.Level),
-                SharpClawLogBounds.LevelBytes) ?? "I",
-            eventName,
-            normalizedMessage,
-            exceptionType,
-            correlationId,
-            ExceptionText: exceptionText,
-            MessageTemplate: template,
-            Category: category,
-            EventIdId: eventIdId,
-            EventIdName: eventIdName,
-            TraceId: traceId,
-            SpanId: spanId,
-            Properties: properties);
-
-        return FitEncodedBody(record, maxRecordBytes);
+        return properties;
     }
+
+    private static DurableRecordWrite CreateRecord(
+        LogEvent logEvent, NormalizedText text, Dictionary<string, string> properties)
+    {
+        var eventId = GetEventId(logEvent);
+        return new DurableRecordWrite(
+            Guid.NewGuid(), logEvent.Timestamp,
+            Bound(NormalizeLevel(logEvent.Level), SharpClawLogBounds.LevelBytes) ?? "I",
+            Bound(GetString(logEvent, "EventName") ?? eventId.Name ?? "Log", SharpClawLogBounds.EventNameBytes) ?? "Log",
+            text.Message,
+            Bound(logEvent.Exception?.GetType().FullName, SharpClawLogBounds.ExceptionTypeBytes),
+            Bound(GetString(logEvent, "CorrelationId") ?? GetString(logEvent, "RequestId"), SharpClawLogBounds.CorrelationIdBytes),
+            ExceptionText: text.Exception, MessageTemplate: text.Template,
+            Category: Bound(GetString(logEvent, "SourceContext"), SharpClawLogBounds.CategoryBytes),
+            EventIdId: eventId.Id,
+            EventIdName: Bound(eventId.Name, SharpClawLogBounds.EventIdNameBytes),
+            TraceId: Bound(GetString(logEvent, "TraceId"), SharpClawLogBounds.TraceIdBytes),
+            SpanId: Bound(GetString(logEvent, "SpanId"), SharpClawLogBounds.SpanIdBytes),
+            Properties: properties);
+    }
+
+    private readonly record struct NormalizedText(
+        string Message, string Template, string? Exception,
+        int OriginalMessageBytes, int OriginalTemplateBytes, int OriginalExceptionBytes);
 
     private static Dictionary<string, string> CollectProperties(LogEvent logEvent)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (name, value) in logEvent.Properties)
         {
-            if (name is "SourceContext" or "EventId" or "EventName" or "CorrelationId"
-                or "RequestId" or "TraceId" or "SpanId"
+            if (IsRecordProperty(name)
                 || IsTrustedPropertyName(name)
                 || SharpClawLogRedactor.IsSecretPropertyName(name))
             {
@@ -148,7 +117,7 @@ internal static class SharpClawLogNormalizer
                 SharpClawLogBounds.PropertyNameBytes,
                 out _);
             var boundedValue = SharpClawLogBounds.TruncateUtf8(
-                SharpClawLogRedactor.Redact(value.ToString()),
+                SharpClawLogRedactor.Redact(value.ToString(null, CultureInfo.InvariantCulture)),
                 SharpClawLogBounds.PropertyValueBytes,
                 out _);
             AddProperty(result, boundedName, boundedValue);
@@ -177,60 +146,11 @@ internal static class SharpClawLogNormalizer
         if (DurableSegmentStore.MeasureEncodedRecordBody(record) <= maxRecordBytes)
             return record;
 
-        record = ShrinkField(
-            record,
-            maxRecordBytes,
-            static current => current.Message,
-            static (current, value) => current with { Message = value ?? string.Empty },
-            keepNonNull: true);
-        record = ShrinkField(
-            record,
-            maxRecordBytes,
-            static current => current.ExceptionText,
-            static (current, value) => current with { ExceptionText = value },
-            keepNonNull: false);
-        record = ShrinkField(
-            record,
-            maxRecordBytes,
-            static current => current.MessageTemplate,
-            static (current, value) => current with { MessageTemplate = value },
-            keepNonNull: false);
-        record = ShrinkField(
-            record,
-            maxRecordBytes,
-            static current => current.Category,
-            static (current, value) => current with { Category = value },
-            keepNonNull: false);
-        record = ShrinkField(
-            record,
-            maxRecordBytes,
-            static current => current.CorrelationId,
-            static (current, value) => current with { CorrelationId = value },
-            keepNonNull: false);
-        record = ShrinkField(
-            record,
-            maxRecordBytes,
-            static current => current.EventIdName,
-            static (current, value) => current with { EventIdName = value },
-            keepNonNull: false);
-        record = ShrinkField(
-            record,
-            maxRecordBytes,
-            static current => current.TraceId,
-            static (current, value) => current with { TraceId = value },
-            keepNonNull: false);
-        record = ShrinkField(
-            record,
-            maxRecordBytes,
-            static current => current.SpanId,
-            static (current, value) => current with { SpanId = value },
-            keepNonNull: false);
-        record = ShrinkField(
-            record,
-            maxRecordBytes,
-            static current => current.EventName,
-            static (current, value) => current with { EventName = value ?? "Log" },
-            keepNonNull: true);
+        foreach (var field in ShrinkableFields)
+        {
+            record = ShrinkField(record, maxRecordBytes,
+                field.GetValue, field.SetValue, field.KeepNonNull);
+        }
 
         foreach (var propertyName in TrustedPropertyNames)
         {
@@ -260,6 +180,33 @@ internal static class SharpClawLogNormalizer
 
         return record;
     }
+
+    private static readonly BodyField[] ShrinkableFields =
+    [
+        new(static r => r.Message, static (r, v) => r with { Message = v ?? string.Empty }, true),
+        new(static r => r.ExceptionText, static (r, v) => r with { ExceptionText = v }, false),
+        new(static r => r.MessageTemplate, static (r, v) => r with { MessageTemplate = v }, false),
+        new(static r => r.Category, static (r, v) => r with { Category = v }, false),
+        new(static r => r.CorrelationId, static (r, v) => r with { CorrelationId = v }, false),
+        new(static r => r.EventIdName, static (r, v) => r with { EventIdName = v }, false),
+        new(static r => r.TraceId, static (r, v) => r with { TraceId = v }, false),
+        new(static r => r.SpanId, static (r, v) => r with { SpanId = v }, false),
+        new(static r => r.EventName, static (r, v) => r with { EventName = v ?? "Log" }, true),
+    ];
+
+    private readonly record struct BodyField(
+        Func<DurableRecordWrite, string?> GetValue,
+        Func<DurableRecordWrite, string?, DurableRecordWrite> SetValue,
+        bool KeepNonNull);
+
+    private static bool IsRecordProperty(string name) =>
+        string.Equals(name, "SourceContext", StringComparison.Ordinal)
+        || string.Equals(name, "EventId", StringComparison.Ordinal)
+        || string.Equals(name, "EventName", StringComparison.Ordinal)
+        || string.Equals(name, "CorrelationId", StringComparison.Ordinal)
+        || string.Equals(name, "RequestId", StringComparison.Ordinal)
+        || string.Equals(name, "TraceId", StringComparison.Ordinal)
+        || string.Equals(name, "SpanId", StringComparison.Ordinal);
 
     private static DurableRecordWrite ShrinkTrustedProperty(
         DurableRecordWrite record,
@@ -291,6 +238,9 @@ internal static class SharpClawLogNormalizer
         Func<DurableRecordWrite, string?, DurableRecordWrite> setValue,
         bool keepNonNull)
     {
+        if (DurableSegmentStore.MeasureEncodedRecordBody(record) <= maxRecordBytes)
+            return record;
+
         var current = getValue(record);
         if (string.IsNullOrEmpty(current))
             return record;
@@ -374,7 +324,7 @@ internal static class SharpClawLogNormalizer
     private static string? GetString(LogEvent logEvent, string name) =>
         logEvent.Properties.TryGetValue(name, out var value)
             ? value is ScalarValue { Value: not null } scalar
-                ? scalar.Value.ToString()
+                ? Convert.ToString(scalar.Value, CultureInfo.InvariantCulture)
                 : null
             : null;
 
@@ -397,10 +347,10 @@ internal static class SharpClawLogNormalizer
             foreach (var property in structure.Properties)
             {
                 if (property.Name.Equals("Id", StringComparison.Ordinal))
-                    id = int.TryParse(property.Value.ToString(), out var parsed) ? parsed : null;
+                    id = int.TryParse(property.Value.ToString(null, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
                 else if (property.Name.Equals("Name", StringComparison.Ordinal)
                          && property.Value is ScalarValue { Value: not null } scalar)
-                    name = scalar.Value.ToString();
+                    name = Convert.ToString(scalar.Value, CultureInfo.InvariantCulture);
             }
 
             return (id, name);

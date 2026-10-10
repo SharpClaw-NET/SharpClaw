@@ -49,7 +49,15 @@ public static class ClientActionCatalog
     public static bool Contains(SharpClawActionKey key) =>
         All.Any(action => action == key);
 
-    private static SharpClawActionKey Find(string value) =>
-        SharpClawActionCatalog.Kernel.Single(key =>
-            string.Equals(key.Value, value, StringComparison.Ordinal));
+    private static SharpClawActionKey Find(string value)
+    {
+        SharpClawActionKey? match = null;
+        foreach (var key in SharpClawActionCatalog.Kernel)
+        {
+            if (!string.Equals(key.Value, value, StringComparison.Ordinal)) continue;
+            if (match is not null) throw new InvalidOperationException("Duplicate client action key.");
+            match = key;
+        }
+        return match ?? throw new InvalidOperationException("Missing client action key.");
+    }
 }

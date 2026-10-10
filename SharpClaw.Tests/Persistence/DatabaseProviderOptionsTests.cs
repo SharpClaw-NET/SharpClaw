@@ -136,8 +136,7 @@ internal sealed class DatabaseProviderOptionsTests
             [typeof(ConfiguredRegistrationEntity)]));
 
         var factory = serviceProvider.GetRequiredService<IOwnedDbContextFactory>();
-        using var dbContext = (ConfiguredRegistrationDbContext)factory.CreateDbContext(
-            typeof(ConfiguredRegistrationDbContext));
+        using var dbContext = factory.CreateDbContext<ConfiguredRegistrationDbContext>();
 
         dbContext.Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.Sqlite");
         dbContext.Database.GetCommandTimeout().Should().Be(17);
@@ -159,7 +158,7 @@ internal sealed class DatabaseProviderOptionsTests
 
         using var serviceProvider = services.BuildServiceProvider();
         var provider = serviceProvider.GetServices<ISharpClawPersistenceProvider>()
-            .Single(candidate => string.Equals(candidate.Key, "SQLServer", StringComparison.Ordinal));
+            .Where(candidate => string.Equals(candidate.Key, "SQLServer", StringComparison.Ordinal)).Should().ContainSingle().Which;
         var moduleLoadContext = AssemblyLoadContext.GetLoadContext(provider.GetType().Assembly);
 
         moduleLoadContext.Should().NotBeNull();

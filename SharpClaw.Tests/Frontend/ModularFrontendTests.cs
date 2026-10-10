@@ -34,19 +34,17 @@ internal sealed class ModularFrontendTests
     {
         var requests = new List<string>();
         var failCatalog = false;
-        using var http = new HttpClient(new Handler(request =>
+        using var handler = new Handler(request =>
         {
             request.Method.Should().Be(HttpMethod.Get);
             var path = request.RequestUri!.AbsolutePath;
             requests.Add(path);
-            if (string.Equals(path, "/setup/provider", StringComparison.Ordinal)) return new(HttpStatusCode.OK) { Content = new StringContent("""
-                {"setupRequired":false,"providerKey":"arbitrary","model":"model", "providers":[
-                  {"key":"arbitrary","displayName":"Third party","requiresApiKey":false,"requiresEndpoint":false}]}
-                """) };
+            if (string.Equals(path, "/setup/provider", StringComparison.Ordinal)) return new(HttpStatusCode.OK) { Content = new StringContent("{\"setupRequired\":false,\"providerKey\":\"arbitrary\",\"model\":\"model\", \"providers\":[\n  {\"key\":\"arbitrary\",\"displayName\":\"Third party\",\"requiresApiKey\":false,\"requiresEndpoint\":false}]}") };
             path.Should().Be("/setup/models");
             return failCatalog ? new(HttpStatusCode.ServiceUnavailable) : new(HttpStatusCode.OK)
             { Content = new StringContent("""{"providerKey":"arbitrary","models":["model"]}""") };
-        }))
+        });
+        using var http = new HttpClient(handler, disposeHandler: false)
         { BaseAddress = new Uri("https://runtime.example") };
         var api = new SharpClawApiClient(http, NullLogger<SharpClawApiClient>.Instance,
           new ClientActionDispatcher(), fixedApiKey: "test-key");
@@ -56,25 +54,25 @@ internal sealed class ModularFrontendTests
         (await StatelessChatReadiness.CheckAsync(api).ConfigureAwait(false)).Should().BeFalse();
         requests.Should().Equal("/setup/provider", "/setup/models", "/setup/provider", "/setup/models");
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-        Func<Task> canceled = () => StatelessChatReadiness.CheckAsync(api, cancellation.Token);
+        await cancellation.CancelAsync().ConfigureAwait(false);
+        Func<Task> canceled = async () => await StatelessChatReadiness.CheckAsync(api, cancellation.Token).ConfigureAwait(false);
         await canceled.Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
     }
 
     [Test]
     public void ManifestSettingsAreDataWithNoBuiltInModuleNames()
     {
-        var pages = SharpClawModuleSettings.ReadManifest("""
-            {"frontend":{"schemaVersion":1,"settings":[
-                {"id":"preferences","title":"Preferences","readPath":"/fixture/settings","savePath":"/fixture/settings"}]}}
-            """, "unknown_module", "Unknown module");
+        const string settingsManifest =
+            """{"frontend":{"schemaVersion":1,"settings":[""" + "\n"
+            + """{"id":"preferences","title":"Preferences","readPath":"/fixture/settings","savePath":"/fixture/settings"}]}}""";
+        var pages = SharpClawModuleSettings.ReadManifest(settingsManifest, "unknown_module", "Unknown module");
         pages.Single().Should().Be(new SharpClawModuleSettingsPage(
             "unknown_module", "Unknown module", "preferences", "Preferences", "/fixture/settings", "/fixture/settings"));
         SharpClawModuleSettings.ReadManifest("{}", "empty", "Empty").Should().BeEmpty();
-        SharpClawModuleSettings.ReadManifest("""
-            { /* existing package metadata remains compatible */
-              "vendor":{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":true}}}}}}}}}}
-            """, "empty", "Empty").Should().BeEmpty();
+        const string existingMetadata =
+            """{ /* existing package metadata remains compatible */""" + "\n"
+            + """  "vendor":{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":true}}}}}}}}}}""";
+        SharpClawModuleSettings.ReadManifest(existingMetadata, "empty", "Empty").Should().BeEmpty();
     }
 
     [TestCase("//attacker.example/settings")]
@@ -99,13 +97,13 @@ internal sealed class ModularFrontendTests
     [Test]
     public void GenericSettingsSupportTextBooleanChoiceAndOpaqueWriteOnlySecrets()
     {
-        var doc = SharpClawModuleSettings.ReadDocument("""
-            {"schemaVersion":1,"fields":[{"key":"name","label":"Name","kind":"text","required":true},
-              {"key":"enabled","label":"Enabled","kind":"boolean"},
-              {"key":"mode","label":"Mode","kind":"choice","choices":["one","two"]},
-              {"key":"token","label":"Token","kind":"secret"}],
-              "values":{"name":"example","enabled":true,"mode":"two"}}
-            """);
+        const string settingsDocument =
+            """{"schemaVersion":1,"fields":[{"key":"name","label":"Name","kind":"text","required":true},""" + "\n"
+            + """{"key":"enabled","label":"Enabled","kind":"boolean"},""" + "\n"
+            + """{"key":"mode","label":"Mode","kind":"choice","choices":["one","two"]},""" + "\n"
+            + """{"key":"token","label":"Token","kind":"secret"}],""" + "\n"
+            + """  "values":{"name":"example","enabled":true,"mode":"two"}}""";
+        var doc = SharpClawModuleSettings.ReadDocument(settingsDocument);
         doc.Fields.Should().HaveCount(4);
         doc.Values.Should().NotContainKey("token");
     }

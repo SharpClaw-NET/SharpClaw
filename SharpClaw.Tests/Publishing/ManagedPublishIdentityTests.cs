@@ -51,7 +51,7 @@ public sealed class ManagedPublishIdentityTests
             var metadata = pe.GetMetadataReader();
             var method = metadata.MethodDefinitions
                 .Select(metadata.GetMethodDefinition)
-                .Single(definition => string.Equals(metadata.GetString(definition.Name), nameof(IdentityFixtureMethod), StringComparison.Ordinal));
+                .Where(definition => string.Equals(metadata.GetString(definition.Name), nameof(IdentityFixtureMethod), StringComparison.Ordinal)).Should().ContainSingle().Which;
             var offset = FileOffset(pe, method.RelativeVirtualAddress);
             var headerSize = (changed[offset] & 3) == 2 ? 1 : (changed[offset + 1] >> 4) * 4;
             // Change a ldc.i4 operand, leaving the instruction and PE valid.
@@ -70,7 +70,7 @@ public sealed class ManagedPublishIdentityTests
         var changed = (byte[])bytes.Clone();
         using var pe = new PEReader(new MemoryStream(bytes));
         var metadata = pe.GetMetadataReader();
-        var field = metadata.GetFieldDefinition(metadata.FieldDefinitions.Single());
+        var field = metadata.GetFieldDefinition(metadata.FieldDefinitions.Should().ContainSingle().Which);
         changed[FileOffset(pe, field.GetRelativeVirtualAddress()) + 7] ^= 1;
         using var replacementPe = new PEReader(new MemoryStream(changed));
         var replacementMetadata = replacementPe.GetMetadataReader();
@@ -78,8 +78,8 @@ public sealed class ManagedPublishIdentityTests
         replacementPe.GetMetadata().GetContent().Should().Equal(pe.GetMetadata().GetContent());
         replacementMetadata.GetGuid(replacementMetadata.GetModuleDefinition().Mvid)
             .Should().Be(metadata.GetGuid(metadata.GetModuleDefinition().Mvid));
-        var method = metadata.GetMethodDefinition(metadata.MethodDefinitions.Single());
-        var replacementMethod = replacementMetadata.GetMethodDefinition(replacementMetadata.MethodDefinitions.Single());
+        var method = metadata.GetMethodDefinition(metadata.MethodDefinitions.Should().ContainSingle().Which);
+        var replacementMethod = replacementMetadata.GetMethodDefinition(replacementMetadata.MethodDefinitions.Should().ContainSingle().Which);
         replacementPe.GetMethodBody(replacementMethod.RelativeVirtualAddress).GetILContent()
             .Should().Equal(pe.GetMethodBody(method.RelativeVirtualAddress).GetILContent());
 
@@ -96,8 +96,8 @@ public sealed class ManagedPublishIdentityTests
         var firstMetadata = first.GetMetadataReader();
         var secondMetadata = second.GetMetadataReader();
 
-        firstMetadata.GetFieldDefinition(firstMetadata.FieldDefinitions.Single()).GetRelativeVirtualAddress()
-            .Should().NotBe(secondMetadata.GetFieldDefinition(secondMetadata.FieldDefinitions.Single()).GetRelativeVirtualAddress());
+        firstMetadata.GetFieldDefinition(firstMetadata.FieldDefinitions.Should().ContainSingle().Which).GetRelativeVirtualAddress()
+            .Should().NotBe(secondMetadata.GetFieldDefinition(secondMetadata.FieldDefinitions.Should().ContainSingle().Which).GetRelativeVirtualAddress());
         relocated.Should().NotEqual(bytes);
         Fingerprint(relocated).Should().Be(Fingerprint(bytes));
     }
@@ -112,7 +112,7 @@ public sealed class ManagedPublishIdentityTests
         var changed = (byte[])bytes.Clone();
         using var pe = new PEReader(new MemoryStream(bytes));
         var metadata = pe.GetMetadataReader();
-        var offset = FileOffset(pe, metadata.GetFieldDefinition(metadata.FieldDefinitions.Single()).GetRelativeVirtualAddress());
+        var offset = FileOffset(pe, metadata.GetFieldDefinition(metadata.FieldDefinitions.Should().ContainSingle().Which).GetRelativeVirtualAddress());
         changed[offset + size - 1] ^= 1;
 
         Fingerprint(changed).Should().NotBe(Fingerprint(bytes));
@@ -165,7 +165,7 @@ public sealed class ManagedPublishIdentityTests
     {
         var metadata = new MetadataBuilder();
         metadata.AddModule(0, metadata.GetOrAddString("InitializedFieldFixture.dll"),
-            metadata.GetOrAddGuid(new Guid("46ba5d48-8998-4a72-94ea-46b8bb702922")), default, default);
+            metadata.GetOrAddGuid(new Guid(0x46ba5d48, 0x8998, 0x4a72, 0x94, 0xea, 0x46, 0xb8, 0xbb, 0x70, 0x29, 0x22)), default, default);
         var core = metadata.AddAssemblyReference(metadata.GetOrAddString("System.Runtime"), new Version(10, 0, 0, 0),
             default, default, default, default);
         var valueType = metadata.AddTypeReference(core, metadata.GetOrAddString("System"), metadata.GetOrAddString("ValueType"));
@@ -202,8 +202,8 @@ public sealed class ManagedPublishIdentityTests
 
     private static int FileOffset(PEReader pe, int rva)
     {
-        var section = pe.PEHeaders.SectionHeaders.Single(header =>
-            rva >= header.VirtualAddress && rva < header.VirtualAddress + Math.Max(header.VirtualSize, header.SizeOfRawData));
+        var section = pe.PEHeaders.SectionHeaders.Where(header =>
+            rva >= header.VirtualAddress && rva < header.VirtualAddress + Math.Max(header.VirtualSize, header.SizeOfRawData)).Should().ContainSingle().Which;
         return section.PointerToRawData + rva - section.VirtualAddress;
     }
 

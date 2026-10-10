@@ -43,8 +43,7 @@ public static class SharpClawLogBounds
         out int originalBytes)
     {
         ArgumentNullException.ThrowIfNull(value);
-        if (maximumBytes < 0)
-            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumBytes);
 
         originalBytes = Encoding.UTF8.GetByteCount(value);
         if (originalBytes <= maximumBytes)

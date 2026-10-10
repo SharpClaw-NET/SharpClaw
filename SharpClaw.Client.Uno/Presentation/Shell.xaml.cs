@@ -2,6 +2,10 @@ using Microsoft.UI.Xaml.Media;
 
 namespace SharpClaw.Presentation;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1010",
+    Justification = "This Uno view inherits nongeneric enumeration from the framework for XAML children; it is not a public collection API and adding generic enumeration would change framework semantics.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1724",
+    Justification = "Shell is the existing XAML class and Uno navigation shell; its full SharpClaw.Presentation identity is distinct from the unrelated Windows.UI.Shell namespace.")]
 public sealed partial class Shell : UserControl, IContentControlProvider
 {
     private readonly DispatcherTimer _dotsTimer;

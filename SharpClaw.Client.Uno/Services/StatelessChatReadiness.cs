@@ -15,8 +15,8 @@ internal static class StatelessChatReadiness
         setup is { SetupRequired: false, Providers: not null } &&
         !string.IsNullOrWhiteSpace(setup.ProviderKey) &&
         !string.IsNullOrWhiteSpace(setup.Model) &&
-        setup.Providers.Count(provider => string.Equals(
-            provider?.Key, setup.ProviderKey, StringComparison.OrdinalIgnoreCase)) == 1;
+        setup.Providers.Where(provider => string.Equals(
+            provider?.Key, setup.ProviderKey, StringComparison.OrdinalIgnoreCase)).Take(2).Count() == 1;
 
     public static bool CanChat(SharpClawProviderSetup? setup, SharpClawProviderModels? catalog) =>
         CanChat(setup) && catalog is { Models: not null } &&

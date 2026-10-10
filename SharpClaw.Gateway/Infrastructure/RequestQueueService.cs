@@ -28,6 +28,7 @@ internal sealed class RequestQueueService : IDisposable
     private long _sequence;
     private int _count;
     private bool _disposed;
+    private bool _completed;
 
     public RequestQueueService(
         IOptions<RequestQueueOptions> options,
@@ -62,22 +63,26 @@ internal sealed class RequestQueueService : IDisposable
     {
         lock (_lock)
         {
+            if (_completed || _disposed)
+                return false;
+
             if (_count >= _options.MaxQueueSize)
             {
-                _logger.LogWarning("Request queue full. Rejecting {Method} {Path}.", request.Method, request.Path);
+                GatewayLog.QueueFull(_logger, request.Method, request.Path);
                 return false;
             }
 
             request.QueuePosition = _count;
             _queue.Enqueue(request, ((int)request.Priority, ++_sequence));
             _count++;
+            _signal.Release();
         }
 
-        _signal.Release();
         Metrics.RecordEnqueue();
 
-        _logger.LogDebug("Enqueued {Method} {Path} ({Id}) [{Priority}]. Position: {Position}, Pending: {Count}.",
-            request.Method, request.Path, request.Id, request.Priority, request.QueuePosition, PendingCount);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            GatewayLog.RequestEnqueued(_logger, request.Method, request.Path, request.Id,
+                request.Priority, request.QueuePosition, PendingCount);
 
         return true;
     }
@@ -97,10 +102,33 @@ internal sealed class RequestQueueService : IDisposable
         }
     }
 
+    internal void CompleteWaitingRequests(CancellationToken cancellationToken, Exception? failure = null)
+    {
+        lock (_lock)
+        {
+            _completed = true;
+            var cancelled = cancellationToken.IsCancellationRequested
+                ? cancellationToken
+                : new CancellationToken(canceled: true);
+            while (_queue.TryDequeue(out var request, out _))
+            {
+                if (failure is null)
+                    request.Completion.TrySetCanceled(cancelled);
+                else
+                    request.Completion.TrySetException(failure);
+            }
+            _count = 0;
+        }
+    }
+
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        lock (_lock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
+        CompleteWaitingRequests(new CancellationToken(canceled: true));
         _signal.Dispose();
     }
 }

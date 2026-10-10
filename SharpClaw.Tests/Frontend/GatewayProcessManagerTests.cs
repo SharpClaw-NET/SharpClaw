@@ -21,7 +21,7 @@ internal sealed class GatewayProcessManagerTests
                 explicitInstanceRoot: instanceRoot,
                 sharedRootOverride: sharedRoot);
 
-            var manager = new GatewayProcessManager(
+            using var manager = new GatewayProcessManager(
                 GatewayProcessManager.DefaultGatewayUrl,
                 "http://127.0.0.1:48923",
                 NullLogger<GatewayProcessManager>.Instance,
@@ -40,7 +40,7 @@ internal sealed class GatewayProcessManagerTests
     [Test]
     public void UpdateBackendBaseUrl_WhenCalled_UpdatesForwardedBackendBaseUrl()
     {
-        var manager = new GatewayProcessManager(
+        using var manager = new GatewayProcessManager(
             GatewayProcessManager.DefaultGatewayUrl,
             "http://127.0.0.1:48923",
             NullLogger<GatewayProcessManager>.Instance);
@@ -66,8 +66,13 @@ internal sealed class GatewayProcessManagerTests
         {
             Directory.Delete(path, recursive: true);
         }
-        catch
+        catch (IOException exception)
         {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
         }
     }
 }

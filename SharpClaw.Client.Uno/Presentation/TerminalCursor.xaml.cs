@@ -1,5 +1,7 @@
 namespace SharpClaw.Presentation;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1010",
+    Justification = "This Uno view inherits nongeneric enumeration from the framework for XAML children; it is not a public collection API and adding generic enumeration would change framework semantics.")]
 public sealed partial class TerminalCursor : UserControl
 {
     private readonly DispatcherTimer _blinkTimer;
@@ -20,6 +22,8 @@ public sealed partial class TerminalCursor : UserControl
             BlinkBlock.Text = _cursorVisible ? "_" : " ";
         };
         _blinkTimer.Start();
+        Loaded += (_, _) => Unfreeze();
+        Unloaded += (_, _) => { Freeze(); StopTypewriter(); };
     }
 
     /// <summary>

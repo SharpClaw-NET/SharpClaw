@@ -17,6 +17,8 @@ public sealed class SharpClawDiscoveryEntry
 
     public required string InstanceRoot { get; set; }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056",
+        Justification = "This published string property preserves the versioned JSON manifest/discovery representation and existing CLR getter/setter ABI. Persisted endpoint text is retained exactly; converting its public type to Uri would break those contracts.")]
     public required string BaseUrl { get; set; }
 
     public required string RuntimeDirectory { get; set; }

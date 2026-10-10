@@ -92,10 +92,10 @@ internal sealed class RegistrationDependencyGuardrailTests
             {
                 Id = id,
                 Element = project.Descendants("PackageReference")
-                    .Single(reference => string.Equals(
+                    .Where(reference => string.Equals(
                         (string?)reference.Attribute("Include"),
                         id,
-                        StringComparison.Ordinal))
+                        StringComparison.Ordinal)).Should().ContainSingle().Which
             })
             .ToList();
 
@@ -108,8 +108,9 @@ internal sealed class RegistrationDependencyGuardrailTests
 
         packageReferences.Should().NotBeEmpty();
 
-        foreach (var reference in packageReferences)
+        for (var index = 0; index < packageReferences.Count; index++)
         {
+            var reference = packageReferences[index];
             ((string?)reference.Element.Attribute("GeneratePathProperty")).Should().Be(
                 "true",
                 $"{reference.Id} is consumed only for package payload paths");
@@ -133,8 +134,9 @@ internal sealed class RegistrationDependencyGuardrailTests
                 .Contains("SharpClaw.DefaultModules.TestHarness", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        foreach (var reference in testHarnessReferences)
+        for (var index = 0; index < testHarnessReferences.Count; index++)
         {
+            var reference = testHarnessReferences[index];
             var referenceOutputAssembly =
                 (string?)reference.Attribute("ReferenceOutputAssembly")
                 ?? reference.Element("ReferenceOutputAssembly")?.Value;
@@ -166,8 +168,9 @@ internal sealed class RegistrationDependencyGuardrailTests
             property => property.Value,
             StringComparer.OrdinalIgnoreCase);
 
-        foreach (var packageId in packageIds)
+        for (var index = 0; index < packageIds.Count; index++)
         {
+            var packageId = packageIds[index];
             var library = targetLibraries
                 .Single(pair => pair.Key.StartsWith(packageId + "/", StringComparison.OrdinalIgnoreCase))
                 .Value;
@@ -195,8 +198,9 @@ internal sealed class RegistrationDependencyGuardrailTests
                 property => property.Value,
                 StringComparer.OrdinalIgnoreCase);
 
-        foreach (var packageId in packageIds)
+        for (var index = 0; index < packageIds.Count; index++)
         {
+            var packageId = packageIds[index];
             var dependencyPath = FindSharpClawCoreDependencyPath(packageId, libraries);
 
             dependencyPath.Should().BeNull(
@@ -219,8 +223,9 @@ internal sealed class RegistrationDependencyGuardrailTests
 
         registrationProjectPaths.Should().NotBeEmpty("the in-repo TestHarness modules are module payload fixtures");
 
-        foreach (var projectPath in registrationProjectPaths)
+        for (var index = 0; index < registrationProjectPaths.Count; index++)
         {
+            var projectPath = registrationProjectPaths[index];
             var project = XDocument.Load(projectPath);
             var sharpClawCorePackageReferences = project.Descendants("PackageReference")
                 .Where(reference => string.Equals(
@@ -276,7 +281,7 @@ internal sealed class RegistrationDependencyGuardrailTests
                         artifactProjectRoot,
                         "project.assets.json",
                         SearchOption.AllDirectories)
-                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .Order(StringComparer.OrdinalIgnoreCase)
                     .FirstOrDefault();
                 if (match is not null)
                     return match;
@@ -284,9 +289,6 @@ internal sealed class RegistrationDependencyGuardrailTests
 
             directory = directory.Parent;
         }
-
-        if (File.Exists(normalPath))
-            return normalPath;
 
         return normalPath;
     }
@@ -298,7 +300,7 @@ internal sealed class RegistrationDependencyGuardrailTests
             .Where(id => id is not null
                 && id.StartsWith("SharpClaw.Modules.", StringComparison.Ordinal))
             .Select(id => id!)
-            .OrderBy(id => id, StringComparer.Ordinal);
+            .Order(StringComparer.Ordinal);
     }
 
     private static IEnumerable<string> GetRegistrationFacingPackageIds(XDocument project)
@@ -309,12 +311,12 @@ internal sealed class RegistrationDependencyGuardrailTests
                 && (id.StartsWith("SharpClaw.Modules.", StringComparison.Ordinal)
                     || string.Equals(id, "SharpClaw.SidecarHost.OutOfProcess", StringComparison.Ordinal)))
             .Select(id => id!)
-            .OrderBy(id => id, StringComparer.Ordinal);
+            .Order(StringComparer.Ordinal);
     }
 
     private static string? FindSharpClawCoreDependencyPath(
         string rootPackageId,
-        IReadOnlyDictionary<string, JsonElement> libraries)
+        Dictionary<string, JsonElement> libraries)
     {
         var queue = new Queue<(string PackageId, string Path)>();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -350,7 +352,7 @@ internal sealed class RegistrationDependencyGuardrailTests
 
     private static string GetPackageId(string libraryKey)
     {
-        var slashIndex = libraryKey.IndexOf('/');
+        var slashIndex = libraryKey.IndexOf('/', StringComparison.Ordinal);
         return slashIndex < 0 ? libraryKey : libraryKey[..slashIndex];
     }
 

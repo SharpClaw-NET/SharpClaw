@@ -33,26 +33,23 @@ internal sealed class RuntimeTransactionBoundaryTests
                 Path.Combine(sourceRoot, "SharpClaw.Runtime"),
                 "*.cs",
                 SearchOption.AllDirectories)
-            .Where(path => !path.Contains(
+            .Where(path => (!path.Contains(
                 $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
-                StringComparison.OrdinalIgnoreCase))
-            .Where(path => !path.Contains(
+                StringComparison.OrdinalIgnoreCase)) && (!path.Contains(
                 $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
-                StringComparison.OrdinalIgnoreCase));
+                StringComparison.OrdinalIgnoreCase)));
 
         var offenders = runtimeSources
             .SelectMany(path => File.ReadLines(path)
                 .Select((line, index) => (Path: path, Line: index + 1, Text: line)))
-            .Where(entry =>
-                entry.Text.Contains("db.Database.BeginTransaction", StringComparison.Ordinal)
+            .Where(entry => (entry.Text.Contains("db.Database.BeginTransaction", StringComparison.Ordinal)
                 || entry.Text.Contains("transaction.CommitAsync(", StringComparison.Ordinal)
                 || entry.Text.Contains("transaction.RollbackAsync(", StringComparison.Ordinal)
                 || entry.Text.Contains("current.CommitAsync(", StringComparison.Ordinal)
-                || entry.Text.Contains("current.RollbackAsync(", StringComparison.Ordinal))
-            .Where(entry => !string.Equals(
+                || entry.Text.Contains("current.RollbackAsync(", StringComparison.Ordinal)) && (!string.Equals(
                 Path.GetFileName(entry.Path),
                 "RuntimeTransactionActionRunner.cs",
-                StringComparison.Ordinal))
+                StringComparison.Ordinal)))
             .Select(entry => $"{entry.Path}:{entry.Line}")
             .ToArray();
 

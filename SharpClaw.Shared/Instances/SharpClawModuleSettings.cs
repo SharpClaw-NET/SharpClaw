@@ -54,7 +54,7 @@ public static class SharpClawModuleSettings
                 field.Kind is not ("text" or "secret" or "boolean" or "choice") ||
                 (string.Equals(field.Kind, "choice", StringComparison.Ordinal) && (field.Choices is null || field.Choices.Count is 0 or > 64 ||
                     field.Choices.Any(choice => !IsLabel(choice)) ||
-                    field.Choices.Distinct(StringComparer.Ordinal).Count() != field.Choices.Count)))
+                    field.Choices.Distinct(StringComparer.Ordinal).Take(field.Choices.Count + 1).Count() != field.Choices.Count)))
                 throw new InvalidDataException("Invalid module settings field.");
             if (document.Values.TryGetValue(field.Key, out var value) && !string.Equals(field.Kind, "secret", StringComparison.Ordinal))
             {
@@ -69,7 +69,7 @@ public static class SharpClawModuleSettings
         return document;
     }
 
-    public static bool IsIdentifier(string? value) => value is { Length: > 0 and <= 128 } && value is not ("." or "..") &&
+    public static bool IsIdentifier(string? value) => value is { Length: > 0 and <= 128 } and not ("." or "..") &&
         value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.');
 
     public static bool IsLabel(string? value) => value is { Length: > 0 and <= 256 } &&

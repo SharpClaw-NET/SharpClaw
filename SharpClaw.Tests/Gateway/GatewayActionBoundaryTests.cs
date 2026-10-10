@@ -277,10 +277,7 @@ internal sealed class GatewayActionBoundaryTests
                         descriptor.Version,
                         types.ActionType.AssemblyQualifiedName!,
                         types.ResultType.AssemblyQualifiedName!,
-                        KernelSchemaIdentity.Action(
-                            descriptor,
-                            typeof(KernelActionEnvelope),
-                            typeof(object)));
+                        KernelSchemaIdentity.Action(descriptor));
                 })
                 .ToArray(),
             });

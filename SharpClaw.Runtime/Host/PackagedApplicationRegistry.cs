@@ -61,7 +61,7 @@ internal sealed class PackagedApplicationRegistry
         };
 
     private static readonly TimeSpan CarrierLifetime = TimeSpan.FromMinutes(3);
-    private readonly IReadOnlyDictionary<string, CliRoute> _cliRoutes;
+    private readonly Dictionary<string, CliRoute> _cliRoutes;
     private readonly IReadOnlyList<EndpointRoute> _endpointRoutes;
 
     public static PackagedApplicationRegistry Empty { get; } = new([], []);
@@ -100,6 +100,17 @@ internal sealed class PackagedApplicationRegistry
                     "The registration command requires administrator authority."));
         }
 
+        return await InvokeCliRouteAsync(route, arguments, runtimeKernel,
+            executionContext, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<CliResult> InvokeCliRouteAsync(
+        CliRoute route,
+        IReadOnlyList<string> arguments,
+        RuntimeKernelAdapter runtimeKernel,
+        KernelActionExecutionContext executionContext,
+        CancellationToken cancellationToken)
+    {
         var invocation = new RuntimeCliActionInvocation(
             "execute",
             route.Descriptor.Name,
@@ -213,7 +224,21 @@ internal sealed class PackagedApplicationRegistry
         }
 
         var executionContext = KernelHostEndpoints.CreateExecutionContext(context);
-        var original = new EndpointIngress(
+        var original = CreateEndpointIngress(context, target, body);
+        if (target.Descriptor.Transport == HostEndpointTransport.WebSocket)
+        {
+            await InvokeWebSocketRouteAsync(context, target, original,
+                executionContext, runtimeKernel).ConfigureAwait(false);
+            return;
+        }
+        await InvokeHttpRouteAsync(context, target, original,
+            executionContext, runtimeKernel).ConfigureAwait(false);
+    }
+
+    private static EndpointIngress CreateEndpointIngress(
+        HttpContext context, EndpointTarget target, byte[] body)
+    {
+        return new EndpointIngress(
             target.Descriptor.Id,
             target.Descriptor.Method,
             target.Descriptor.Path,
@@ -230,50 +255,63 @@ internal sealed class PackagedApplicationRegistry
                     StringComparer.Ordinal),
             body);
 
-        if (target.Descriptor.Transport == HostEndpointTransport.WebSocket)
-        {
-            await runtimeKernel.RunRequestAsync(
-                executionContext,
-                original,
-                async (effective, cancellationToken) =>
-                {
-                    ValidateImmutableRoute(original, effective);
-                    using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
-                    var channel = new AspNetWebSocketChannel(
-                        socket,
-                        target.Client?.HostLimits.StreamChunkBytes
-                            ?? target.InProcess!.Graph.PayloadLimits.StreamChunkBytes);
-                    var request = CreateEndpointRequest(
-                        target,
-                        effective,
-                        executionContext,
-                        runtimeKernel);
-                    if (target.Client is { } client)
-                    {
-                        await client.InvokeWebSocketEndpointAsync(
-                            request,
-                            channel,
-                            cancellationToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        var contexts = runtimeKernel.HostServices
-                            .GetRequiredService<RuntimeHostActionContextAccessor>();
-                        var hostActionEntry = runtimeKernel.HostServices
-                            .GetRequiredService<IHostActionEntry>();
-                        using var contextScope = contexts.Push(request.Invocation.HostActionContext);
-                        await target.InProcess!.Invoker.InvokeWebSocketEndpointAsync(
-                            request,
-                            channel,
-                            hostActionEntry,
-                            cancellationToken).ConfigureAwait(false);
-                    }
-                    return true;
-                },
-                context.RequestAborted).ConfigureAwait(false);
-            return;
-        }
+    }
 
+    private static async Task InvokeWebSocketRouteAsync(
+        HttpContext context,
+        EndpointTarget target,
+        EndpointIngress original,
+        KernelActionExecutionContext executionContext,
+        RuntimeKernelAdapter runtimeKernel)
+    {
+        await runtimeKernel.RunRequestAsync(
+            executionContext,
+            original,
+            async (effective, cancellationToken) =>
+            {
+                ValidateImmutableRoute(original, effective);
+                using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+                var channel = new AspNetWebSocketChannel(
+                    socket,
+                    target.Client?.HostLimits.StreamChunkBytes
+                        ?? target.InProcess!.Graph.PayloadLimits.StreamChunkBytes);
+                var request = CreateEndpointRequest(
+                    target,
+                    effective,
+                    executionContext,
+                    runtimeKernel);
+                if (target.Client is { } client)
+                {
+                    await client.InvokeWebSocketEndpointAsync(
+                        request,
+                        channel,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    var contexts = runtimeKernel.HostServices
+                        .GetRequiredService<RuntimeHostActionContextAccessor>();
+                    var hostActionEntry = runtimeKernel.HostServices
+                        .GetRequiredService<IHostActionEntry>();
+                    using var contextScope = contexts.Push(request.Invocation.HostActionContext);
+                    await target.InProcess!.Invoker.InvokeWebSocketEndpointAsync(
+                        request,
+                        channel,
+                        hostActionEntry,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                return true;
+            },
+            context.RequestAborted).ConfigureAwait(false);
+    }
+
+    private static async Task InvokeHttpRouteAsync(
+        HttpContext context,
+        EndpointTarget target,
+        EndpointIngress original,
+        KernelActionExecutionContext executionContext,
+        RuntimeKernelAdapter runtimeKernel)
+    {
         var response = await runtimeKernel.RunRequestAsync(
             executionContext,
             original,
@@ -419,7 +457,7 @@ internal sealed class PackagedApplicationRegistry
         };
     }
 
-    private static IReadOnlyDictionary<string, CliRoute> BuildCliRoutes(
+    private static Dictionary<string, CliRoute> BuildCliRoutes(
         IReadOnlyList<InProcessRegistrationHost> inProcessRegistrations,
         IReadOnlyList<OutOfProcessRegistrationProxy> registrations)
     {
@@ -478,7 +516,9 @@ internal sealed class PackagedApplicationRegistry
         CliCommandDescriptor descriptor)
     {
         if ((client is null) == (inProcess is null))
+#pragma warning disable MA0015 // The invalid state concerns the relationship of both owner parameters, not either individual parameter.
             throw new ArgumentException("A CLI route must have exactly one invocation owner.");
+#pragma warning restore MA0015
         if (ReservedCliNames.Contains(name)
             || !routes.TryAdd(name, new CliRoute(client, inProcess, descriptor)))
         {
@@ -487,7 +527,7 @@ internal sealed class PackagedApplicationRegistry
         }
     }
 
-    private static IReadOnlyList<EndpointRoute> BuildEndpointRoutes(
+    private static EndpointRoute[] BuildEndpointRoutes(
         IReadOnlyList<InProcessRegistrationHost> inProcessRegistrations,
         IReadOnlyList<OutOfProcessRegistrationProxy> registrations)
     {
@@ -531,6 +571,7 @@ internal sealed class PackagedApplicationRegistry
         ArgumentNullException.ThrowIfNull(inProcessEndpoints);
         ArgumentNullException.ThrowIfNull(sidecarEndpoints);
         var endpoints = inProcessEndpoints.Concat(sidecarEndpoints).ToArray();
+#pragma warning disable HLQ013 // Indices compare each unordered route pair exactly once, without self-comparisons or repeated pairs.
         for (var firstIndex = 0; firstIndex < endpoints.Length; firstIndex++)
         {
             for (var secondIndex = firstIndex + 1; secondIndex < endpoints.Length; secondIndex++)
@@ -546,7 +587,9 @@ internal sealed class PackagedApplicationRegistry
         }
     }
 
-    private static IReadOnlyDictionary<string, string[]> CopyHeaders(IHeaderDictionary headers) =>
+#pragma warning restore HLQ013
+
+    private static Dictionary<string, string[]> CopyHeaders(IHeaderDictionary headers) =>
         headers
             .Where(pair => !FilteredRequestHeaders.Contains(pair.Key))
             .ToDictionary(
@@ -554,7 +597,7 @@ internal sealed class PackagedApplicationRegistry
                 pair => pair.Value.Select(value => value ?? string.Empty).ToArray(),
                 StringComparer.OrdinalIgnoreCase);
 
-    private static IReadOnlyDictionary<string, string[]> FilterHeaders(
+    private static Dictionary<string, string[]> FilterHeaders(
         IReadOnlyDictionary<string, string[]> headers) =>
         headers
             .Where(pair => !FilteredRequestHeaders.Contains(pair.Key))

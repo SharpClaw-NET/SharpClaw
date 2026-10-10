@@ -28,7 +28,7 @@ namespace SharpClaw.Tests.Providers.LlamaSharp;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
     Justification = "NUnit discovers and constructs this internal fixture through reflection; its tests are executed by the maintained test suite.")]
 [TestFixture]
-internal sealed class LlamaSharpToolGrammarShapeTests
+internal sealed partial class LlamaSharpToolGrammarShapeTests
 {
     /// <summary>
     /// Regex matching the specific failure pattern: any line whose first
@@ -36,8 +36,8 @@ internal sealed class LlamaSharpToolGrammarShapeTests
     /// GBNF output, <c>|</c> only ever appears inside a rule body (never
     /// at the start of a physical line). Blank lines are ignored.
     /// </summary>
-    private static readonly Regex BrokenContinuationLine =
-        new(@"^\s+\|", RegexOptions.Multiline | RegexOptions.Compiled);
+    [GeneratedRegex(@"^\s+\|", RegexOptions.Multiline, 1000)]
+    private static partial Regex BrokenContinuationLine();
 
     // ─── Non-strict grammar (BuildGrammar path) ─────────────────────────
 
@@ -184,7 +184,7 @@ internal sealed class LlamaSharpToolGrammarShapeTests
     /// </summary>
     private static void AssertNoBrokenContinuation(string gbnf)
     {
-        var match = BrokenContinuationLine.Match(gbnf);
+        var match = BrokenContinuationLine().Match(gbnf);
         match.Success.Should().BeFalse(
             "grammar must not contain any line starting with '|' after whitespace. " +
             "First offending match: '{0}'. See bug #4 in the debug report — llama.cpp's GBNF " +

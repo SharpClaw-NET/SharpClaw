@@ -31,8 +31,9 @@ internal sealed class GatewayActionResponseStream(
     public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
     public override void SetLength(long value) => inner.SetLength(value);
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD002", Justification = "Stream.Write is synchronous. Gateway runs without a UI synchronization context, and every awaited action and write uses ConfigureAwait(false).")]
     public override void Write(byte[] buffer, int offset, int count) =>
-        WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        WriteAsync(buffer.AsMemory(offset, count)).AsTask().ConfigureAwait(false).GetAwaiter().GetResult();
 
     public override Task WriteAsync(
         byte[] buffer,
@@ -71,14 +72,8 @@ internal sealed class GatewayActionResponseStream(
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-            logger.LogTrace("Gateway stream response wrapper disposed after {ChunkCount} chunks.", _chunk);
+            GatewayLog.StreamDisposed(logger, _chunk);
         base.Dispose(disposing);
     }
 
-    public override ValueTask DisposeAsync()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-        return ValueTask.CompletedTask;
-    }
 }

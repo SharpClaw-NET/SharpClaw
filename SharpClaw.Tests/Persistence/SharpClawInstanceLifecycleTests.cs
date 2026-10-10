@@ -32,26 +32,11 @@ internal sealed class SharpClawInstanceLifecycleTests
             var staleEntryPath = Path.Combine(paths.DiscoveryDirectory, "backend-stale.json");
             File.WriteAllText(
                 staleEntryPath,
-                """
-                {
-                  "schemaVersion": 1,
-                  "instanceKind": "Backend",
-                  "instanceId": "stale-instance",
-                  "installFingerprint": "stale",
-                  "instanceRoot": "REPLACE_ROOT",
-                  "baseUrl": "http://127.0.0.1:48999",
-                  "runtimeDirectory": "REPLACE_RUNTIME",
-                  "apiKeyFilePath": "REPLACE_API",
-                  "gatewayTokenFilePath": "REPLACE_GATEWAY",
-                  "processId": 999999,
-                  "startedAtUtc": "2000-01-01T00:00:00Z",
-                  "lastSeenUtc": "2000-01-01T00:00:00Z"
-                }
-                """
-                .Replace("REPLACE_ROOT", EscapeJson(staleInstanceRoot))
-                .Replace("REPLACE_RUNTIME", EscapeJson(Path.Combine(staleInstanceRoot, "runtime")))
-                .Replace("REPLACE_API", EscapeJson(Path.Combine(staleInstanceRoot, "runtime", ".api-key")))
-                .Replace("REPLACE_GATEWAY", EscapeJson(Path.Combine(staleInstanceRoot, "runtime", ".gateway-token"))));
+                "{\n  \"schemaVersion\": 1,\n  \"instanceKind\": \"Backend\",\n  \"instanceId\": \"stale-instance\",\n  \"installFingerprint\": \"stale\",\n  \"instanceRoot\": \"REPLACE_ROOT\",\n  \"baseUrl\": \"http://127.0.0.1:48999\",\n  \"runtimeDirectory\": \"REPLACE_RUNTIME\",\n  \"apiKeyFilePath\": \"REPLACE_API\",\n  \"gatewayTokenFilePath\": \"REPLACE_GATEWAY\",\n  \"processId\": 999999,\n  \"startedAtUtc\": \"2000-01-01T00:00:00Z\",\n  \"lastSeenUtc\": \"2000-01-01T00:00:00Z\"\n}"
+                .Replace("REPLACE_ROOT", EscapeJson(staleInstanceRoot), StringComparison.Ordinal)
+                .Replace("REPLACE_RUNTIME", EscapeJson(Path.Combine(staleInstanceRoot, "runtime")), StringComparison.Ordinal)
+                .Replace("REPLACE_API", EscapeJson(Path.Combine(staleInstanceRoot, "runtime", ".api-key")), StringComparison.Ordinal)
+                .Replace("REPLACE_GATEWAY", EscapeJson(Path.Combine(staleInstanceRoot, "runtime", ".gateway-token")), StringComparison.Ordinal));
 
             paths.CleanupStaleDiscoveryEntries(TimeSpan.FromMinutes(2));
 
@@ -137,12 +122,17 @@ internal sealed class SharpClawInstanceLifecycleTests
         {
             Directory.Delete(path, recursive: true);
         }
-        catch
+        catch (IOException exception)
         {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
         }
     }
 
-    private static string EscapeJson(string value) => value.Replace("\\", "\\\\");
+    private static string EscapeJson(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal);
 
     private static DateTimeOffset ReadLastSeen(string discoveryEntryPath)
     {

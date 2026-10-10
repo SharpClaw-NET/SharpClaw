@@ -15,10 +15,11 @@ public sealed class DurableStreamPathEncoder(string rootDirectory)
         if (string.IsNullOrWhiteSpace(key.CanonicalValue))
             throw new ArgumentException("A typed stream key is required.", nameof(key));
 
-        var hash = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(key.CanonicalValue)))
-            .ToLowerInvariant();
+        var hash = Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(key.CanonicalValue)));
+#pragma warning disable CA1308 // Existing durable directories use lowercase kind names; changing casing would change on-disk stream identity.
         var kind = key.Kind.ToString().ToLowerInvariant();
+#pragma warning restore CA1308
         var candidate = Path.GetFullPath(
             Path.Combine(_root, "streams", kind, hash[..2], hash));
         var boundary = _root.EndsWith(Path.DirectorySeparatorChar)
@@ -29,8 +30,8 @@ public sealed class DurableStreamPathEncoder(string rootDirectory)
         return candidate;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "Keep the published instance method for existing binary callers.")]
     public string GetStreamHash(DurableStreamKey key) =>
-        Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(key.CanonicalValue)))
-            .ToLowerInvariant();
+        Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(key.CanonicalValue)));
 }

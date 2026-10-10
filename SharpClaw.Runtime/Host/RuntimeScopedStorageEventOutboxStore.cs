@@ -42,10 +42,12 @@ internal sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db
         var document = new OutboxDocument(
             message.EventId,
             message.EventKey.Value,
+#pragma warning disable VSTHRD103 // This serializes an in-memory envelope into the persisted string payload; there is no stream or asynchronous I/O to await.
             JsonSerializer.Serialize(
                 message.Envelope,
                 message.Envelope.GetType(),
                 JsonOptions),
+#pragma warning restore VSTHRD103
             message.Delivery,
             message.TargetListenerId,
             Pending,
@@ -53,15 +55,15 @@ internal sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db
             null,
             now,
             now);
-        db.ScopedStorageRecords.Add(new ScopedStorageRecordDB
+        await db.ScopedStorageRecords.AddAsync(new ScopedStorageRecordDB
         {
             Id = Guid.NewGuid(),
             SourceId = SourceId,
             StorageName = StorageName,
             RecordKey = recordKey,
             ValueJson = JsonSerializer.Serialize(document, JsonOptions),
-        });
-        db.ScopedStorageIndexEntries.Add(new ScopedStorageIndexEntryDB
+        }, cancellationToken).ConfigureAwait(false);
+        await db.ScopedStorageIndexEntries.AddAsync(new ScopedStorageIndexEntryDB
         {
             Id = Guid.NewGuid(),
             SourceId = SourceId,
@@ -69,7 +71,7 @@ internal sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db
             IndexName = StateIndexName,
             RecordKey = recordKey,
             StringValue = Pending,
-        });
+        }, cancellationToken).ConfigureAwait(false);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -157,6 +159,7 @@ internal sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db
                 replacement.CreatedAt,
                 replacement.UpdatedAt),
             JsonOptions);
+#pragma warning disable HLQ005 // Duplicate state index rows are corrupt outbox state and must fail rather than choose an arbitrary row.
         var stateIndex = await db.ScopedStorageIndexEntries.SingleOrDefaultAsync(
             index =>
                 index.SourceId == SourceId &&
@@ -164,9 +167,10 @@ internal sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db
                 index.IndexName == StateIndexName &&
                 index.RecordKey == recordKey,
             cancellationToken).ConfigureAwait(false);
+#pragma warning restore HLQ005
         if (stateIndex is null)
         {
-            db.ScopedStorageIndexEntries.Add(new ScopedStorageIndexEntryDB
+            await db.ScopedStorageIndexEntries.AddAsync(new ScopedStorageIndexEntryDB
             {
                 Id = Guid.NewGuid(),
                 SourceId = SourceId,
@@ -174,7 +178,7 @@ internal sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db
                 IndexName = StateIndexName,
                 RecordKey = recordKey,
                 StringValue = state,
-            });
+            }, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -186,12 +190,14 @@ internal sealed class RuntimeScopedStorageEventOutboxStore(SharpClawDbContext db
     private async ValueTask<ScopedStorageRecordDB?> FindAsync(
         string recordKey,
         CancellationToken cancellationToken) =>
+#pragma warning disable HLQ005 // Outbox record keys are unique; detecting duplicate persisted rows is part of this lookup contract.
         await db.ScopedStorageRecords.SingleOrDefaultAsync(
             record =>
                 record.SourceId == SourceId &&
                 record.StorageName == StorageName &&
                 record.RecordKey == recordKey,
             cancellationToken).ConfigureAwait(false);
+#pragma warning restore HLQ005
 
     private static RuntimeEventOutboxRecord Parse(ScopedStorageRecordDB row)
     {

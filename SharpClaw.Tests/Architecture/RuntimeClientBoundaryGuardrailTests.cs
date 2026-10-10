@@ -80,7 +80,7 @@ internal sealed class RuntimeClientBoundaryGuardrailTests
             "Client.Uno starts packaged processes and talks over HTTP; it must not compile against Runtime or Gateway assemblies");
     }
 
-    private static IReadOnlyList<string> LoadProjectReferenceIncludes(string projectPath)
+    private static List<string> LoadProjectReferenceIncludes(string projectPath)
     {
         var project = XDocument.Load(projectPath);
 

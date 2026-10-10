@@ -32,7 +32,7 @@ public static class EncryptionKeyResolver
         {
             throw;
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or FormatException or System.Security.Cryptography.CryptographicException or System.Text.Json.JsonException or PlatformNotSupportedException)
         {
             return null;
         }

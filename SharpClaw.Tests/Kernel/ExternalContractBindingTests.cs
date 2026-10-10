@@ -141,7 +141,7 @@ internal sealed class ExternalContractBindingTests
         new(sourceId, [new PackageContractReference(ContractName, serviceType.FullName)]);
 
     private static ServiceDescriptor Binding(ServiceContractBinding binding) =>
-        ServiceDescriptor.Singleton(typeof(ServiceContractBinding), binding);
+        ServiceDescriptor.Singleton(binding);
 
     private static IEnumerable<ServiceContractBinding> ExportBindings(
         IEnumerable<ServiceDescriptor> services) =>

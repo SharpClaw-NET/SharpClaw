@@ -27,6 +27,7 @@ public sealed class SharpClawRegistrationLoggerFactory(
         throw new InvalidOperationException(
             "Registration logger factories cannot add providers to the host logging pipeline.");
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "HLQ009", Justification = "ILoggerFactory requires Dispose, but this registration wrapper borrows the host factory and owns no disposable resources.")]
     public void Dispose()
     {
     }

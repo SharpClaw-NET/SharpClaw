@@ -5,19 +5,17 @@ namespace SharpClaw.Presentation;
 
 public sealed partial class MainPage
 {
-    private void OnSettingsClick(object sender, RoutedEventArgs e)
-    {
-        if (App.Services is not { } services)
-            return;
-
-        _ = services.GetRequiredService<ClientNavigationService>()
-            .NavigateRouteAsync(this, "Settings");
-    }
-
-    private void OnBootClick(object sender, RoutedEventArgs e)
+    private void OnSettingsClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         if (App.Services is not { } services) return;
-        _ = services.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Boot");
-    }
+        await services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Settings", cancellationToken: CancellationToken.None).ConfigureAwait(true);
+    });
 
+    private void OnBootClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
+    {
+        if (App.Services is not { } services) return;
+        await services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Boot", cancellationToken: CancellationToken.None).ConfigureAwait(true);
+    });
 }

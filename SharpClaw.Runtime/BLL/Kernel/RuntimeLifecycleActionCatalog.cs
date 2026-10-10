@@ -24,6 +24,8 @@ internal static class RuntimeLifecycleActionCatalog
         All.Any(candidate => candidate.Equals(key));
 
     private static SharpClawActionKey Find(string value) =>
+#pragma warning disable HLQ005 // Require catalog uniqueness as well as presence; duplicate lifecycle keys are a contract failure.
         SharpClawActionCatalog.Kernel.Single(key =>
             string.Equals(key.Value, value, StringComparison.Ordinal));
+#pragma warning restore HLQ005
 }

@@ -25,7 +25,7 @@ internal sealed class InstallationKeyCompatibilityTests
             .Build();
 
         configuration["Admin:Username"].Should().Be("FreshAdmin");
-        var rawKey = File.ReadAllBytes(workspace.KeyPath);
+        var rawKey = (await File.ReadAllBytesAsync(workspace.KeyPath, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false));
         rawKey.Should().HaveCount(32);
         (await new SharpClawInstallationKeyStore(workspace.KeyPath).GetOrCreateKeyAsync().ConfigureAwait(false))
             .Should().Equal(rawKey);
@@ -42,13 +42,13 @@ internal sealed class InstallationKeyCompatibilityTests
         workspace.Write(".env.template", "Admin__Username=TemplateAdmin\n");
         var expectedKey = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
         Directory.CreateDirectory(Path.GetDirectoryName(workspace.KeyPath)!);
-        File.WriteAllText(workspace.KeyPath, Convert.ToBase64String(expectedKey));
+        await File.WriteAllTextAsync(workspace.KeyPath, Convert.ToBase64String(expectedKey), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         var legacyJson = Encoding.UTF8.GetBytes(
             "{\n" +
             "  // legacy installation document\n" +
             "  \"Admin\": { \"Username\": \"ImportedAdmin\" },\n" +
             "}\n");
-        File.WriteAllBytes(workspace.Path(".env"), ApiKeyEncryptor.EncryptBytes(legacyJson, expectedKey));
+        await File.WriteAllBytesAsync(workspace.Path(".env"), ApiKeyEncryptor.EncryptBytes(legacyJson, expectedKey), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
         var configuration = new ConfigurationBuilder()
             .AddLocalEnvironmentFrom(workspace.EnvironmentDirectory, false, workspace.Paths)
@@ -59,7 +59,7 @@ internal sealed class InstallationKeyCompatibilityTests
             workspace.Paths));
 
         configuration["Admin:Username"].Should().Be("ImportedAdmin");
-        File.ReadAllBytes(workspace.KeyPath).Should().Equal(expectedKey);
+        (await File.ReadAllBytesAsync(workspace.KeyPath, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().Equal(expectedKey);
         (await store.ReadDocumentAsync().ConfigureAwait(false)).Should().Contain("Admin__Username=\"ImportedAdmin\"");
         EncryptionKeyResolver.ResolveKey(workspace.Paths).Should().Equal(expectedKey);
         Convert.FromBase64String(PersistentKeyStore.GetOrCreate("encryption-key", workspace.Paths))
@@ -74,21 +74,21 @@ internal sealed class InstallationKeyCompatibilityTests
         workspace.Write(".env.template", "Api__Url=http://127.0.0.1:48923\n");
         var expectedKey = Enumerable.Range(33, 32).Select(value => (byte)value).ToArray();
         Directory.CreateDirectory(Path.GetDirectoryName(workspace.KeyPath)!);
-        File.WriteAllBytes(workspace.KeyPath, expectedKey);
+        await File.WriteAllBytesAsync(workspace.KeyPath, expectedKey, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
         var options = LocalEnvironment.CreateSecretsOptions(
             workspace.EnvironmentDirectory,
             false,
             workspace.Paths);
         var store = new SupprocomSecretFileStore(options);
-        await store.ReplaceDocumentAsync("Api__Url=http://127.0.0.1:48924\n").ConfigureAwait(false);
+        await store.ReplaceDocumentAsync("Api__Url=http://127.0.0.1:48924\n", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
         var restarted = new SupprocomSecretFileStore(LocalEnvironment.CreateSecretsOptions(
             workspace.EnvironmentDirectory,
             false,
             workspace.Paths));
 
-        (await restarted.ReadDocumentAsync().ConfigureAwait(false)).Should().Contain("Api__Url=http://127.0.0.1:48924");
+        (await restarted.ReadDocumentAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().Contain("Api__Url=http://127.0.0.1:48924");
         EncryptionKeyResolver.ResolveKey(workspace.Paths).Should().Equal(expectedKey);
     }
 
@@ -112,7 +112,7 @@ internal sealed class InstallationKeyCompatibilityTests
                 InstallationKeyPath = workspace.KeyPath
             }
         });
-        File.WriteAllBytes(workspace.KeyPath, expectedKey);
+        await File.WriteAllBytesAsync(workspace.KeyPath, expectedKey, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         await fileStore.ReplaceDocumentAsync("Admin__Username=EnvironmentAdmin\n").ConfigureAwait(false);
         File.Delete(workspace.KeyPath);
 
@@ -197,8 +197,13 @@ internal sealed class InstallationKeyCompatibilityTests
                 if (Directory.Exists(Root))
                     Directory.Delete(Root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }

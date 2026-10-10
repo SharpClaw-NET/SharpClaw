@@ -15,6 +15,9 @@
   <Folder Name="/Shared/">
     <Project Path="SharpClaw.Shared/SharpClaw.Shared.csproj" />
   </Folder>
+  <Folder Name="/Build Tools/">
+    <Project Path="build/SharpClaw.GeneratedCodeSuppressions/SharpClaw.GeneratedCodeSuppressions.csproj" />
+  </Folder>
   <Folder Name="/Solution Items/" />
   <Folder Name="/Tests/Infrastructure/">
     <Project Path="SharpClaw.DefaultModules/TestHarness.InProcess/SharpClaw.DefaultModules.TestHarness.InProcess.csproj" />

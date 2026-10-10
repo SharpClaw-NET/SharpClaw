@@ -54,6 +54,7 @@ internal sealed class GatewayRequestDispatcher(
 
     // ── Internals ────────────────────────────────────────────────
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD003", Justification = "The queue owns this RunContinuationsAsynchronously receipt. Gateway has no JoinableTaskFactory or UI synchronization context, and shutdown settles queued and active receipts.")]
     private async Task<QueuedResponse> EnqueueOrDirectAsync<TRequest>(
         HttpMethod method, string path, TRequest? body, CancellationToken ct)
     {
@@ -118,7 +119,7 @@ internal sealed class GatewayRequestDispatcher(
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            logger.LogWarning(ex, "Direct forward failed for {Method} {Path}.", method, path);
+            GatewayLog.DirectForwardFailed(logger, ex, method, path);
             return new QueuedResponse
             {
                 StatusCode = HttpStatusCode.BadGateway,
@@ -130,10 +131,10 @@ internal sealed class GatewayRequestDispatcher(
     private RequestPriority ResolvePriority()
     {
         var header = httpContextAccessor.HttpContext?.Request.Headers["X-Priority"].FirstOrDefault();
-        return header?.ToLowerInvariant() switch
+        return header?.ToUpperInvariant() switch
         {
-            "high" => RequestPriority.High,
-            "low" => RequestPriority.Low,
+            "HIGH" => RequestPriority.High,
+            "LOW" => RequestPriority.Low,
             _ => RequestPriority.Normal,
         };
     }

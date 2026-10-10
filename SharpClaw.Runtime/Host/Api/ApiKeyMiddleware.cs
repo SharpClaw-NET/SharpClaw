@@ -40,7 +40,7 @@ internal sealed class ApiKeyMiddleware(
             // 423 Locked: the API is locked to trusted local processes that hold the session key.
             // Distinct from 401 (user identity) and 419 (expired token).
             context.Response.StatusCode = StatusCodes.Status423Locked;
-            context.Response.Headers["WWW-Authenticate"] = "ApiKey";
+            context.Response.Headers.WWWAuthenticate = "ApiKey";
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(
                 $$"""{"error":"{{AuthErrorCodes.InvalidApiKey}}","message":"The X-Api-Key header is missing or invalid. Obtain the current session key from the local key file."}""",

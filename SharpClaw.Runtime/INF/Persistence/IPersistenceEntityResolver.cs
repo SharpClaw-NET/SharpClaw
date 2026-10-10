@@ -28,6 +28,7 @@ public interface IPersistenceEntityResolver
     /// chronologically. An optional <paramref name="hint"/> may guide
     /// resolver implementations to an indexed lookup path.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0026", Justification = "These existing optional overloads are part of the published resolver contract; changing their defaults would break callers.")]
     Task<IReadOnlyList<T>> QueryAsync<T>(
         SharpClawDbContext db,
         Expression<Func<T, bool>> predicate,
@@ -41,6 +42,7 @@ public interface IPersistenceEntityResolver
     /// re-ordered chronologically. An optional <paramref name="hint"/>
     /// may guide resolver implementations to an indexed lookup path.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0026", Justification = "These existing optional overloads are part of the published resolver contract; changing their defaults would break callers.")]
     Task<IReadOnlyList<T>> QueryAsync<T>(
         SharpClawDbContext db,
         Expression<Func<T, bool>> predicate,

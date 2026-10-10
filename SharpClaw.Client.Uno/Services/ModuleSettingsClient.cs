@@ -17,7 +17,7 @@ internal static class ModuleSettingsClient
             !SharpClawModuleSettings.IsIdentifier(page.SourceId) || !SharpClawModuleSettings.IsIdentifier(page.Id) ||
             !SharpClawModuleSettings.IsLabel(page.ModuleName) || !SharpClawModuleSettings.IsLabel(page.Title) ||
             !SharpClawModuleSettings.IsEndpointPath(page.ReadPath) || !SharpClawModuleSettings.IsEndpointPath(page.SavePath)) ||
-            pages.Select(page => (page.SourceId, page.Id)).Distinct().Count() != pages.Length)
+            pages.Select(page => (page.SourceId, page.Id)).Distinct().Take(pages.Length + 1).Count() != pages.Length)
             throw new InvalidDataException("Invalid module settings catalog.");
         return pages;
     }

@@ -27,6 +27,8 @@ public sealed class RuntimeKernelAdapter :
     private readonly KernelJobsActionRunner _jobsActionRunner;
     private readonly IServiceProvider _hostServices;
     private bool _started;
+    private readonly Lock _stopGate = new();
+    private Task? _stopTask;
     private static readonly JsonSerializerOptions EventActionJsonOptions =
         new(JsonSerializerDefaults.General)
         {
@@ -54,22 +56,7 @@ public sealed class RuntimeKernelAdapter :
 
         _hostServices = hostServices;
         _lifecycleServices = lifecycleServices.ToArray();
-        var graphBuilder = new KernelGraphBuilder();
-        jobsBindings.AddTo(graphBuilder);
-        RuntimeEventBindings.AddTo(graphBuilder);
-        graphBuilder.Add(RuntimeStartupActionDefinitions.Initialize, RuntimeStartupActionDefinitions.SourceId);
-        Graph = graphBuilder.Compile(
-            hostServices,
-            AddRuntimeOwnedGrants(
-                MergeExternalBehaviorAuthority(
-                    graphCompileOptions,
-                    hostServices.GetServices<IExternalBehaviorAuthority>()),
-                jobsBindings));
-        RuntimeProviderActionManifest.Validate(Graph);
-        RuntimeToolActionManifest.Validate(Graph);
-        RuntimePersistenceActionManifest.Validate(Graph);
-        RuntimeTransactionActionManifest.Validate(Graph);
-        RuntimeEventActionManifest.Validate(Graph);
+        Graph = CompileRuntimeGraph(hostServices, jobsBindings, graphCompileOptions);
         _eventDeliverySink = eventDeliverySink ?? new InMemoryEventDeliverySink(supportsDurable: true);
         _eventDispatcher = new KernelEventDispatcher(Graph, _eventDeliverySink);
         _actionDispatcher = new KernelActionDispatcher(
@@ -103,11 +90,34 @@ public sealed class RuntimeKernelAdapter :
             new ProviderKernelTransport(providerKey =>
                 providerClients.GetOrAdd(
                     providerKey,
-                    key => new Lazy<IProviderApiClient>(() =>
-                        providerClientFactory.Create(configuration, plugins, key))).Value),
+                    static (key, state) => new Lazy<IProviderApiClient>(() =>
+                        state.Factory.Create(state.Configuration, state.Plugins, key)),
+                    (Factory: providerClientFactory, Configuration: configuration, Plugins: plugins)).Value),
             conversationResolver,
             profileResolver,
             effectiveConversationStore);
+    }
+
+    private static KernelGraph CompileRuntimeGraph(
+        IServiceProvider hostServices, KernelJobsBindings jobsBindings, KernelGraphCompileOptions? graphCompileOptions)
+    {
+        var graphBuilder = new KernelGraphBuilder();
+        jobsBindings.AddTo(graphBuilder);
+        RuntimeEventBindings.AddTo(graphBuilder);
+        graphBuilder.Add(RuntimeStartupActionDefinitions.Initialize, RuntimeStartupActionDefinitions.SourceId);
+        var graph = graphBuilder.Compile(
+            hostServices,
+            AddRuntimeOwnedGrants(
+                MergeExternalBehaviorAuthority(
+                    graphCompileOptions,
+                    hostServices.GetServices<IExternalBehaviorAuthority>()),
+                jobsBindings));
+        RuntimeProviderActionManifest.Validate(graph);
+        RuntimeToolActionManifest.Validate(graph);
+        RuntimePersistenceActionManifest.Validate(graph);
+        RuntimeTransactionActionManifest.Validate(graph);
+        RuntimeEventActionManifest.Validate(graph);
+        return graph;
     }
 
     public KernelGraph Graph { get; }
@@ -187,43 +197,7 @@ public sealed class RuntimeKernelAdapter :
         var committed = await RunEventActionAsync(
             new SharpClawActionKey("event.publish.commit"),
             committedInvocation,
-            async (effective, ct) =>
-            {
-                return await RunEventActionAsync(
-                    new SharpClawActionKey("event.deliver"),
-                    effective with { Phase = "deliver" },
-                    async (deliveryInvocation, deliveryCt) =>
-                    {
-                        if (deliveryInvocation.Payload is not RuntimeEventPayload eventPayload)
-                        {
-                            throw new KernelActionExecutionException(
-                                "The event delivery action returned an invalid payload.");
-                        }
-
-                        await _eventDispatcher.PublishAsync(
-                            RuntimeEventDefinitions.Committed,
-                            eventPayload.Validate(),
-                            deliveryCt).ConfigureAwait(false);
-                        if (deliveryInvocation.Delivery != EventDelivery.Inline)
-                        {
-                            await _eventDeliverySink.EnqueueAsync(
-                                RuntimeEventDefinitions.CommittedKey,
-                                new EventEnvelope<RuntimeEventPayload>(
-                                    deliveryInvocation.EventId,
-                                    null,
-                                    Guid.NewGuid(),
-                                    DateTimeOffset.UtcNow,
-                                    RuntimeEventDefinitions.SourceId,
-                                    eventPayload),
-                                deliveryInvocation.Delivery,
-                                deliveryCt,
-                                "runtime-event-outbox").ConfigureAwait(false);
-                        }
-
-                        return deliveryInvocation;
-                    },
-                    ct).ConfigureAwait(false);
-            },
+            CommitEventAsync,
             cancellationToken).ConfigureAwait(false);
 
         ValidateEventInvocation(committed, "commit");
@@ -237,6 +211,48 @@ public sealed class RuntimeKernelAdapter :
             committed.EventId,
             committedPayload.Validate(),
             committed.Delivery);
+    }
+
+    private async ValueTask<RuntimeEventActionInvocation> CommitEventAsync(
+        RuntimeEventActionInvocation effective, CancellationToken cancellationToken)
+    {
+        return await RunEventActionAsync(
+            new SharpClawActionKey("event.deliver"),
+            effective with { Phase = "deliver" },
+            DeliverEventAsync,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<RuntimeEventActionInvocation> DeliverEventAsync(
+        RuntimeEventActionInvocation deliveryInvocation, CancellationToken deliveryCt)
+    {
+        if (deliveryInvocation.Payload is not RuntimeEventPayload eventPayload)
+        {
+            throw new KernelActionExecutionException(
+                "The event delivery action returned an invalid payload.");
+        }
+
+        await _eventDispatcher.PublishAsync(
+            RuntimeEventDefinitions.Committed,
+            eventPayload.Validate(),
+            deliveryCt).ConfigureAwait(false);
+        if (deliveryInvocation.Delivery != EventDelivery.Inline)
+        {
+            await _eventDeliverySink.EnqueueAsync(
+                RuntimeEventDefinitions.CommittedKey,
+                new EventEnvelope<RuntimeEventPayload>(
+                    deliveryInvocation.EventId,
+                    null,
+                    Guid.NewGuid(),
+                    DateTimeOffset.UtcNow,
+                    RuntimeEventDefinitions.SourceId,
+                    eventPayload),
+                deliveryInvocation.Delivery,
+                deliveryCt,
+                "runtime-event-outbox").ConfigureAwait(false);
+        }
+
+        return deliveryInvocation;
     }
 
     private static void ValidateEventInvocation(
@@ -278,30 +294,8 @@ public sealed class RuntimeKernelAdapter :
                 CreateHostExecutionContext(),
                 Graph.GetStandardAction(actionKey),
                 new KernelActionEnvelope(actionKey, invocation),
-                async (envelope, ct) =>
-                {
-                    var effective = NormalizeEventInvocation(envelope.Action.Payload, actionKey);
-
-                    if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
-                    {
-                        var repeated = await terminalResult.Task.WaitAsync(ct).ConfigureAwait(false);
-                        return (object?)repeated ?? throw new KernelActionExecutionException(
-                            $"Event action '{actionKey.Value}' returned a null repeated result.");
-                    }
-
-                    try
-                    {
-                        var value = await terminal(effective, ct).ConfigureAwait(false);
-                        terminalResult.TrySetResult(value);
-                        return (object?)value ?? throw new KernelActionExecutionException(
-                            $"Event action '{actionKey.Value}' returned a null result.");
-                    }
-                    catch (Exception exception)
-                    {
-                        terminalResult.TrySetException(exception);
-                        throw;
-                    }
-                },
+                (envelope, ct) => InvokeEventTerminalAsync(envelope, actionKey, terminal,
+                    terminalResult, () => Interlocked.CompareExchange(ref terminalState, 1, 0) == 0, ct),
                 Graph.ActionSnapshot,
                 cancellationToken).ConfigureAwait(false);
 
@@ -329,6 +323,37 @@ public sealed class RuntimeKernelAdapter :
         {
             await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: false).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
+            throw;
+        }
+    }
+
+    private static async ValueTask<object> InvokeEventTerminalAsync<TResult>(
+        ActionContext<KernelActionEnvelope> envelope,
+        SharpClawActionKey actionKey,
+        Func<RuntimeEventActionInvocation, CancellationToken, ValueTask<TResult>> terminal,
+        TaskCompletionSource<TResult> terminalResult,
+        Func<bool> tryStartTerminal,
+        CancellationToken ct)
+    {
+        var effective = NormalizeEventInvocation(envelope.Action.Payload, actionKey);
+
+        if (!tryStartTerminal())
+        {
+            var repeated = await terminalResult.Task.WaitAsync(ct).ConfigureAwait(false);
+            return (object?)repeated ?? throw new KernelActionExecutionException(
+                $"Event action '{actionKey.Value}' returned a null repeated result.");
+        }
+
+        try
+        {
+            var value = await terminal(effective, ct).ConfigureAwait(false);
+            terminalResult.TrySetResult(value);
+            return (object?)value ?? throw new KernelActionExecutionException(
+                $"Event action '{actionKey.Value}' returned a null result.");
+        }
+        catch (Exception exception)
+        {
+            terminalResult.TrySetException(exception);
             throw;
         }
     }
@@ -446,7 +471,7 @@ public sealed class RuntimeKernelAdapter :
         }
     }
 
-    internal KernelActionExecutionContext CreateCliExecutionContext(
+    internal static KernelActionExecutionContext CreateCliExecutionContext(
         RequestPrincipal? caller = null,
         ExtensionFeatureSet? features = null) =>
         CreateHostExecutionContext(caller, features);
@@ -604,9 +629,11 @@ public sealed class RuntimeKernelAdapter :
                 }
 
                 if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
+#pragma warning disable VSTHRD003 // Repeated context-free invocations must join the same request terminal; the completion has no UI or JoinableTask dependency.
                     return (object?)await terminalResult.Task.ConfigureAwait(false)
                         ?? throw new KernelActionExecutionException(
                             "Runtime request terminal returned a null repeated result.");
+#pragma warning restore VSTHRD003
 
                 try
                 {
@@ -634,6 +661,11 @@ public sealed class RuntimeKernelAdapter :
                 "Runtime request action completed without running its terminal.");
         }
 
+        return RequireRequestResult<TResult>(result);
+    }
+
+    private static TResult RequireRequestResult<TResult>(object? result)
+    {
         if (result is not TResult typedResult)
         {
             throw new KernelActionExecutionException(
@@ -811,13 +843,19 @@ public sealed class RuntimeKernelAdapter :
         }
         finally
         {
-            linkedCancellation.Cancel();
             try
             {
-                await dispatchTask.ConfigureAwait(false);
+                await linkedCancellation.CancelAsync().ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            finally
             {
+                try
+                {
+                    await dispatchTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                }
             }
         }
     }
@@ -869,10 +907,12 @@ public sealed class RuntimeKernelAdapter :
                     "Runtime request stream action completed without running its terminal.");
             }
         }
+#pragma warning disable CA1031 // The channel is the failure transport to the stream reader; complete it with the exact dispatch exception below.
         catch (Exception exception)
         {
             failure = exception;
         }
+#pragma warning restore CA1031
         finally
         {
             writer.TryComplete(failure);
@@ -939,8 +979,13 @@ public sealed class RuntimeKernelAdapter :
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(hostVersion);
-        if (_started)
-            throw new InvalidOperationException("The Runtime kernel has already started.");
+        lock (_stopGate)
+        {
+            if (_started)
+                throw new InvalidOperationException("The Runtime kernel has already started.");
+            if (_stopTask is { IsCompleted: false })
+                throw new InvalidOperationException("The Runtime kernel is still stopping.");
+        }
 
         var effectiveCaller = caller ?? RequestPrincipal.Anonymous;
         var effectiveFeatures = features ?? ExtensionFeatureSet.Empty;
@@ -954,120 +999,106 @@ public sealed class RuntimeKernelAdapter :
                 effectiveFeatures,
                 ct),
             cancellationToken).ConfigureAwait(false);
-        _started = true;
+        lock (_stopGate)
+        {
+            _stopTask = null;
+            _started = true;
+        }
     }
 
-    public async ValueTask StopAsync(
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1068", Justification = "Preserve the published StopAsync parameter order and optional callback defaults for existing positional and named callers.")]
+    public ValueTask StopAsync(
         CancellationToken cancellationToken = default,
         Func<CancellationToken, ValueTask>? onPrepare = null,
         Func<CancellationToken, ValueTask>? onComplete = null)
     {
-        if (!_started)
-            return;
-
-        var executionContext = CreateHostExecutionContext();
-        var prepare = onPrepare ?? (static _ => ValueTask.CompletedTask);
-        var completion = onComplete ?? (static _ => ValueTask.CompletedTask);
-        var prepareInvoked = false;
-        var participantStopInvoked = 0;
-        var completionInvoked = false;
-        ExceptionDispatchInfo? failure = null;
-
-        async ValueTask PrepareHostAndParticipantsAsync(CancellationToken _)
+        lock (_stopGate)
         {
-            prepareInvoked = true;
-            ExceptionDispatchInfo? prepareFailure = null;
-            try
-            {
-                await prepare(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                prepareFailure = ExceptionDispatchInfo.Capture(exception);
-            }
-
-            if (Interlocked.Exchange(ref participantStopInvoked, 1) == 0)
-            {
-                try
-                {
-                    await StopParticipantsAsync(CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    prepareFailure ??= ExceptionDispatchInfo.Capture(exception);
-                }
-            }
-
-            prepareFailure?.Throw();
+            if (_stopTask is { } stopping)
+                return new ValueTask(stopping);
+            if (!_started)
+                return ValueTask.CompletedTask;
+            _stopTask = StopCoreAsync(onPrepare, onComplete, cancellationToken);
+            return new ValueTask(_stopTask);
         }
+    }
 
-        async ValueTask CompleteHostAsync(CancellationToken _)
+    private async Task StopCoreAsync(
+        Func<CancellationToken, ValueTask>? onPrepare,
+        Func<CancellationToken, ValueTask>? onComplete,
+        CancellationToken cancellationToken)
+    {
+        var executionContext = CreateHostExecutionContext();
+        var prepareInvoked = false;
+        var completionInvoked = false;
+        var prepare = CreateStopPreparation(onPrepare ?? (static _ => ValueTask.CompletedTask),
+            () => prepareInvoked = true);
+        var completion = onComplete ?? (static _ => ValueTask.CompletedTask);
+        ValueTask CompleteHostAsync(CancellationToken _)
         {
             completionInvoked = true;
-            await completion(CancellationToken.None).ConfigureAwait(false);
+            return completion(CancellationToken.None);
         }
-
+        ExceptionDispatchInfo? failure = null;
         try
         {
             try
             {
-                await RunRuntimeLifecycleActionCoreAsync(
-                    RuntimeLifecycleActionCatalog.StopPrepare,
-                    null,
-                    executionContext,
-                    PrepareHostAndParticipantsAsync,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                failure = ExceptionDispatchInfo.Capture(exception);
+                failure = await CaptureShutdownFailureAsync(
+                    () => RunRuntimeLifecycleActionCoreAsync(RuntimeLifecycleActionCatalog.StopPrepare,
+                        null, executionContext, prepare, cancellationToken), failure).ConfigureAwait(false);
             }
             finally
             {
                 if (!prepareInvoked)
-                {
-                    try
-                    {
-                        await PrepareHostAndParticipantsAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch (Exception exception)
-                    {
-                        failure ??= ExceptionDispatchInfo.Capture(exception);
-                    }
-                }
-
+                    failure = await CaptureShutdownFailureAsync(
+                        () => prepare(CancellationToken.None), failure).ConfigureAwait(false);
                 _started = false;
-                try
-                {
-                    await RunRuntimeLifecycleActionCoreAsync(
-                        RuntimeLifecycleActionCatalog.StopComplete,
-                        null,
-                        executionContext,
-                        CompleteHostAsync,
-                        CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    failure ??= ExceptionDispatchInfo.Capture(exception);
-                }
+                failure = await CaptureShutdownFailureAsync(
+                    () => RunRuntimeLifecycleActionCoreAsync(RuntimeLifecycleActionCatalog.StopComplete,
+                        null, executionContext, CompleteHostAsync, CancellationToken.None), failure).ConfigureAwait(false);
             }
         }
         finally
         {
             if (!completionInvoked)
-            {
-                try
-                {
-                    await completion(CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    failure ??= ExceptionDispatchInfo.Capture(exception);
-                }
-            }
+                failure = await CaptureShutdownFailureAsync(
+                    () => completion(CancellationToken.None), failure).ConfigureAwait(false);
         }
-
         failure?.Throw();
+    }
+
+    private Func<CancellationToken, ValueTask> CreateStopPreparation(
+        Func<CancellationToken, ValueTask> prepare, Action markPreparationInvoked)
+    {
+        var participantStopInvoked = 0;
+        async ValueTask PrepareHostAndParticipantsAsync(CancellationToken _)
+        {
+            markPreparationInvoked();
+            var failure = await CaptureShutdownFailureAsync(
+                () => prepare(CancellationToken.None), null).ConfigureAwait(false);
+            if (Interlocked.Exchange(ref participantStopInvoked, 1) == 0)
+                failure = await CaptureShutdownFailureAsync(
+                    () => StopParticipantsAsync(CancellationToken.None), failure).ConfigureAwait(false);
+            failure?.Throw();
+        }
+        return PrepareHostAndParticipantsAsync;
+    }
+
+    private static async ValueTask<ExceptionDispatchInfo?> CaptureShutdownFailureAsync(
+        Func<ValueTask> operation, ExceptionDispatchInfo? failure)
+    {
+        try
+        {
+            await operation().ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Shutdown must complete later host and participant cleanup even when an earlier step fails; StopAsync rethrows the first captured failure.
+        catch (Exception exception)
+        {
+            failure ??= ExceptionDispatchInfo.Capture(exception);
+        }
+#pragma warning restore CA1031
+        return failure;
     }
 
     private async ValueTask RunRuntimeLifecycleActionCoreAsync(
@@ -1133,10 +1164,12 @@ public sealed class RuntimeKernelAdapter :
             {
                 await _startedServices[index].StopAsync(cancellationToken).ConfigureAwait(false);
             }
+#pragma warning disable CA1031 // Every started participant must be stopped before the first failure is rethrown below.
             catch (Exception exception)
             {
                 failure ??= ExceptionDispatchInfo.Capture(exception);
             }
+#pragma warning restore CA1031
         }
         _startedServices.Clear();
         failure?.Throw();
@@ -1154,6 +1187,33 @@ public sealed class RuntimeKernelAdapter :
     private static KernelGraphCompileOptions AddRuntimeOwnedGrants(
         KernelGraphCompileOptions? options,
         KernelJobsBindings jobsBindings)
+    {
+        var actionRegistrationGrants = CreateRuntimeActionGrants(options, jobsBindings);
+        var eventRegistrationGrants = CreateRuntimeEventGrants(options);
+
+        return new KernelGraphCompileOptions
+        {
+            SupportedActionCapabilities = options?.SupportedActionCapabilities
+                ?? new KernelGraphCompileOptions().SupportedActionCapabilities,
+            SupportedEventCapabilities = options?.SupportedEventCapabilities
+                ?? new KernelGraphCompileOptions().SupportedEventCapabilities,
+            ActionCapabilityGrants = options?.ActionCapabilityGrants,
+            ActionRegistrationCapabilityGrants = actionRegistrationGrants,
+            EventCapabilityGrants = options?.EventCapabilityGrants,
+            EventRegistrationCapabilityGrants = eventRegistrationGrants,
+            SensitiveActionApprovals = (options?.SensitiveActionApprovals ?? [])
+                .Concat(jobsBindings.Approvals)
+                .ToArray(),
+            ExternalSensitiveActionApprovals = options?.ExternalSensitiveActionApprovals ?? [],
+            SensitiveEventApprovals = options?.SensitiveEventApprovals ?? [],
+            ExternalSensitiveEventApprovals = options?.ExternalSensitiveEventApprovals ?? [],
+            MaximumActionDepth = options?.MaximumActionDepth
+                ?? new KernelGraphCompileOptions().MaximumActionDepth,
+        };
+    }
+
+    private static Dictionary<string, IReadOnlyDictionary<string, ActionInterceptionCapabilities>> CreateRuntimeActionGrants(
+        KernelGraphCompileOptions? options, KernelJobsBindings jobsBindings)
     {
         var actionRegistrationGrants = options?.ActionRegistrationCapabilityGrants is { } existingActionGrants
             ? existingActionGrants.ToDictionary(
@@ -1175,6 +1235,12 @@ public sealed class RuntimeKernelAdapter :
                     RuntimeStartupActionDefinitions.Initialize.Capabilities,
             };
 
+        return actionRegistrationGrants;
+    }
+
+    private static Dictionary<string, IReadOnlyDictionary<string, EventInterceptionCapabilities>> CreateRuntimeEventGrants(
+        KernelGraphCompileOptions? options)
+    {
         var eventRegistrationGrants = options?.EventRegistrationCapabilityGrants is { } existing
             ? existing.ToDictionary(
                 pair => pair.Key,
@@ -1199,25 +1265,7 @@ public sealed class RuntimeKernelAdapter :
             RuntimeEventDefinitions.Committed.Capabilities;
         eventRegistrationGrants[RuntimeEventDefinitions.SourceId] = runtimeEventGrant;
 
-        return new KernelGraphCompileOptions
-        {
-            SupportedActionCapabilities = options?.SupportedActionCapabilities
-                ?? new KernelGraphCompileOptions().SupportedActionCapabilities,
-            SupportedEventCapabilities = options?.SupportedEventCapabilities
-                ?? new KernelGraphCompileOptions().SupportedEventCapabilities,
-            ActionCapabilityGrants = options?.ActionCapabilityGrants,
-            ActionRegistrationCapabilityGrants = actionRegistrationGrants,
-            EventCapabilityGrants = options?.EventCapabilityGrants,
-            EventRegistrationCapabilityGrants = eventRegistrationGrants,
-            SensitiveActionApprovals = (options?.SensitiveActionApprovals ?? [])
-                .Concat(jobsBindings.Approvals)
-                .ToArray(),
-            ExternalSensitiveActionApprovals = options?.ExternalSensitiveActionApprovals ?? [],
-            SensitiveEventApprovals = options?.SensitiveEventApprovals ?? [],
-            ExternalSensitiveEventApprovals = options?.ExternalSensitiveEventApprovals ?? [],
-            MaximumActionDepth = options?.MaximumActionDepth
-                ?? new KernelGraphCompileOptions().MaximumActionDepth,
-        };
+        return eventRegistrationGrants;
     }
 
     private static KernelGraphCompileOptions MergeExternalBehaviorAuthority(
@@ -1235,58 +1283,8 @@ public sealed class RuntimeKernelAdapter :
         foreach (var external in authorities)
         {
             ValidateExternalAuthority(external);
-            var contributionActionGrants = actionRegistrationGrants.TryGetValue(external.SourceId, out var existingActions)
-                ? new Dictionary<string, ActionInterceptionCapabilities>(existingActions, StringComparer.Ordinal)
-                : new Dictionary<string, ActionInterceptionCapabilities>(StringComparer.Ordinal);
-            foreach (var grantGroup in external.Authorization.ActionGrants
-                         .GroupBy(grant => grant.ActionKey.Value, StringComparer.Ordinal))
-            {
-                var grants = grantGroup.Distinct().ToArray();
-                if (grants.Length != 1)
-                {
-                    throw new KernelGraphCompilationException(
-                        $"External source '{external.SourceId}' has conflicting grants for action '{grantGroup.Key}'.");
-                }
-
-                var grant = grants[0];
-                MergeActionGrant(external.SourceId, contributionActionGrants, grant);
-                if (grant.SensitiveApproved)
-                {
-                    AddExternalActionApprovals(
-                        external.SourceId,
-                        grant,
-                        external.Discovery.Actions,
-                        external.Discovery.ActionDefinitions,
-                        actionApprovals);
-                }
-            }
-            actionRegistrationGrants[external.SourceId] = contributionActionGrants;
-
-            var contributionEventGrants = eventRegistrationGrants.TryGetValue(external.SourceId, out var existingEvents)
-                ? new Dictionary<string, EventInterceptionCapabilities>(existingEvents, StringComparer.Ordinal)
-                : new Dictionary<string, EventInterceptionCapabilities>(StringComparer.Ordinal);
-            foreach (var grantGroup in external.Authorization.EventGrants
-                         .GroupBy(grant => grant.EventKey.Value, StringComparer.Ordinal))
-            {
-                var grants = grantGroup.Distinct().ToArray();
-                if (grants.Length != 1)
-                {
-                    throw new KernelGraphCompilationException(
-                        $"External source '{external.SourceId}' has conflicting grants for event '{grantGroup.Key}'.");
-                }
-
-                var grant = grants[0];
-                MergeEventGrant(external.SourceId, contributionEventGrants, grant);
-                if (grant.SensitiveApproved)
-                {
-                    AddExternalEventApprovals(
-                        external.SourceId,
-                        grant,
-                        external.Discovery.Events,
-                        eventApprovals);
-                }
-            }
-            eventRegistrationGrants[external.SourceId] = contributionEventGrants;
+            MergeExternalActionAuthority(external, actionRegistrationGrants, actionApprovals);
+            MergeExternalEventAuthority(external, eventRegistrationGrants, eventApprovals);
         }
 
         return new KernelGraphCompileOptions
@@ -1305,6 +1303,71 @@ public sealed class RuntimeKernelAdapter :
             ExternalSensitiveEventApprovals = eventApprovals.ToArray(),
             MaximumActionDepth = options?.MaximumActionDepth ?? defaults.MaximumActionDepth,
         };
+    }
+
+    private static void MergeExternalActionAuthority(
+        IExternalBehaviorAuthority external,
+        Dictionary<string, IReadOnlyDictionary<string, ActionInterceptionCapabilities>> actionRegistrationGrants,
+        HashSet<KernelExternalSensitiveActionApproval> actionApprovals)
+    {
+        var contributionActionGrants = actionRegistrationGrants.TryGetValue(external.SourceId, out var existingActions)
+            ? new Dictionary<string, ActionInterceptionCapabilities>(existingActions, StringComparer.Ordinal)
+            : new Dictionary<string, ActionInterceptionCapabilities>(StringComparer.Ordinal);
+        foreach (var grantGroup in external.Authorization.ActionGrants
+                     .GroupBy(grant => grant.ActionKey.Value, StringComparer.Ordinal))
+        {
+            var grants = grantGroup.Distinct().ToArray();
+            if (grants.Length != 1)
+            {
+                throw new KernelGraphCompilationException(
+                    $"External source '{external.SourceId}' has conflicting grants for action '{grantGroup.Key}'.");
+            }
+
+            var grant = grants[0];
+            MergeActionGrant(external.SourceId, contributionActionGrants, grant);
+            if (grant.SensitiveApproved)
+            {
+                AddExternalActionApprovals(
+                    external.SourceId,
+                    grant,
+                    external.Discovery.Actions,
+                    external.Discovery.ActionDefinitions,
+                    actionApprovals);
+            }
+        }
+        actionRegistrationGrants[external.SourceId] = contributionActionGrants;
+    }
+
+    private static void MergeExternalEventAuthority(
+        IExternalBehaviorAuthority external,
+        Dictionary<string, IReadOnlyDictionary<string, EventInterceptionCapabilities>> eventRegistrationGrants,
+        HashSet<KernelExternalSensitiveEventApproval> eventApprovals)
+    {
+        var contributionEventGrants = eventRegistrationGrants.TryGetValue(external.SourceId, out var existingEvents)
+            ? new Dictionary<string, EventInterceptionCapabilities>(existingEvents, StringComparer.Ordinal)
+            : new Dictionary<string, EventInterceptionCapabilities>(StringComparer.Ordinal);
+        foreach (var grantGroup in external.Authorization.EventGrants
+                     .GroupBy(grant => grant.EventKey.Value, StringComparer.Ordinal))
+        {
+            var grants = grantGroup.Distinct().ToArray();
+            if (grants.Length != 1)
+            {
+                throw new KernelGraphCompilationException(
+                    $"External source '{external.SourceId}' has conflicting grants for event '{grantGroup.Key}'.");
+            }
+
+            var grant = grants[0];
+            MergeEventGrant(external.SourceId, contributionEventGrants, grant);
+            if (grant.SensitiveApproved)
+            {
+                AddExternalEventApprovals(
+                    external.SourceId,
+                    grant,
+                    external.Discovery.Events,
+                    eventApprovals);
+            }
+        }
+        eventRegistrationGrants[external.SourceId] = contributionEventGrants;
     }
 
     private static Dictionary<string, IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
@@ -1341,7 +1404,7 @@ public sealed class RuntimeKernelAdapter :
 
     private static void MergeActionGrant(
         string SourceId,
-        IDictionary<string, ActionInterceptionCapabilities> target,
+        Dictionary<string, ActionInterceptionCapabilities> target,
         ActionCapabilityGrant grant)
     {
         if (target.TryGetValue(grant.ActionKey.Value, out var existing)
@@ -1355,7 +1418,7 @@ public sealed class RuntimeKernelAdapter :
 
     private static void MergeEventGrant(
         string SourceId,
-        IDictionary<string, EventInterceptionCapabilities> target,
+        Dictionary<string, EventInterceptionCapabilities> target,
         EventCapabilityGrant grant)
     {
         if (target.TryGetValue(grant.EventKey.Value, out var existing)
@@ -1372,12 +1435,11 @@ public sealed class RuntimeKernelAdapter :
         ActionCapabilityGrant grant,
         IReadOnlyList<SidecarActionSubscription> subscriptions,
         IReadOnlyList<SidecarActionDefinition> definitions,
-        ISet<KernelExternalSensitiveActionApproval> approvals)
+        HashSet<KernelExternalSensitiveActionApproval> approvals)
     {
         var matches = subscriptions
-            .Where(subscription => subscription.VersionRange.Contains(grant.ActionVersion))
-            .Where(subscription => subscription.TargetKind != SidecarHookTargetKind.Exact
-                || subscription.ActionKey == grant.ActionKey)
+            .Where(subscription => subscription.VersionRange.Contains(grant.ActionVersion)
+                && (subscription.TargetKind != SidecarHookTargetKind.Exact || subscription.ActionKey == grant.ActionKey))
             .ToArray();
         if (matches.Length > 0)
         {
@@ -1414,12 +1476,11 @@ public sealed class RuntimeKernelAdapter :
         string SourceId,
         EventCapabilityGrant grant,
         IReadOnlyList<SidecarEventSubscription> subscriptions,
-        ISet<KernelExternalSensitiveEventApproval> approvals)
+        HashSet<KernelExternalSensitiveEventApproval> approvals)
     {
         var matches = subscriptions
-            .Where(subscription => subscription.VersionRange.Contains(grant.EventVersion))
-            .Where(subscription => subscription.TargetKind != SidecarHookTargetKind.Exact
-                || subscription.EventKey == grant.EventKey)
+            .Where(subscription => subscription.VersionRange.Contains(grant.EventVersion)
+                && (subscription.TargetKind != SidecarHookTargetKind.Exact || subscription.EventKey == grant.EventKey))
             .ToArray();
         if (matches.Length == 0)
         {
@@ -1474,9 +1535,9 @@ public sealed class RuntimeKernelAdapter :
     {
         var duplicateProviderKeys = plugins
             .GroupBy(plugin => plugin.ProviderKey, StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() > 1)
+            .Where(group => group.Skip(1).Any())
             .Select(group => group.Key)
-            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (duplicateProviderKeys.Length > 0)
         {

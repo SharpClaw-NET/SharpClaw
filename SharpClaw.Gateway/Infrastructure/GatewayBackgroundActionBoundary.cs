@@ -197,7 +197,7 @@ internal sealed class GatewayBackgroundActionBoundary
             cancellationToken).ConfigureAwait(false);
     }
 
-    private KernelActionExecutionContext CreateHostExecutionContext() =>
+    private static KernelActionExecutionContext CreateHostExecutionContext() =>
         new(
             RequestPrincipal.Anonymous,
             ExtensionFeatureSet.Empty,

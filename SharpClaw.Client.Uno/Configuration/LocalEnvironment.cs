@@ -16,6 +16,8 @@ public static class LocalEnvironment
     public const string DefaultApiUrl = "http://127.0.0.1:48923";
     public const string DefaultGatewayUrl = "http://0.0.0.0:48924";
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1055",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public static string LoadApiUrl(bool isDevelopment = false)
     {
         var config = BuildConfiguration(isDevelopment);
@@ -36,6 +38,8 @@ public static class LocalEnvironment
         return value is not null && bool.TryParse(value, out var enabled) && enabled;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1055",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public static string LoadGatewayUrl(bool isDevelopment = false)
     {
         var config = BuildConfiguration(isDevelopment);

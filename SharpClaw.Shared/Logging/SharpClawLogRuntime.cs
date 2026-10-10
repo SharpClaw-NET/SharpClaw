@@ -1,4 +1,5 @@
-using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -22,7 +23,8 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
     private readonly DurableSegmentStore _records;
     private readonly Serilog.ILogger _serilogLogger;
     private readonly SharpClawOwnedStoreRetention? _ownedRetention;
-    private int _disposed;
+    private readonly Lock _disposeGate = new();
+    private Task? _disposeTask;
 
     private SharpClawLogRuntime(
         string appName,
@@ -48,6 +50,7 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
     public SharpClawLogDispatcher Dispatcher { get; }
     public Serilog.ILogger SerilogLogger => _serilogLogger;
     public Exception? RetentionFailure => _ownedRetention?.Failure;
+    [SuppressMessage("Design", "RCS1210", Justification = "The published nullable property represents the absence of an owned retention loop; returning a completed task would change that contract.")]
     public Task? RetentionFirstRun => _ownedRetention?.FirstRun;
 
     public Task<DurableOperationalStreamCatalog> EnumerateOperationalStreamsAsync(
@@ -55,6 +58,7 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
         CancellationToken cancellationToken = default) =>
         _records.EnumerateOperationalStreamsAsync(options, cancellationToken);
 
+    [SuppressMessage("ApiDesign", "RS0026", Justification = "These existing published overloads and optional defaults are retained for source compatibility; no optional overload is being added.")]
     public static SharpClawLogRuntime Create(
         string appName,
         DurableSegmentStore records,
@@ -75,6 +79,7 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
             retentionOptions: retentionOptions);
     }
 
+    [SuppressMessage("ApiDesign", "RS0026", Justification = "These existing published overloads and optional defaults are retained for source compatibility; no optional overload is being added.")]
     public static SharpClawLogRuntime Create(
         string appName,
         SharpClawInstancePaths paths,
@@ -82,7 +87,9 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
         Guid? bootId = null,
         SharpClawOwnedStoreRetentionOptions? retentionOptions = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appName);
         ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(options);
         paths.EnsureDirectories();
         var rootKey = EncryptionKeyResolver.ResolveKey(paths)
             ?? throw new InvalidOperationException("SharpClaw instance encryption key is unavailable.");
@@ -101,7 +108,8 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
             retentionOptions: retentionOptions);
     }
 
-    private static SharpClawLogRuntime CreateCore(
+    [SuppressMessage("Usage", "VSTHRD002", Justification = "The published factory is synchronous. Failure cleanup joins only owned background work, whose continuations use ConfigureAwait(false), before rethrowing construction failure.")]
+    internal static SharpClawLogRuntime CreateCore(
         string appName,
         DurableSegmentStore records,
         SharpClawLoggingOptions options,
@@ -110,51 +118,86 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
         SharpClawOwnedStoreRetentionOptions? retentionOptions)
     {
         var resolvedBootId = bootId ?? Guid.NewGuid();
-        var dispatcher = new SharpClawLogDispatcher(
-            records,
-            appName,
-            resolvedBootId,
-            options);
-        var logger = new LoggerConfiguration()
-            .MinimumLevel.Is(options.MinimumLevel)
-            .MinimumLevel.Override("Microsoft", options.MicrosoftMinimumLevel)
-            .MinimumLevel.Override("Microsoft.AspNetCore", options.AspNetCoreMinimumLevel)
-            .MinimumLevel.Override(
-                "Microsoft.EntityFrameworkCore",
-                options.EntityFrameworkCoreMinimumLevel)
-            .MinimumLevel.Override("Uno", options.UnoMinimumLevel)
-            .Enrich.FromLogContext()
-            .WriteTo.Sink(new SharpClawLogSink(dispatcher))
-            .CreateLogger();
-        var ownedRetention = ownsStore
-            ? new SharpClawOwnedStoreRetention(records, retentionOptions)
-            : null;
-        return new SharpClawLogRuntime(
-            appName,
-            resolvedBootId,
-            records,
-            dispatcher,
-            logger,
-            ownsStore,
-            ownedRetention);
+        SharpClawLogDispatcher? dispatcher = null;
+        Serilog.ILogger? logger = null;
+        SharpClawOwnedStoreRetention? ownedRetention = null;
+        try
+        {
+            dispatcher = new SharpClawLogDispatcher(records, appName, resolvedBootId, options);
+            logger = new LoggerConfiguration()
+                .MinimumLevel.Is(options.MinimumLevel)
+                .MinimumLevel.Override("Microsoft", options.MicrosoftMinimumLevel)
+                .MinimumLevel.Override("Microsoft.AspNetCore", options.AspNetCoreMinimumLevel)
+                .MinimumLevel.Override("Microsoft.EntityFrameworkCore", options.EntityFrameworkCoreMinimumLevel)
+                .MinimumLevel.Override("Uno", options.UnoMinimumLevel)
+                .Enrich.FromLogContext()
+                .WriteTo.Sink(new SharpClawLogSink(dispatcher))
+                .CreateLogger();
+            ownedRetention = ownsStore ? new SharpClawOwnedStoreRetention(records, retentionOptions) : null;
+            return new SharpClawLogRuntime(appName, resolvedBootId, records, dispatcher,
+                logger, ownsStore, ownedRetention);
+        }
+        catch (Exception failure)
+        {
+            DisposeResourcesAsync(ownedRetention, dispatcher, logger,
+                ownsStore ? records : null, failure).ConfigureAwait(false).GetAwaiter().GetResult();
+            throw;
+        }
     }
 
     public Task FlushAndSealAsync(CancellationToken cancellationToken = default) =>
         Dispatcher.FlushAndSealAsync(cancellationToken);
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-            return;
-
-        if (_ownedRetention is not null)
-            await _ownedRetention.DisposeAsync().ConfigureAwait(false);
-        await Dispatcher.DisposeAsync().ConfigureAwait(false);
-        if (_serilogLogger is IDisposable disposable)
-            disposable.Dispose();
-        if (_ownsStore)
-            await _records.DisposeAsync().ConfigureAwait(false);
+        lock (_disposeGate)
+        {
+            return new ValueTask(_disposeTask ??= DisposeResourcesAsync(
+                _ownedRetention, Dispatcher, _serilogLogger, _ownsStore ? _records : null));
+        }
     }
 
-    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+    [SuppressMessage("Design", "CA1031", Justification = "Cleanup attempts every owned resource and then rethrows the first failure, or an aggregate retaining all failures.")]
+    private static async Task DisposeResourcesAsync(
+        SharpClawOwnedStoreRetention? retention,
+        SharpClawLogDispatcher? dispatcher,
+        Serilog.ILogger? logger,
+        DurableSegmentStore? ownedStore,
+        Exception? originalFailure = null)
+    {
+        var failures = new List<Exception>();
+        if (originalFailure is not null)
+            failures.Add(originalFailure);
+        try
+        {
+            if (retention is not null)
+                await retention.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception failure) { failures.Add(failure); }
+        try
+        {
+            if (dispatcher is not null)
+                await dispatcher.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception failure) { failures.Add(failure); }
+        try
+        {
+            if (logger is IDisposable disposable)
+                disposable.Dispose();
+        }
+        catch (Exception failure) { failures.Add(failure); }
+        try
+        {
+            if (ownedStore is not null)
+                await ownedStore.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception failure) { failures.Add(failure); }
+        if (failures.Count == 1)
+            ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1)
+            throw new AggregateException(failures);
+    }
+
+    [SuppressMessage("Usage", "VSTHRD002", Justification = "IDisposable is retained for published synchronous consumers; all asynchronous cleanup uses ConfigureAwait(false) and joins owned background work.")]
+    public void Dispose() => DisposeAsync().AsTask().ConfigureAwait(false).GetAwaiter().GetResult();
 }

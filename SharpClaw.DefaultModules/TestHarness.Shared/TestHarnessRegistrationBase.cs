@@ -7,15 +7,7 @@ using SharpClaw.ModuleSDK;
 namespace SharpClaw.DefaultPackages.TestHarness;
 
 
-#if TEST_HARNESS_OUT_OF_PROCESS
-public sealed class TestHarnessOutOfProcessRegistration()
-    : TestHarnessRegistrationBase(TestHarnessConstants.OutOfProcessRegistrationId, "Test Harness Out Of Process");
-#endif
 
-#if TEST_HARNESS_IN_PROCESS
-public sealed class TestHarnessInProcessRegistration()
-    : TestHarnessRegistrationBase(TestHarnessConstants.InProcessRegistrationId, "Test Harness In Process");
-#endif
 
 /// <summary>Provides deterministic provider and direct-tool behavior for host tests.</summary>
 public abstract class TestHarnessRegistrationBase(string SourceId, string displayName) : ISharpClawModule
@@ -45,8 +37,12 @@ public abstract class TestHarnessRegistrationBase(string SourceId, string displa
 #endif
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822",
+        Justification = "The test harness exposes diagnostics through this existing instance API; making it static would break consumers.")]
     public int PermissionDescriptorBuilds => 0;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822",
+        Justification = "Existing harness consumers invoke the per-registration diagnostic reset as an instance operation.")]
     public void ResetDiagnostics()
     {
     }
@@ -94,18 +90,7 @@ public abstract class TestHarnessRegistrationBase(string SourceId, string displa
 
     private static JsonElement ToolSchema()
     {
-        using var document = JsonDocument.Parse("""
-            {
-              "type": "object",
-              "properties": {
-                "latencyMs": { "type": "integer" },
-                "payloadBytes": { "type": "integer" },
-                "fail": { "type": "boolean" },
-                "result": { "type": "string" }
-              },
-              "additionalProperties": false
-            }
-            """);
+        using var document = JsonDocument.Parse("{\n  \"type\": \"object\",\n  \"properties\": {\n    \"latencyMs\": { \"type\": \"integer\" },\n    \"payloadBytes\": { \"type\": \"integer\" },\n    \"fail\": { \"type\": \"boolean\" },\n    \"result\": { \"type\": \"string\" }\n  },\n  \"additionalProperties\": false\n}");
         return document.RootElement.Clone();
     }
 }

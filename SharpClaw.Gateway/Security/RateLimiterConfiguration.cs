@@ -1,6 +1,7 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
 using SharpClaw.Gateway.Infrastructure;
+using System.Globalization;
 
 namespace SharpClaw.Gateway.Security;
 
@@ -22,15 +23,15 @@ internal static class RateLimiterConfiguration
                 var path = context.HttpContext.Request.Path.Value ?? string.Empty;
                 var limit = ResolveRateLimit(path);
 
-                context.HttpContext.Response.Headers["X-RateLimit-Limit"] = limit.ToString();
+                context.HttpContext.Response.Headers["X-RateLimit-Limit"] = limit.ToString(CultureInfo.InvariantCulture);
                 context.HttpContext.Response.Headers["X-RateLimit-Remaining"] = "0";
 
                 if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
                 {
                     context.HttpContext.Response.Headers.RetryAfter =
-                        ((int)retryAfter.TotalSeconds).ToString();
+                        ((int)retryAfter.TotalSeconds).ToString(CultureInfo.InvariantCulture);
                     context.HttpContext.Response.Headers["X-RateLimit-Reset"] =
-                        DateTimeOffset.UtcNow.Add(retryAfter).ToUnixTimeSeconds().ToString();
+                        DateTimeOffset.UtcNow.Add(retryAfter).ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
                 }
 
                 await GatewayErrors.WriteAsync(

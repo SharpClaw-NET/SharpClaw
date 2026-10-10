@@ -15,54 +15,33 @@ public sealed partial class MainPage
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private async void OnMessageKeyDown(object sender, KeyRoutedEventArgs e)
+    private void OnMessageKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key != Windows.System.VirtualKey.Enter)
-            return;
-
-        if (!_canChat || _isSending || string.IsNullOrWhiteSpace(MessageInput.Text))
-            return;
-
+        if (e.Key != Windows.System.VirtualKey.Enter || !_canChat || _isSending || string.IsNullOrWhiteSpace(MessageInput.Text)) return;
         e.Handled = true;
-        await SendMessageAsync().ConfigureAwait(true);
+        ClientUiEvent.Observe(SendMessageAsync);
     }
 
-    private async void OnSendClick(object sender, RoutedEventArgs e)
+    private void OnSendClick(object sender, RoutedEventArgs e)
     {
         if (_canChat && !_isSending && !string.IsNullOrWhiteSpace(MessageInput.Text))
-            await SendMessageAsync().ConfigureAwait(true);
+            ClientUiEvent.Observe(SendMessageAsync);
     }
 
-    private async void OnCancelClick(object sender, RoutedEventArgs e)
+    private void OnCancelClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
-        if (App.Services?.GetService<ClientActionDispatcher>() is not { } actions)
-            return;
-
-        try
+        if (App.Services?.GetService<ClientActionDispatcher>() is not { } actions) return;
+        await actions.RunCommandAsync("client.chat.cancel", async _ =>
         {
-            await actions.RunCommandAsync(
-                "client.chat.cancel",
-                _ =>
-                {
-                    _streamCts?.Cancel();
-                    return ValueTask.CompletedTask;
-                }).ConfigureAwait(true);
-        }
-        catch
-        {
-            // The stream cancellation path reports the final visible state.
-        }
-    }
+            if (_streamCts is { IsCancellationRequested: false } stream) await stream.CancelAsync().ConfigureAwait(true);
+        }, CancellationToken.None).ConfigureAwait(true);
+    });
 
     private async Task SendMessageAsync()
     {
-        // One owner covers the model check as well as the stream; repeated clicks do not queue sends.
-        if (!_sendGate.Wait(0)) return;
+        // One owner covers readiness as well as the stream; repeated clicks do not queue sends.
+        if (!await _sendGate.WaitAsync(0, CancellationToken.None).ConfigureAwait(true)) return;
         try { await SendMessageCoreAsync().ConfigureAwait(true); }
-        catch (Exception)
-        {
-            // Action rejection/cancellation must not crash an async UI event handler.
-        }
         finally { _sendGate.Release(); }
     }
 
@@ -70,29 +49,51 @@ public sealed partial class MainPage
     {
         var message = MessageInput.Text.Trim();
         if (!_canChat || _isSending || message.Length == 0 ||
-            _pageLifetime is not { IsCancellationRequested: false } lifetime)
-            return;
-
-        // Recheck immediately before transport; a previously ready view is not authority.
+            _pageLifetime is not { IsCancellationRequested: false } lifetime) return;
+        var pageToken = lifetime.Token;
+        if (!await RefreshChatAvailabilityAsync(pageToken).ConfigureAwait(true)) return;
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(pageToken);
         try
         {
-            if (!await RefreshChatAvailabilityAsync(lifetime.Token).ConfigureAwait(true)) return;
+            var assistant = await BeginSendAsync(message, cts, pageToken).ConfigureAwait(true);
+            if (assistant is null) return;
+            await RunChatStreamAsync(message, assistant.Value, cts.Token).ConfigureAwait(true);
         }
-        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { return; }
+        finally
+        {
+            // Admission may publish its CTS before a later action-receipt fault.
+            // The exact CTS identity proves this operation owns the cleanup.
+            if (ReferenceEquals(_streamCts, cts))
+            {
+                try
+                {
+                    await CommitUiStateAsync(_ =>
+                    {
+                        if (!ReferenceEquals(_pageLifetime, lifetime) || pageToken.IsCancellationRequested) return ValueTask.CompletedTask;
+                        _isSending = false;
+                        SetChatAvailability(_canChat);
+                        CancelButton.Visibility = Visibility.Collapsed;
+                        MessageInput.Focus(FocusState.Programmatic);
+                        ScrollToBottom();
+                        return ValueTask.CompletedTask;
+                    }, CancellationToken.None).ConfigureAwait(true);
+                }
+                finally { if (ReferenceEquals(_streamCts, cts)) _streamCts = null; }
+            }
+        }
+    }
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+    private async Task<ChatBubbleRow?> BeginSendAsync(string message, CancellationTokenSource cts, CancellationToken pageToken)
+    {
         ChatBubbleRow assistant = default;
         var accepted = false;
-
         await CommitUiStateAsync(_ =>
         {
-            if (_isSending || !_canChat || lifetime.IsCancellationRequested)
-                return ValueTask.CompletedTask;
-
+            if (_isSending || !_canChat || pageToken.IsCancellationRequested) return ValueTask.CompletedTask;
             accepted = true;
             _isSending = true;
             _streamCts = cts;
-            _streamPageToken = lifetime.Token;
+            _streamPageToken = pageToken;
             MessageInput.Text = string.Empty;
             MessageInput.IsEnabled = false;
             SendButton.IsEnabled = false;
@@ -103,113 +104,79 @@ public sealed partial class MainPage
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "streaming");
             ScrollToBottom();
             return ValueTask.CompletedTask;
-        }).ConfigureAwait(true);
+        }, pageToken).ConfigureAwait(true);
+        return accepted ? assistant : null;
+    }
 
-        if (!accepted)
-            return;
-
-        var streamState = new UnoSseStreamState();
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "Every failed HTTP, SSE or client action is rendered as a failed stream receipt; cancellation has its separate visible outcome and the exception type is journalled.")]
+    private async Task RunChatStreamAsync(string message, ChatBubbleRow assistant, CancellationToken token)
+    {
+        var state = new UnoSseStreamState();
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-        var body = JsonSerializer.Serialize(new UnoDirectChatRequest(message), Json);
-        using var content = new StringContent(body, Encoding.UTF8, "application/json");
-
+        using var content = new StringContent(JsonSerializer.Serialize(new UnoDirectChatRequest(message), Json), Encoding.UTF8, "application/json");
         try
         {
-            await api.ConsumeStreamAsync(
-                "POST",
-                "/chat/stream",
-                content,
-                async (response, streamToken) =>
-                {
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        await CommitStreamStateAsync(
-                            _ =>
-                            {
-                                assistant.Content.Text =
-                                    $"Request failed: {(int)response.StatusCode} {response.ReasonPhrase}";
-                                assistant.Content.Foreground = Brush(0xFF4444);
-                                Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
-                                return ValueTask.CompletedTask;
-                            },
-                            CancellationToken.None).ConfigureAwait(true);
-                        return;
-                    }
-
-                    var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
-                    if (!contentType.Contains("event-stream", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var fallback = await response.Content.ReadAsStringAsync(streamToken).ConfigureAwait(true);
-                        await CommitStreamStateAsync(
-                            _ =>
-                            {
-                                assistant.Content.Text = TerminalUI.Truncate(fallback, 200);
-                                assistant.Content.Foreground = Brush(0xFF4444);
-                                Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
-                                return ValueTask.CompletedTask;
-                            },
-                            CancellationToken.None).ConfigureAwait(true);
-                        return;
-                    }
-
-                    var stream =
-                        await response.Content.ReadAsStreamAsync(streamToken).ConfigureAwait(true);
-                    await using var streamAsyncDisposal = stream.ConfigureAwait(true);
-                    await ReadSseStreamAsync(stream, streamState, assistant, streamToken).ConfigureAwait(true);
-                    if (!streamState.DoneReceived && !streamState.ErrorReceived)
-                        throw new InvalidDataException("The response stream ended before completion.");
-                    await CommitStreamStateAsync(_ =>
-                    {
-                        Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content,
-                            streamState.ErrorReceived ? "failed" : "complete");
-                        return ValueTask.CompletedTask;
-                    }, CancellationToken.None).ConfigureAwait(true);
-                },
-                cts.Token).ConfigureAwait(true);
+            await api.ConsumeStreamAsync("POST", "/chat/stream", content,
+                (response, streamToken) => ConsumeChatResponseAsync(response, state, assistant, streamToken), token).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
-            await CommitStreamStateAsync(
-                _ =>
-                {
-                    assistant.Content.Text = streamState.Text.Length == 0
-                        ? "(cancelled)"
-                        : streamState.Text;
-                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "cancelled");
-                    return ValueTask.CompletedTask;
-                },
-                CancellationToken.None).ConfigureAwait(true);
+            await CommitStreamStateAsync(_ =>
+            {
+                assistant.Content.Text = state.Text.Length == 0 ? "(cancelled)" : state.Text;
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "cancelled");
+                return ValueTask.CompletedTask;
+            }, CancellationToken.None).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
-            await CommitStreamStateAsync(
-                _ =>
-                {
-                    assistant.Content.Text = streamState.Text.Length == 0
-                        ? $"Request failed: {TerminalUI.Truncate(exception.Message, 200)}"
-                        : streamState.Text + $"\nRequest failed: {TerminalUI.Truncate(exception.Message, 200)}";
-                    assistant.Content.Foreground = Brush(0xFF4444);
-                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
-                    return ValueTask.CompletedTask;
-                },
-                CancellationToken.None).ConfigureAwait(true);
-        }
-        finally
-        {
-            await CommitUiStateAsync(_ =>
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            await CommitStreamStateAsync(_ =>
             {
-                if (!ReferenceEquals(_pageLifetime, lifetime)) return ValueTask.CompletedTask;
-                if (ReferenceEquals(_streamCts, cts))
-                    _streamCts = null;
-                _isSending = false;
-                SetChatAvailability(_canChat && !lifetime.IsCancellationRequested);
-                CancelButton.Visibility = Visibility.Collapsed;
-                MessageInput.Focus(FocusState.Programmatic);
-                ScrollToBottom();
+                assistant.Content.Text = state.Text.Length == 0
+                    ? $"Request failed: {TerminalUI.Truncate(exception.Message, 200)}"
+                    : state.Text + $"\nRequest failed: {TerminalUI.Truncate(exception.Message, 200)}";
+                assistant.Content.Foreground = Brush(0xFF4444);
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
                 return ValueTask.CompletedTask;
-            }).ConfigureAwait(true);
+            }, CancellationToken.None).ConfigureAwait(true);
         }
     }
+
+    private async Task ConsumeChatResponseAsync(
+        HttpResponseMessage response, UnoSseStreamState state, ChatBubbleRow assistant, CancellationToken token)
+    {
+        if (!response.IsSuccessStatusCode)
+        {
+            await SetStreamFailureAsync(assistant, $"Request failed: {(int)response.StatusCode} {response.ReasonPhrase}").ConfigureAwait(true);
+            return;
+        }
+        if (!(response.Content.Headers.ContentType?.MediaType ?? string.Empty).Contains("event-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            var fallback = await response.Content.ReadAsStringAsync(token).ConfigureAwait(true);
+            await SetStreamFailureAsync(assistant, TerminalUI.Truncate(fallback, 200)).ConfigureAwait(true);
+            return;
+        }
+        var stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(true);
+        await using var streamAsyncDisposal = stream.ConfigureAwait(true);
+        await ReadSseStreamAsync(stream, state, assistant, token).ConfigureAwait(true);
+        if (!state.DoneReceived && !state.ErrorReceived)
+            throw new InvalidDataException("The response stream ended before completion.");
+        await CommitStreamStateAsync(_ =>
+        {
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, state.ErrorReceived ? "failed" : "complete");
+            return ValueTask.CompletedTask;
+        }, CancellationToken.None).ConfigureAwait(true);
+    }
+
+    private Task SetStreamFailureAsync(ChatBubbleRow assistant, string message) => CommitStreamStateAsync(_ =>
+    {
+        assistant.Content.Text = message;
+        assistant.Content.Foreground = Brush(0xFF4444);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(assistant.Content, "failed");
+        return ValueTask.CompletedTask;
+    }, CancellationToken.None);
 
     private async Task ReadSseStreamAsync(
         Stream stream,

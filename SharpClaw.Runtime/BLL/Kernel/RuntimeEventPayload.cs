@@ -16,9 +16,11 @@ public sealed record RuntimeEventPayload(
         ValidateText(SourceId, nameof(SourceId), 256);
         ValidateText(Summary, nameof(Summary), 2_048);
         if (DataJson is { Length: > 65_536 })
+#pragma warning disable MA0015 // Validation reports the invalid record property, preserving this existing exception contract.
             throw new ArgumentException(
                 "The Runtime event data exceeds the 65536-byte limit.",
                 nameof(DataJson));
+#pragma warning restore MA0015
         return this;
     }
 

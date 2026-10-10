@@ -65,7 +65,7 @@ internal sealed class PublishScriptDeploymentTests
     {
         var project = XDocument.Load(Path.Combine(FindSolutionRoot(), "SharpClaw.Runtime", "Host", "SharpClaw.Runtime.Host.csproj"));
         var reference = project.Descendants("PackageReference")
-            .Single(node => string.Equals(node.Attribute("Include")?.Value, "SharpClaw.SidecarHost.OutOfProcess", StringComparison.Ordinal));
+            .Where(node => string.Equals(node.Attribute("Include")?.Value, "SharpClaw.SidecarHost.OutOfProcess", StringComparison.Ordinal)).Should().ContainSingle().Which;
         reference.Attribute("PrivateAssets")?.Value.Should().Be("all");
         reference.Attribute("Publish")?.Value.Should().Be("true",
             "the SDK otherwise removes a private reference from the self-contained dependency manifest");
@@ -102,7 +102,7 @@ internal sealed class PublishScriptDeploymentTests
         var script = ReadPublishScript();
         var deploymentTypePattern = @"\$deploymentTypes\s*=\s*@\([^)]*""" + Regex.Escape(oldName) + @"""";
 
-        Regex.IsMatch(script, deploymentTypePattern).Should().BeFalse(
+        Regex.IsMatch(script, deploymentTypePattern, RegexOptions.None, TimeSpan.FromSeconds(1)).Should().BeFalse(
             $"{oldName} must not remain as an accepted top-level deployment type");
         script.Should().NotContain(
             $"Publish-{oldName}",
@@ -115,7 +115,7 @@ internal sealed class PublishScriptDeploymentTests
         var match = Regex.Match(
             script,
             pattern,
-            RegexOptions.Singleline | RegexOptions.Multiline | RegexOptions.CultureInvariant);
+            RegexOptions.Singleline | RegexOptions.Multiline | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
         match.Success.Should().BeTrue($"scripts/publish.ps1 must define {functionName}");
         return match.Value;

@@ -28,6 +28,8 @@ public sealed class BootModel
     public bool IsAwaitingInput { get; set; }
 
     /// <summary>Current API base URL (for display / editing).</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public string ApiUrl => _backend.ApiUrl;
 
     internal const int MaxRetries = 3;
@@ -38,6 +40,8 @@ public sealed class BootModel
         !result.Ok && result.CanRetry && attempt < MaxRetries &&
         (_backend.IsExternal || _backend.IsRunning);
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public async ValueTask ApplyCustomUrlAsync(
         string? customUrl,
         CancellationToken cancellationToken = default)
@@ -59,6 +63,8 @@ public sealed class BootModel
     }
 
     /// <summary>Step 1 (silent): ensure the backend process is available.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This diagnostic-step boundary translates any backend, gateway, transport or action failure into an explicit failed StepResult. Caller cancellation is rethrown, and the fault type is observed in the bounded journal.")]
     public async Task<StepResult> RunBackendStepAsync(CancellationToken ct)
     {
         try
@@ -75,6 +81,7 @@ public sealed class BootModel
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, ex);
             // Missing binaries, disabled launch and process-start failures need
             // user intervention; restarting unchanged inputs cannot correct them.
             return new(false, new("Backend", ex.Message, true), CanRetry: false);
@@ -85,6 +92,8 @@ public sealed class BootModel
     /// Step 2: Echo probe — unauthenticated GET /echo.
     /// Polls with retries for bundled backends that need startup time.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This diagnostic-step boundary translates any backend, gateway, transport or action failure into an explicit failed StepResult. Caller cancellation is rethrown, and the fault type is observed in the bounded journal.")]
     public async Task<StepResult> RunEchoStepAsync(CancellationToken ct)
     {
         var maxWait = _backend.IsExternal ? TimeSpan.FromSeconds(5) : BundledStartupProbeBudget;
@@ -121,7 +130,10 @@ public sealed class BootModel
                 lastReason = response.ReasonPhrase;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception ex) { lastEx = ex; }
+            catch (Exception ex)
+            {
+                ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, ex); lastEx = ex;
+            }
 
             try { await Task.Delay(500, ct).ConfigureAwait(true); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -140,6 +152,8 @@ public sealed class BootModel
     /// Step 3: Ping probe — authenticated GET /ping.
     /// Returns an extra API-key diagnostic line via <paramref name="extraDiag"/>.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This diagnostic-step boundary translates any backend, gateway, transport or action failure into an explicit failed StepResult. Caller cancellation is rethrown, and the fault type is observed in the bounded journal.")]
     public async Task<(StepResult Result, DiagnosticLine? ApiKeyLine)> RunPingStepAsync(CancellationToken ct)
     {
         var keyPath = _frontendInstance?.ResolveBackendApiKeyPath(_backend.ApiUrl);
@@ -171,12 +185,13 @@ public sealed class BootModel
         {
             return (new(false, new("Ping", "timed out — API key may be invalid or stale", true)), apiKeyLine);
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("API key file"))
+        catch (InvalidOperationException ex) when (ex.Message.Contains("API key file", StringComparison.Ordinal))
         {
             return (new(false, new("Ping", $"API key unavailable — {ex.Message}", true)), apiKeyLine);
         }
         catch (Exception ex)
         {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, ex);
             return (new(false, new("Ping", ex.Message, true)), apiKeyLine);
         }
     }
@@ -186,6 +201,8 @@ public sealed class BootModel
     /// Non-fatal — the gateway is opt-in and not required for core functionality.
     /// Returns <c>null</c> when the gateway is disabled (skip launch).
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This diagnostic-step boundary translates any backend, gateway, transport or action failure into an explicit failed StepResult. Caller cancellation is rethrown, and the fault type is observed in the bounded journal.")]
     public async Task<StepResult?> RunGatewayStepAsync(CancellationToken ct)
     {
         if (_gateway.SkipLaunch)
@@ -210,6 +227,7 @@ public sealed class BootModel
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, ex);
             // Non-fatal — the core API still works without the gateway.
             return new(false, new("Gateway", ex.Message, true));
         }
@@ -254,25 +272,25 @@ public sealed class BootModel
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("SharpClaw Boot Diagnostics");
         sb.AppendLine(new string('─', 40));
-        sb.AppendLine($"URL:  {_backend.ApiUrl}");
-        sb.AppendLine($"Mode: {(_backend.IsExternal ? "external" : "bundled")}");
-        sb.AppendLine($"Exe:  {(_backend.IsAvailable ? "found" : "NOT FOUND")}");
+        sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"URL:  {_backend.ApiUrl}");
+        sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"Mode: {(_backend.IsExternal ? "external" : "bundled")}");
+        sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"Exe:  {(_backend.IsAvailable ? "found" : "NOT FOUND")}");
         sb.AppendLine();
 
         if (!log.IsDefaultOrEmpty)
         {
             sb.AppendLine("Probe Results:");
             foreach (var line in log)
-                sb.AppendLine($"  {(line.IsError ? "✗" : "✓")} {line.Label}: {line.Result}");
+                sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"  {(line.IsError ? "✗" : "✓")} {line.Label}: {line.Result}");
             sb.AppendLine();
         }
 
         var output = _backend.ProcessOutput;
         if (output.Count > 0)
         {
-            sb.AppendLine($"Process Output ({output.Count} lines):");
+            sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"Process Output ({output.Count} lines):");
             foreach (var line in output)
-                sb.AppendLine($"  {line}");
+                sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"  {line}");
         }
         else
         {

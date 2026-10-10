@@ -6,6 +6,8 @@ using SharpClaw.Core.Kernel;
 namespace SharpClaw.Services;
 
 /// <summary>Routes all Uno commands and state transitions through one Core dispatcher.</summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
+    Justification = "This application-lifetime dispatcher retains reusable managed-only gates; AvailableWaitHandle is never accessed and every acquisition is released in finally. No native wait handle or disposable service is owned by these gates.")]
 public sealed class ClientActionDispatcher
 {
     private readonly KernelGraph _graph;
@@ -187,42 +189,7 @@ public sealed class ClientActionDispatcher
                 static (value, _) => ValueTask.FromResult(value),
                 cancellationToken).ConfigureAwait(true);
 
-            await _navigationGate.WaitAsync(cancellationToken).ConfigureAwait(true);
-            try
-            {
-                if (invocation.ExpectedVersion != Interlocked.Read(ref _navigationVersion))
-                {
-                    throw new ClientActionConflictException(
-                        $"Navigation '{prepared.Route}' conflicted with a newer navigation.");
-                }
-
-                var receipt = new ClientCommitReceipt();
-                var terminalSucceeded = 0;
-                await RunActionAsync(
-                    context,
-                    ClientActionCatalog.NavigationCommit,
-                    prepared,
-                    async (_, token) =>
-                    {
-                        if (Volatile.Read(ref terminalSucceeded) != 0)
-                            return receipt;
-
-                        await terminal(prepared, token).ConfigureAwait(true);
-                        Volatile.Write(ref terminalSucceeded, 1);
-                        return receipt;
-                    },
-                    cancellationToken).ConfigureAwait(true);
-
-                if (Volatile.Read(ref terminalSucceeded) == 0)
-                    throw new ClientActionConflictException(
-                        $"Navigation '{prepared.Route}' was not committed by the host.");
-
-                Interlocked.Increment(ref _navigationVersion);
-            }
-            finally
-            {
-                _navigationGate.Release();
-            }
+            await CommitNavigationAsync(context, invocation, prepared, terminal, cancellationToken).ConfigureAwait(true);
         }
         catch (KernelActionCancelledException)
         {
@@ -241,6 +208,51 @@ public sealed class ClientActionDispatcher
             await TrySignalAsync(context, ClientActionCatalog.CommandFail,
                 new ClientCommandInvocation("navigation", "CLIENT", route, invocation.NavigationId)).ConfigureAwait(true);
             throw;
+        }
+    }
+
+    private async ValueTask CommitNavigationAsync(
+        KernelActionExecutionContext context,
+        ClientNavigationInvocation invocation,
+        ClientNavigationInvocation prepared,
+        Func<ClientNavigationInvocation, CancellationToken, ValueTask> terminal,
+        CancellationToken cancellationToken)
+    {
+        await _navigationGate.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            if (invocation.ExpectedVersion != Interlocked.Read(ref _navigationVersion))
+            {
+                throw new ClientActionConflictException(
+                    $"Navigation '{prepared.Route}' conflicted with a newer navigation.");
+            }
+
+            var receipt = new ClientCommitReceipt();
+            var terminalSucceeded = 0;
+            await RunActionAsync(
+                context,
+                ClientActionCatalog.NavigationCommit,
+                prepared,
+                async (_, token) =>
+                {
+                    if (Volatile.Read(ref terminalSucceeded) != 0)
+                        return receipt;
+
+                    await terminal(prepared, token).ConfigureAwait(true);
+                    Volatile.Write(ref terminalSucceeded, 1);
+                    return receipt;
+                },
+                cancellationToken).ConfigureAwait(true);
+
+            if (Volatile.Read(ref terminalSucceeded) == 0)
+                throw new ClientActionConflictException(
+                    $"Navigation '{prepared.Route}' was not committed by the host.");
+
+            Interlocked.Increment(ref _navigationVersion);
+        }
+        finally
+        {
+            _navigationGate.Release();
         }
     }
 
@@ -272,47 +284,7 @@ public sealed class ClientActionDispatcher
                 invocation,
                 static (value, _) => ValueTask.FromResult(value),
                 cancellationToken).ConfigureAwait(true);
-            var gate = _stateGates.GetOrAdd(stateKey, static _ => new SemaphoreSlim(1, 1));
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(true);
-            try
-            {
-                var currentVersion = GetStateVersion(invocation.StateKey);
-                if (invocation.ExpectedVersion != currentVersion)
-                {
-                    throw new ClientActionConflictException(
-                        $"State '{invocation.StateKey}' changed from version {invocation.ExpectedVersion}.");
-                }
-
-                var receipt = new ClientCommitReceipt();
-                var terminalSucceeded = 0;
-                await RunActionAsync(
-                    context,
-                    ClientActionCatalog.StateCommit,
-                    prepared,
-                    async (_, token) =>
-                    {
-                        if (Volatile.Read(ref terminalSucceeded) != 0)
-                            return receipt;
-
-                        await terminal(token).ConfigureAwait(true);
-                        Volatile.Write(ref terminalSucceeded, 1);
-                        return receipt;
-                    },
-                    cancellationToken).ConfigureAwait(true);
-
-                if (Volatile.Read(ref terminalSucceeded) == 0)
-                    throw new ClientActionConflictException(
-                        $"State '{invocation.StateKey}' was not committed by the host.");
-
-                return _stateVersions.AddOrUpdate(
-                    invocation.StateKey,
-                    1,
-                    static (_, version) => checked(version + 1));
-            }
-            finally
-            {
-                gate.Release();
-            }
+            return await CommitPreparedStateAsync(context, invocation, prepared, terminal, cancellationToken).ConfigureAwait(true);
         }
         catch (KernelActionCancelledException)
         {
@@ -334,6 +306,59 @@ public sealed class ClientActionDispatcher
         }
     }
 
+    private async ValueTask<long> CommitPreparedStateAsync(
+        KernelActionExecutionContext context,
+        ClientStateInvocation invocation,
+        ClientStateInvocation prepared,
+        Func<CancellationToken, ValueTask> terminal,
+        CancellationToken cancellationToken)
+    {
+        var stateKey = invocation.StateKey;
+        var gate = _stateGates.GetOrAdd(stateKey, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            var currentVersion = GetStateVersion(invocation.StateKey);
+            if (invocation.ExpectedVersion != currentVersion)
+            {
+                throw new ClientActionConflictException(
+                    $"State '{invocation.StateKey}' changed from version {invocation.ExpectedVersion}.");
+            }
+
+            var receipt = new ClientCommitReceipt();
+            var terminalSucceeded = 0;
+            await RunActionAsync(
+                context,
+                ClientActionCatalog.StateCommit,
+                prepared,
+                async (_, token) =>
+                {
+                    if (Volatile.Read(ref terminalSucceeded) != 0)
+                        return receipt;
+
+                    await terminal(token).ConfigureAwait(true);
+                    Volatile.Write(ref terminalSucceeded, 1);
+                    return receipt;
+                },
+                cancellationToken).ConfigureAwait(true);
+
+            if (Volatile.Read(ref terminalSucceeded) == 0)
+                throw new ClientActionConflictException(
+                    $"State '{invocation.StateKey}' was not committed by the host.");
+
+            return _stateVersions.AddOrUpdate(
+                invocation.StateKey,
+                1,
+                static (_, version) => checked(version + 1));
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "Failure/cancellation signalling is secondary to the original action failure; its observed failure must not replace that original exception or turn a failed command into success.")]
     private async ValueTask TrySignalAsync(
         KernelActionExecutionContext context,
         SharpClawActionKey actionKey,
@@ -348,8 +373,9 @@ public sealed class ClientActionDispatcher
                 static (_, _) => ValueTask.FromResult(true),
                 CancellationToken.None).ConfigureAwait(true);
         }
-        catch
+        catch (Exception exception)
         {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
             // Preserve the original command, navigation, or state failure.
         }
     }

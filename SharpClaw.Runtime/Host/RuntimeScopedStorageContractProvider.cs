@@ -16,8 +16,8 @@ internal sealed class RuntimeScopedStorageContractProvider : IStorageContractPro
 
         _contracts = contracts
             .GroupBy(contract => (contract.SourceId, contract.StorageName))
-            .Select(group => group.Count() == 1
-                ? group.Single()
+            .Select(group => group.Take(2).Count() == 1
+                ? group.First()
                 : throw new InvalidOperationException(
                     $"Storage contract '{group.Key.SourceId}/{group.Key.StorageName}' was declared more than once."))
             .ToArray();

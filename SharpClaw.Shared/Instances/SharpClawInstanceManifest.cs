@@ -17,12 +17,16 @@ public sealed class SharpClawInstanceManifest
 
     public required string InstanceRoot { get; set; }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056",
+        Justification = "This published string property preserves the versioned JSON manifest/discovery representation and existing CLR getter/setter ABI. Persisted endpoint text is retained exactly; converting its public type to Uri would break those contracts.")]
     public string? BaseUrl { get; set; }
 
     public string? DataDirectory { get; set; }
 
     public string? SelectedBackendInstanceId { get; set; }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056",
+        Justification = "This published string property preserves the versioned JSON manifest/discovery representation and existing CLR getter/setter ABI. Persisted endpoint text is retained exactly; converting its public type to Uri would break those contracts.")]
     public string? SelectedBackendBaseUrl { get; set; }
 
     public string? SelectedBackendBindingKind { get; set; }

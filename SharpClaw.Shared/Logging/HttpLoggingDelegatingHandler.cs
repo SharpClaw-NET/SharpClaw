@@ -23,35 +23,26 @@ public sealed class HttpLoggingDelegatingHandler(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         var stopwatch = Stopwatch.StartNew();
         var path = SafePath(request.RequestUri);
-        logger.LogDebug(
-            "HTTP request started: {Method} {Path}; content length={ContentLength}",
-            request.Method,
-            path,
-            request.Content?.Headers.ContentLength);
+        if (logger.IsEnabled(LogLevel.Debug))
+            SharpClawHttpLog.Started(logger, request.Method, path, request.Content?.Headers.ContentLength);
         try
         {
             var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
-            logger.LogDebug(
-                "HTTP request completed: {StatusCode} after {ElapsedMilliseconds}ms: {Method} {Path}; response length={ContentLength}",
-                (int)response.StatusCode,
-                stopwatch.ElapsedMilliseconds,
-                request.Method,
-                path,
-                response.Content?.Headers.ContentLength);
+            if (logger.IsEnabled(LogLevel.Debug))
+                SharpClawHttpLog.Completed(logger, (int)response.StatusCode,
+                    stopwatch.ElapsedMilliseconds, request.Method, path,
+                    response.Content?.Headers.ContentLength);
             return response;
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            logger.LogError(
-                ex,
-                "HTTP request failed after {ElapsedMilliseconds}ms: {Method} {Path}",
-                stopwatch.ElapsedMilliseconds,
-                request.Method,
-                path);
+            if (logger.IsEnabled(LogLevel.Error))
+                SharpClawHttpLog.Failed(logger, ex, stopwatch.ElapsedMilliseconds, request.Method, path);
             throw;
         }
     }

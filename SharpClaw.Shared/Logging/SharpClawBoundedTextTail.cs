@@ -20,13 +20,12 @@ public sealed class SharpClawBoundedTextTail
 {
     private readonly int _maximumBytes;
     private readonly Queue<string> _lines = [];
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private int _encodedBytes;
 
     public SharpClawBoundedTextTail(int maximumBytes)
     {
-        if (maximumBytes <= 0)
-            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
         _maximumBytes = maximumBytes;
     }
 

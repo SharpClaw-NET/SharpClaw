@@ -42,6 +42,8 @@ public partial class App : Application
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
         Justification = "The top-level async-void startup boundary must persist any failure and show a failure window rather than leave an invisible process; failure is not treated as startup success.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD100",
+        Justification = "Application.OnLaunched is a mandatory void Uno override; the complete awaited launch is caught, journalled and translated into the startup-failure window.")]
     protected async override void OnLaunched(LaunchActivatedEventArgs args)
     {
         try
@@ -85,115 +87,7 @@ public partial class App : Application
         var logging = _logging;
         RegisterGlobalExceptionLogging(logging.SerilogLogger);
 
-        var builder = this.CreateBuilder(args)
-            // Add navigation support for toolkit controls such as TabBar and NavigationView
-            .UseToolkitNavigation()
-            .Configure(host => host
-#if DEBUG
-                // Switch to Development environment when running in DEBUG
-                .UseEnvironment(Environments.Development)
-#endif
-                .UseLogging(configure: (context, logBuilder) =>
-                {
-                    logBuilder
-                        .ClearProviders()
-                        .AddSerilog(logging.SerilogLogger, dispose: false)
-                        .SetMinimumLevel(
-                            loggingOptions.MinimumLevel switch
-                            {
-                                Serilog.Events.LogEventLevel.Verbose => LogLevel.Trace,
-                                Serilog.Events.LogEventLevel.Debug => LogLevel.Debug,
-                                Serilog.Events.LogEventLevel.Information => LogLevel.Information,
-                                Serilog.Events.LogEventLevel.Warning => LogLevel.Warning,
-                                Serilog.Events.LogEventLevel.Error => LogLevel.Error,
-                                _ => LogLevel.Critical,
-                            })
-
-                        // Default filters for core Uno Platform namespaces
-                        .CoreLogLevel(LogLevel.Warning);
-
-                    // Uno Platform namespace filter groups
-                    // Uncomment individual methods to see more detailed logging
-                    //// Generic Xaml events
-                    //logBuilder.XamlLogLevel(LogLevel.Debug);
-                    //// Layout specific messages
-                    //logBuilder.XamlLayoutLogLevel(LogLevel.Debug);
-                    //// Storage messages
-                    //logBuilder.StorageLogLevel(LogLevel.Debug);
-                    //// Binding related messages
-                    //logBuilder.XamlBindingLogLevel(LogLevel.Debug);
-                    //// Binder memory references tracking
-                    //logBuilder.BinderMemoryReferenceLogLevel(LogLevel.Debug);
-                    //// DevServer and HotReload related
-                    //logBuilder.HotReloadCoreLogLevel(LogLevel.Information);
-                    //// Debug JS interop
-                    //logBuilder.WebAssemblyLogLevel(LogLevel.Debug);
-
-                }, enableUnoLogging: true)
-                .UseConfiguration(configure: configBuilder =>
-                    configBuilder
-                        .EmbeddedSource<App>()
-                        .Section<AppConfig>()
-                )
-                // Enable localization (see appsettings.json for supported languages)
-                .UseLocalization()
-                .ConfigureServices((context, services) =>
-                {
-                    services.AddSingleton(logging);
-                    services.AddSingleton(frontendInstance);
-                    var isDev = context.HostingEnvironment.IsDevelopment();
-                    var configuredApiUrl = LocalEnvironment.LoadApiUrl(isDev);
-                    var apiUrl = frontendInstance.ResolvePreferredBackendBaseUrl(configuredApiUrl);
-                    if (!string.Equals(configuredApiUrl, LocalEnvironment.DefaultApiUrl, StringComparison.OrdinalIgnoreCase))
-                        frontendInstance.RememberBackendBinding(null, configuredApiUrl, "configured");
-                    var backendEnabled = LocalEnvironment.LoadBackendEnabled(isDev);
-                    var persistent = LocalEnvironment.LoadProcessesPersistent(isDev);
-
-                    services.AddSingleton<BackendProcessManager>(sp =>
-                    {
-                        var manager = new BackendProcessManager(
-                            apiUrl,
-                            sp.GetRequiredService<ILogger<BackendProcessManager>>(),
-                            frontendInstance)
-                        {
-                            SkipLaunch = !backendEnabled,
-                            Persistent = persistent,
-                        };
-                        return manager;
-                    });
-
-                    var gatewayUrl = LocalEnvironment.LoadGatewayUrl(isDev);
-                    var gatewayEnabled = LocalEnvironment.LoadGatewayEnabled(isDev);
-
-                    services.AddSingleton<GatewayProcessManager>(sp =>
-                    {
-                        var manager = new GatewayProcessManager(
-                            gatewayUrl,
-                            apiUrl,
-                            sp.GetRequiredService<ILogger<GatewayProcessManager>>(),
-                            frontendInstance)
-                        {
-                            SkipLaunch = !gatewayEnabled,
-                            Persistent = persistent,
-                        };
-                        return manager;
-                    });
-
-                    services.AddSingleton<ClientActionContextSource>();
-                    services.AddSingleton<ClientActionDispatcher>(sp =>
-                        ClientActionDispatcher.CreateProduction(
-                            sp.GetRequiredService<ClientActionContextSource>()));
-                    services.AddTransient<ClientNavigationService>();
-                    services.AddSingleton<ModulePackageStore>();
-                    services.AddSingleton<SharpClawApiClient>(sp =>
-                        new SharpClawApiClient(
-                            apiUrl,
-                            sp.GetRequiredService<ILogger<SharpClawApiClient>>(),
-                            frontendInstance,
-                            sp.GetRequiredService<ClientActionDispatcher>()));
-                })
-                .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
-            );
+        var builder = CreateApplicationBuilder(args, logging, loggingOptions, frontendInstance);
         MainWindow = builder.Window;
         MainWindow.Title = "SharpClaw";
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.BuilderReady);
@@ -226,36 +120,158 @@ public partial class App : Application
         Host = await navigation.ConfigureAwait(true);
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationReady);
 
-        // Dispose managed processes when the app window closes.
-        // Persistent mode → Detach (keep running); otherwise → Stop + Kill.
-        if (MainWindow is not null)
-        {
-            MainWindow.Closed += async (_, _) =>
+        MainWindow.Closed += OnWindowClosed;
+    }
+
+    private Uno.Extensions.Hosting.IApplicationBuilder CreateApplicationBuilder(
+        LaunchActivatedEventArgs args,
+        SharpClawLogRuntime logging,
+        SharpClawLoggingOptions loggingOptions,
+        FrontendInstanceService frontendInstance)
+    {
+        return this.CreateBuilder(args)
+            // Add navigation support for toolkit controls such as TabBar and NavigationView
+            .UseToolkitNavigation()
+            .Configure(host => host
+#if DEBUG
+                // Switch to Development environment when running in DEBUG
+                .UseEnvironment(Environments.Development)
+#endif
+                .UseLogging(configure: (_, logBuilder) => ConfigureLogging(logBuilder, logging, loggingOptions), enableUnoLogging: true)
+                .UseConfiguration(configure: configBuilder =>
+                    configBuilder
+                        .EmbeddedSource<App>()
+                        .Section<AppConfig>()
+                )
+                // Enable localization (see appsettings.json for supported languages)
+                .UseLocalization()
+                .ConfigureServices((context, services) => RegisterServices(
+                    services, logging, frontendInstance, context.HostingEnvironment.IsDevelopment()))
+                .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
+            );
+    }
+
+    private static void ConfigureLogging(
+        ILoggingBuilder builder,
+        SharpClawLogRuntime logging,
+        SharpClawLoggingOptions options)
+    {
+        builder.ClearProviders()
+            .AddSerilog(logging.SerilogLogger, dispose: false)
+            .SetMinimumLevel(options.MinimumLevel switch
             {
-                var services = Host?.Services;
-                var actions = services?.GetService<ClientActionDispatcher>();
-                if (services is null || actions is null)
-                    return;
+                Serilog.Events.LogEventLevel.Verbose => LogLevel.Trace,
+                Serilog.Events.LogEventLevel.Debug => LogLevel.Debug,
+                Serilog.Events.LogEventLevel.Information => LogLevel.Information,
+                Serilog.Events.LogEventLevel.Warning => LogLevel.Warning,
+                Serilog.Events.LogEventLevel.Error => LogLevel.Error,
+                _ => LogLevel.Critical,
+            })
+            .CoreLogLevel(LogLevel.Warning);
+    }
 
-                await actions.RunCommandAsync(
-                    "client.app.close",
-                    async _ =>
-                    {
-                        var gw = services.GetService<GatewayProcessManager>();
-                        var be = services.GetService<BackendProcessManager>();
-                        var api = services.GetService<SharpClawApiClient>();
+    private static void RegisterServices(
+        IServiceCollection services,
+        SharpClawLogRuntime logging,
+        FrontendInstanceService frontendInstance,
+        bool isDevelopment)
+    {
 
-                        WindowsStartupManager.RefreshIfNeeded(
-                            be?.ExecutablePath, be?.ApiUrl,
-                            gw?.ExecutablePath, gw?.GatewayUrl);
+        services.AddSingleton(logging);
+        services.AddSingleton(frontendInstance);
+        var isDev = isDevelopment;
+        var apiUrl = RegisterProcesses(services, frontendInstance, isDev);
+        services.AddSingleton<ClientActionContextSource>();
+        services.AddSingleton<ClientActionDispatcher>(sp =>
+            ClientActionDispatcher.CreateProduction(
+                sp.GetRequiredService<ClientActionContextSource>()));
+        services.AddTransient<ClientNavigationService>();
+        services.AddSingleton<ModulePackageStore>();
+        services.AddSingleton<SharpClawApiClient>(sp =>
+            new SharpClawApiClient(
+                apiUrl,
+                sp.GetRequiredService<ILogger<SharpClawApiClient>>(),
+                frontendInstance,
+                sp.GetRequiredService<ClientActionDispatcher>()));
+    }
 
-                        gw?.Dispose();
-                        be?.Dispose();
-                        if (api is not null)
-                            await api.DisposeAsync().ConfigureAwait(true);
-                        _logging?.Dispose();
-                    }).ConfigureAwait(true);
+    private static string RegisterProcesses(
+        IServiceCollection services, FrontendInstanceService frontendInstance, bool isDev)
+    {
+        var configuredApiUrl = LocalEnvironment.LoadApiUrl(isDev);
+        var apiUrl = frontendInstance.ResolvePreferredBackendBaseUrl(configuredApiUrl);
+        if (!string.Equals(configuredApiUrl, LocalEnvironment.DefaultApiUrl, StringComparison.OrdinalIgnoreCase))
+            frontendInstance.RememberBackendBinding(null, configuredApiUrl, "configured");
+        var backendEnabled = LocalEnvironment.LoadBackendEnabled(isDev);
+        var persistent = LocalEnvironment.LoadProcessesPersistent(isDev);
+
+        services.AddSingleton<BackendProcessManager>(sp =>
+        {
+            var manager = new BackendProcessManager(
+                apiUrl,
+                sp.GetRequiredService<ILogger<BackendProcessManager>>(),
+                frontendInstance)
+            {
+                SkipLaunch = !backendEnabled,
+                Persistent = persistent,
             };
+            return manager;
+        });
+
+        var gatewayUrl = LocalEnvironment.LoadGatewayUrl(isDev);
+        var gatewayEnabled = LocalEnvironment.LoadGatewayEnabled(isDev);
+
+        services.AddSingleton<GatewayProcessManager>(sp =>
+        {
+            var manager = new GatewayProcessManager(
+                gatewayUrl,
+                apiUrl,
+                sp.GetRequiredService<ILogger<GatewayProcessManager>>(),
+                frontendInstance)
+            {
+                SkipLaunch = !gatewayEnabled,
+                Persistent = persistent,
+            };
+            return manager;
+        });
+
+        return apiUrl;
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD100",
+        Justification = "Uno requires a void Window.Closed handler; all awaited shutdown faults are observed by the journal before the event returns.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "The final UI shutdown boundary observes any action or resource-cleanup fault; exceptions cannot escape its required async-void event contract.")]
+    private async void OnWindowClosed(object sender, WindowEventArgs e)
+    {
+        try
+        {
+            var services = Host?.Services;
+            var actions = services?.GetService<ClientActionDispatcher>();
+            if (services is null || actions is null) return;
+            await actions.RunCommandAsync("client.app.close", async _ =>
+            {
+                var gateway = services.GetService<GatewayProcessManager>();
+                var backend = services.GetService<BackendProcessManager>();
+                var api = services.GetService<SharpClawApiClient>();
+                WindowsStartupManager.RefreshIfNeeded(
+                    backend?.ExecutablePath, backend?.ApiUrl,
+                    gateway?.ExecutablePath, gateway?.GatewayUrl);
+                try { gateway?.Dispose(); }
+                finally
+                {
+                    try { backend?.Dispose(); }
+                    finally
+                    {
+                        try { if (api is not null) await api.DisposeAsync().ConfigureAwait(true); }
+                        finally { if (_logging is not null) await _logging.DisposeAsync().ConfigureAwait(true); }
+                    }
+                }
+            }, CancellationToken.None).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
         }
     }
 
@@ -314,7 +330,7 @@ public partial class App : Application
                 SharpClaw.Client.Uno.WindowExtensions.SetWindowIcon(window);
             }
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or ArgumentException or System.ComponentModel.Win32Exception)
         {
             SharpClaw.Client.Uno.WindowExtensions.SetWindowIcon(window);
         }

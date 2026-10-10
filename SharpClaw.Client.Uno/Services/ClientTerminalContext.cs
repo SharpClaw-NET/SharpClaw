@@ -22,6 +22,8 @@ internal readonly struct ClientTerminalContext(SynchronizationContext? context)
 
     [SuppressMessage("Design", "CA1031", Justification =
         "Queue failures are propagated through the completion task while atomically preventing late queued effects; they are not swallowed.")]
+    [SuppressMessage("Usage", "VSTHRD001", Justification =
+        "Uno requires the SynchronizationContext captured from its renderer, not Visual Studio JoinableTaskFactory. This Post is nonblocking and propagates queue cancellation/fault through one owned completion task.")]
     private static async ValueTask<TResult> PostAsync<TResult>(
         SynchronizationContext context,
         Func<CancellationToken, ValueTask<TResult>> terminal,

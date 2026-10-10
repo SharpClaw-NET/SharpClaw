@@ -52,7 +52,7 @@ internal sealed class DirectChatKernelTests
         var conversationId = Guid.NewGuid();
         var first = await gate.EnterAsync(conversationId, CancellationToken.None).ConfigureAwait(false);
 
-        var releaseThread = new Thread(() => first.DisposeAsync().GetAwaiter().GetResult())
+        var releaseThread = new Thread(() => first.DisposeAsync().AsTask().GetAwaiter().GetResult())
         {
             IsBackground = true,
         };
@@ -218,10 +218,13 @@ internal sealed class DirectChatKernelTests
             kernel.StreamAsync(new ChatTurnInput("cancel stream"), cancellation.Token),
             cancellation.Token);
 
-        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-        cancellation.Cancel();
+        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await cancellation.CancelAsync().ConfigureAwait(false);
 
+        // The test owns this operation/signal; it runs without a JoinableTaskFactory dependency.
+#pragma warning disable VSTHRD003
         Assert.ThrowsAsync<OperationCanceledException>(async () => await consume.ConfigureAwait(false));
+#pragma warning restore VSTHRD003
         (await store.LoadHistoryAsync(
             conversationId,
             TestOperationContext(),
@@ -245,10 +248,16 @@ internal sealed class DirectChatKernelTests
             new InMemoryConversationStore());
 
         var first = kernel.RunAsync(new ChatTurnInput("first")).AsTask();
+        // The test owns this operation/signal; it runs without a JoinableTaskFactory dependency.
+#pragma warning disable VSTHRD003
         await provider.FirstCallStarted.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
 
         var second = kernel.RunAsync(new ChatTurnInput("second")).AsTask();
+        // The test owns this operation/signal; it runs without a JoinableTaskFactory dependency.
+#pragma warning disable VSTHRD003
         await resolver.SecondResolutionStarted.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
         provider.SecondCallStarted.Should().BeFalse();
 
         provider.ReleaseFirstCall();

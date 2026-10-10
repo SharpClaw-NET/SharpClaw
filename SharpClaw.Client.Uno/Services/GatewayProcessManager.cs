@@ -17,6 +17,20 @@ namespace SharpClaw.Services;
 /// </summary>
 public sealed class GatewayProcessManager : IDisposable
 {
+    private static readonly Action<ILogger, string, Exception?> LogStdout =
+        LoggerMessage.Define<string>(LogLevel.Information, new EventId(1, "GatewayStdout"), "Gateway process stdout: {Line}");
+    private static readonly Action<ILogger, string, Exception?> LogStderr =
+        LoggerMessage.Define<string>(LogLevel.Warning, new EventId(2, "GatewayStderr"), "Gateway process stderr: {Line}");
+
+    private static readonly Action<ILogger, Exception?> LogStarting =
+        LoggerMessage.Define(LogLevel.Information, new EventId(3, "GatewayStarting"), "Starting bundled gateway process.");
+    private static readonly Action<ILogger, string, Exception?> LogApiKeySource =
+        LoggerMessage.Define<string>(LogLevel.Information, new EventId(4, "GatewayApiKeySource"), "API key forwarded to bundled gateway from {Source}.");
+    private static readonly Action<ILogger, Exception?> LogMissingApiKey =
+        LoggerMessage.Define(LogLevel.Warning, new EventId(5, "GatewayApiKeyMissing"), "No API key available to forward to bundled gateway.");
+    private static readonly Action<ILogger, Exception?> LogGatewayToken =
+        LoggerMessage.Define(LogLevel.Information, new EventId(6, "GatewayTokenForwarded"), "Gateway token forwarded to bundled gateway.");
+
     private readonly FrontendInstanceService? _frontendInstance;
     private readonly ILogger<GatewayProcessManager> _logger;
     private readonly Func<bool>? _processOnPortProbe;
@@ -29,7 +43,7 @@ public sealed class GatewayProcessManager : IDisposable
     private string _gatewayUrl;
     private readonly SharpClawBoundedTextTail _processOutput =
         new(SharpClawLogBounds.SidecarTailBytes);
-    private readonly object _outputLock = new();
+    private readonly Lock _outputLock = new();
 
     public const string DefaultGatewayUrl = "http://0.0.0.0:48924";
 
@@ -40,9 +54,13 @@ public sealed class GatewayProcessManager : IDisposable
     public bool IsExternal { get; private set; }
 
     /// <summary>Current gateway base URL (bind address for the server).</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public string GatewayUrl => _gatewayUrl;
 
     /// <summary>Current backend base URL forwarded to the gateway.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public string BackendBaseUrl => _backendBaseUrl;
 
     /// <summary>Full path to the bundled gateway executable.</summary>
@@ -53,7 +71,9 @@ public sealed class GatewayProcessManager : IDisposable
     /// bind address with <c>127.0.0.1</c> so HTTP calls from the Uno
     /// client actually reach the gateway.
     /// </summary>
-    public string ClientUrl => _gatewayUrl.Replace("://0.0.0.0", "://127.0.0.1");
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
+    public string ClientUrl => _gatewayUrl.Replace("://0.0.0.0", "://127.0.0.1", StringComparison.Ordinal);
 
     public string? BundledGatewayInstanceRoot => _frontendInstance is null
         ? null
@@ -107,6 +127,8 @@ public sealed class GatewayProcessManager : IDisposable
     /// <summary>Returns the number of captured output lines without copying.</summary>
     public int OutputLineCount { get { lock (_outputLock) return _processOutput.Count; } }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public GatewayProcessManager(
         string gatewayUrl,
         string backendBaseUrl,
@@ -154,11 +176,15 @@ public sealed class GatewayProcessManager : IDisposable
     /// Changes the target gateway URL. Only meaningful before the next
     /// <see cref="EnsureStartedAsync"/> call.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public void UpdateGatewayUrl(string gatewayUrl) => _gatewayUrl = gatewayUrl;
 
     /// <summary>
     /// Changes the target backend URL the gateway should forward to.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public void UpdateBackendBaseUrl(string backendBaseUrl) => _backendBaseUrl = backendBaseUrl;
 
     /// <summary>
@@ -183,10 +209,11 @@ public sealed class GatewayProcessManager : IDisposable
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            var response = await http.GetAsync($"{ClientUrl}/healthz", ct).ConfigureAwait(true);
+            using var response = await http.GetAsync(new Uri($"{ClientUrl}/healthz", UriKind.Absolute), ct).ConfigureAwait(true);
             return response.IsSuccessStatusCode;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or UriFormatException or NotSupportedException)
         {
             return false;
         }
@@ -259,7 +286,7 @@ public sealed class GatewayProcessManager : IDisposable
             if (!portInUse)
                 return false;
         }
-        catch
+        catch (Exception exception) when (exception is NetworkInformationException or NotSupportedException or System.Security.SecurityException)
         {
             return false;
         }
@@ -267,9 +294,13 @@ public sealed class GatewayProcessManager : IDisposable
         try
         {
             var candidates = Process.GetProcessesByName("SharpClaw.Gateway");
-            return candidates.Length > 0;
+            try { return candidates.Length > 0; }
+            finally
+            {
+                foreach (var candidate in candidates) candidate.Dispose();
+            }
         }
-        catch
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException or System.Security.SecurityException)
         {
             return false;
         }
@@ -277,17 +308,8 @@ public sealed class GatewayProcessManager : IDisposable
 
     private bool TryGetPortFromUrl(out int port)
     {
-        port = 0;
-        try
-        {
-            var uri = new Uri(_gatewayUrl);
-            port = uri.Port;
-            return port > 0;
-        }
-        catch
-        {
-            return false;
-        }
+        port = Uri.TryCreate(_gatewayUrl, UriKind.Absolute, out var uri) ? uri.Port : 0;
+        return port > 0;
     }
 
     /// <summary>
@@ -305,7 +327,7 @@ public sealed class GatewayProcessManager : IDisposable
 
         lock (_outputLock) _processOutput.AppendLine(
             $"[{DateTime.Now:HH:mm:ss}] ── Starting gateway process ──");
-        _logger.LogInformation("Starting bundled gateway process.");
+        LogStarting(_logger, null);
         IsExternal = false;
         _startedByObserver = false;
 
@@ -319,6 +341,22 @@ public sealed class GatewayProcessManager : IDisposable
             WorkingDirectory = Path.GetDirectoryName(_executablePath)!,
         };
 
+        ConfigureProcessEnvironment(psi);
+        ForwardApiKey(psi);
+        ForwardGatewayToken(psi);
+
+        if (_processStartObserver is not null)
+        {
+            _processStartObserver(psi);
+            _startedByObserver = true;
+            return;
+        }
+
+        LaunchProcess(psi);
+    }
+
+    private void ConfigureProcessEnvironment(ProcessStartInfo psi)
+    {
         // Bind to the configured URL.
         psi.EnvironmentVariables["ASPNETCORE_URLS"] = _gatewayUrl;
         psi.EnvironmentVariables["InternalApi__BaseUrl"] = _backendBaseUrl;
@@ -353,6 +391,10 @@ public sealed class GatewayProcessManager : IDisposable
             }
         }
 
+    }
+
+    private void ForwardApiKey(ProcessStartInfo psi)
+    {
         // Pass the internal API key directly to the gateway process so it
         // does not need to locate the key file itself.  In MSIX packaging,
         // the Uno host process and its child processes may resolve
@@ -374,7 +416,7 @@ public sealed class GatewayProcessManager : IDisposable
                 if (!string.IsNullOrWhiteSpace(keyFilePath) && File.Exists(keyFilePath))
                     resolvedKey = File.ReadAllText(keyFilePath).Trim();
             }
-            catch
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
             {
                 // Best-effort — the gateway will fall back to reading the file itself.
             }
@@ -390,17 +432,19 @@ public sealed class GatewayProcessManager : IDisposable
             psi.ArgumentList.Add($"--InternalApi:ApiKey={resolvedKey}");
             lock (_outputLock) _processOutput.AppendLine(
                 $"[{DateTime.Now:HH:mm:ss}] API key forwarded to gateway via CLI arg ({(ApiKey is not null ? "in-memory" : "file")}).");
-            _logger.LogInformation(
-                "API key forwarded to bundled gateway from {Source}.",
-                ApiKey is not null ? "in-memory" : "file");
+            LogApiKeySource(_logger, ApiKey is not null ? "in-memory" : "file", null);
         }
         else
         {
             lock (_outputLock) _processOutput.AppendLine(
                 $"[{DateTime.Now:HH:mm:ss}] ⚠ No API key available to forward — gateway may get 401.");
-            _logger.LogWarning("No API key available to forward to bundled gateway.");
+            LogMissingApiKey(_logger, null);
         }
 
+    }
+
+    private void ForwardGatewayToken(ProcessStartInfo psi)
+    {
         // ── Gateway service token ────────────────────────────────────
         string? resolvedGatewayToken = GatewayToken;
 
@@ -413,7 +457,7 @@ public sealed class GatewayProcessManager : IDisposable
                 if (!string.IsNullOrWhiteSpace(tokenFilePath) && File.Exists(tokenFilePath))
                     resolvedGatewayToken = File.ReadAllText(tokenFilePath).Trim();
             }
-            catch { /* best-effort — gateway falls back to file read itself */ }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { /* The child can fall back to its own discovery file. */ }
         }
 
         if (!string.IsNullOrEmpty(resolvedGatewayToken))
@@ -422,25 +466,23 @@ public sealed class GatewayProcessManager : IDisposable
             psi.ArgumentList.Add($"--InternalApi:GatewayToken={resolvedGatewayToken}");
             lock (_outputLock) _processOutput.AppendLine(
                 $"[{DateTime.Now:HH:mm:ss}] Gateway token forwarded.");
-            _logger.LogInformation("Gateway token forwarded to bundled gateway.");
+            LogGatewayToken(_logger, null);
         }
 
-        if (_processStartObserver is not null)
-        {
-            _processStartObserver(psi);
-            _startedByObserver = true;
-            return;
-        }
+    }
 
-        _process = Process.Start(psi);
+    private void LaunchProcess(ProcessStartInfo psi)
+    {
+        _process = Process.Start(psi)
+            ?? throw new InvalidOperationException("The bundled process did not start.");
 
-        _process!.OutputDataReceived += (_, e) =>
+        _process.OutputDataReceived += (_, e) =>
         {
             if (e.Data is not null)
             {
                 lock (_outputLock) _processOutput.AppendLine(
                     $"[{DateTime.Now:HH:mm:ss}] {e.Data}");
-                _logger.LogInformation("Gateway process stdout: {Line}", e.Data);
+                LogStdout(_logger, e.Data, null);
             }
         };
         _process.ErrorDataReceived += (_, e) =>
@@ -449,7 +491,7 @@ public sealed class GatewayProcessManager : IDisposable
             {
                 lock (_outputLock) _processOutput.AppendLine(
                     $"[{DateTime.Now:HH:mm:ss}] [stderr] {e.Data}");
-                _logger.LogWarning("Gateway process stderr: {Line}", e.Data);
+                LogStderr(_logger, e.Data, null);
             }
         };
         _process.BeginOutputReadLine();
@@ -478,7 +520,7 @@ public sealed class GatewayProcessManager : IDisposable
 
             _process.WaitForExit(TimeSpan.FromSeconds(5));
         }
-        catch { /* best-effort */ }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { /* The process may already have exited or be inaccessible. */ }
     }
 
     /// <summary>
@@ -496,7 +538,7 @@ public sealed class GatewayProcessManager : IDisposable
             _process.CancelOutputRead();
             _process.CancelErrorRead();
         }
-        catch { /* best-effort */ }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { /* The process may already have exited or be inaccessible. */ }
 
         _process.Dispose();
         _process = null;
@@ -510,5 +552,6 @@ public sealed class GatewayProcessManager : IDisposable
             Stop();
 
         _process?.Dispose();
+        _process = null;
     }
 }

@@ -12,7 +12,7 @@ internal sealed class ErrorEnvelopeFilter(
 {
     public void OnException(ExceptionContext context)
     {
-        logger.LogError(context.Exception, "Unhandled exception in {Controller}/{Action}.",
+        GatewayLog.UnhandledControllerError(logger, context.Exception,
             context.RouteData.Values["controller"],
             context.RouteData.Values["action"]);
 

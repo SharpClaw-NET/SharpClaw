@@ -27,10 +27,10 @@ internal sealed class GatewayActionMiddleware(
                 (_, cancellationToken) => RunAuthenticatedRequestAsync(
                     context,
                     invocation,
-                    cancellationToken,
-                    executionContext),
-                context.RequestAborted,
-                executionContext).ConfigureAwait(false);
+                    executionContext,
+                    cancellationToken),
+                executionContext,
+                context.RequestAborted).ConfigureAwait(false);
         }
         catch (KernelActionCancelledException exception)
         {
@@ -54,9 +54,8 @@ internal sealed class GatewayActionMiddleware(
         }
         catch (Exception exception)
         {
-            logger.LogError(
-                exception,
-                "Gateway action boundary failed for {Method} {Path}.",
+            GatewayLog.ActionBoundaryFailed(
+                logger, exception,
                 context.Request.Method,
                 context.Request.Path);
             await SignalAsync(
@@ -72,105 +71,103 @@ internal sealed class GatewayActionMiddleware(
     private async ValueTask<bool> RunAuthenticatedRequestAsync(
         HttpContext context,
         GatewayActionInvocation invocation,
-        CancellationToken cancellationToken,
-        KernelActionExecutionContext executionContext)
+        KernelActionExecutionContext executionContext,
+        CancellationToken cancellationToken)
+    {
+        await AuthenticateAndRouteAsync(context, invocation, executionContext, cancellationToken).ConfigureAwait(false);
+        if (invocation.IsStream)
+            await ForwardStreamAsync(context, invocation, executionContext, cancellationToken).ConfigureAwait(false);
+        else
+            await RunForwardAsync(context, invocation, executionContext, cancellationToken).ConfigureAwait(false);
+
+        await RunActionAsync(
+            context,
+            new SharpClawActionKey("gateway.request.response"),
+            invocation with { Operation = "response" },
+            static (_, _) => ValueTask.FromResult(true),
+            executionContext,
+            cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    private async ValueTask AuthenticateAndRouteAsync(
+        HttpContext context,
+        GatewayActionInvocation invocation,
+        KernelActionExecutionContext executionContext,
+        CancellationToken cancellationToken)
     {
         RequireAllowed(await RunActionAsync(
             context,
             new SharpClawActionKey("gateway.request.authenticate"),
             invocation with { Operation = "authenticate" },
             static (_, _) => ValueTask.FromResult(true),
-            cancellationToken,
-            executionContext).ConfigureAwait(false),
+            executionContext,
+            cancellationToken).ConfigureAwait(false),
             "gateway.request.authenticate");
         RequireAllowed(await RunActionAsync(
             context,
             new SharpClawActionKey("gateway.request.authorize"),
             invocation with { Operation = "authorize" },
             static (_, _) => ValueTask.FromResult(true),
-            cancellationToken,
-            executionContext).ConfigureAwait(false),
+            executionContext,
+            cancellationToken).ConfigureAwait(false),
             "gateway.request.authorize");
         RequireAllowed(await RunActionAsync(
             context,
             new SharpClawActionKey("gateway.request.route"),
             invocation with { Operation = "route" },
             static (_, _) => ValueTask.FromResult(true),
-            cancellationToken,
-            executionContext).ConfigureAwait(false),
+            executionContext,
+            cancellationToken).ConfigureAwait(false),
             "gateway.request.route");
+    }
 
-        var isStream = invocation.IsStream;
-        if (isStream)
+    private async ValueTask ForwardStreamAsync(
+        HttpContext context,
+        GatewayActionInvocation invocation,
+        KernelActionExecutionContext executionContext,
+        CancellationToken cancellationToken)
+    {
+        try
         {
-            try
-            {
-                await RunActionAsync(
-                    context,
-                    new SharpClawActionKey("gateway.stream.open"),
-                    invocation with { Operation = "stream.open" },
-                    (_, ct) => RunForwardAsync(context, invocation, ct, executionContext),
-                    cancellationToken,
-                    executionContext).ConfigureAwait(false);
-                await RunActionAsync(
-                    context,
-                    new SharpClawActionKey("gateway.stream.close"),
-                    invocation with { Operation = "stream.close" },
-                    static (_, _) => ValueTask.FromResult(true),
-                    cancellationToken,
-                    executionContext).ConfigureAwait(false);
-            }
-            catch (KernelActionCancelledException exception)
-            {
-                await SignalAsync(
-                    actions,
-                    new SharpClawActionKey("gateway.stream.cancel"),
-                    invocation with { Operation = "stream.cancel" },
-                    exception,
-                    executionContext).ConfigureAwait(false);
-                throw;
-            }
-            catch (OperationCanceledException exception)
-            {
-                await SignalAsync(
-                    actions,
-                    new SharpClawActionKey("gateway.stream.cancel"),
-                    invocation with { Operation = "stream.cancel" },
-                    exception,
-                    executionContext).ConfigureAwait(false);
-                throw;
-            }
-            catch (Exception exception)
-            {
-                await SignalAsync(
-                    actions,
-                    new SharpClawActionKey("gateway.stream.fail"),
-                    invocation with { Operation = "stream.fail" },
-                    exception,
-                    executionContext).ConfigureAwait(false);
-                throw;
-            }
+            await RunActionAsync(
+                context,
+                new SharpClawActionKey("gateway.stream.open"),
+                invocation with { Operation = "stream.open" },
+                (_, ct) => RunForwardAsync(context, invocation, executionContext, ct),
+                executionContext,
+                cancellationToken).ConfigureAwait(false);
+            await RunActionAsync(
+                context,
+                new SharpClawActionKey("gateway.stream.close"),
+                invocation with { Operation = "stream.close" },
+                static (_, _) => ValueTask.FromResult(true),
+                executionContext,
+                cancellationToken).ConfigureAwait(false);
         }
-        else
+        catch (OperationCanceledException exception)
         {
-            await RunForwardAsync(context, invocation, cancellationToken, executionContext).ConfigureAwait(false);
+            await SignalAsync(actions,
+                new SharpClawActionKey("gateway.stream.cancel"),
+                invocation with { Operation = "stream.cancel" },
+                exception, executionContext).ConfigureAwait(false);
+            throw;
         }
-
-        await RunActionAsync(
-            context,
-            new SharpClawActionKey("gateway.request.response"),
-        invocation with { Operation = "response" },
-        static (_, _) => ValueTask.FromResult(true),
-        cancellationToken,
-        executionContext).ConfigureAwait(false);
-        return true;
+        catch (Exception exception)
+        {
+            await SignalAsync(actions,
+                new SharpClawActionKey("gateway.stream.fail"),
+                invocation with { Operation = "stream.fail" },
+                exception, executionContext).ConfigureAwait(false);
+            throw;
+        }
     }
 
     private async ValueTask<bool> RunForwardAsync(
         HttpContext context,
         GatewayActionInvocation invocation,
-        CancellationToken cancellationToken,
-        KernelActionExecutionContext executionContext)
+        KernelActionExecutionContext executionContext,
+        CancellationToken cancellationToken)
     {
         var actionKey = ResolveForwardAction(context);
         if (!invocation.IsStream)
@@ -184,8 +181,8 @@ internal sealed class GatewayActionMiddleware(
                     await next(context).ConfigureAwait(false);
                     return true;
                 },
-                cancellationToken,
-                executionContext).ConfigureAwait(false);
+                executionContext,
+                cancellationToken).ConfigureAwait(false);
             return true;
         }
 
@@ -209,8 +206,8 @@ internal sealed class GatewayActionMiddleware(
                     await next(context).ConfigureAwait(false);
                     return true;
                 },
-                cancellationToken,
-                executionContext).ConfigureAwait(false);
+                executionContext,
+                cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -222,7 +219,7 @@ internal sealed class GatewayActionMiddleware(
 
     private static SharpClawActionKey ResolveForwardAction(HttpContext context)
     {
-        if (!context.Request.Path.StartsWithSegments("/api/chat"))
+        if (!context.Request.Path.StartsWithSegments("/api/chat", StringComparison.OrdinalIgnoreCase))
             return new SharpClawActionKey("gateway.endpoint.dispatch");
 
         return new SharpClawActionKey("gateway.request.forward");
@@ -233,8 +230,8 @@ internal sealed class GatewayActionMiddleware(
         SharpClawActionKey actionKey,
         TPayload payload,
         Func<TPayload, CancellationToken, ValueTask<TResult>> terminal,
-        CancellationToken cancellationToken,
-        KernelActionExecutionContext executionContext) =>
+        KernelActionExecutionContext executionContext,
+        CancellationToken cancellationToken) =>
         actions.RunActionAsync(
             actionKey,
             payload,

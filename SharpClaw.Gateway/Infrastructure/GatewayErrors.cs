@@ -30,6 +30,6 @@ internal static class GatewayErrors
             ? s : Guid.NewGuid().ToString("N");
 
         context.Response.StatusCode = statusCode;
-        return context.Response.WriteAsJsonAsync(new { error, code, requestId });
+        return context.Response.WriteAsJsonAsync(new { error, code, requestId }, context.RequestAborted);
     }
 }

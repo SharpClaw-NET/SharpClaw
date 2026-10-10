@@ -42,18 +42,7 @@ internal sealed class RuntimeHostCompositionTests
             $"the test build must provide the normal Host module payload at '{registrationRoot}'");
 
         using var workspace = new TemporaryWorkspace();
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
-            {
-                ["Provider:Key"] = "sharpclaw-test",
-                ["Provider:Model"] = "test-harness-model",
-                ["Packages:sharpclaw_providers_anthropic"] = "false",
-                ["Packages:sharpclaw_providers_google"] = "false",
-                ["Packages:sharpclaw_providers_llamasharp"] = "false",
-                ["Packages:sharpclaw_providers_ollama"] = "false",
-                ["Packages:sharpclaw_providers_openai_compat"] = "false",
-            })
-            .Build();
+        var configuration = CreateHarnessConfiguration();
         using var registrationSet = PackagedDotNetRegistrationSet.Load(
             [
                 Path.Combine(registrationRoot, "contributions"),
@@ -70,18 +59,7 @@ internal sealed class RuntimeHostCompositionTests
             ]);
 
         var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-        {
-            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
-        });
-        builder.Configuration.Sources.Clear();
-        builder.Configuration.AddConfiguration(configuration);
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Host.UseDefaultServiceProvider(options =>
-        {
-            options.ValidateScopes = true;
-            options.ValidateOnBuild = true;
-        });
+        var builder = CreateValidatedHostBuilder(configuration);
         RuntimeHostComposition.RegisterServices(
             builder.Services,
             configuration,
@@ -98,101 +76,25 @@ internal sealed class RuntimeHostCompositionTests
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         readiness.IsReady.Should().BeFalse();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        app.Services.GetService<IConversationStore>().Should().BeNull();
-        app.Services.GetRequiredService<IActionDispatcher>()
-            .Should().BeSameAs(adapter.ActionDispatcher);
-        adapter.Graph.ContainsAction(new SharpClawActionKey("runtime.request.receive"))
-            .Should().BeTrue();
-        adapter.Graph.ContainsAction(new SharpClawActionKey("jobs.submit"))
-            .Should().BeTrue();
-        adapter.Graph.ContainsAction(new SharpClawActionKey("jobs.dispatch"))
-            .Should().BeTrue();
-        adapter.Graph.ContainsAction(new SharpClawActionKey("jobs.cancel"))
-            .Should().BeTrue();
-        adapter.Graph.ContainsAction(new SharpClawActionKey("storage.query"))
-            .Should().BeTrue();
-        {
-            var jobsScope = app.Services.CreateAsyncScope();
-            await using (jobsScope.ConfigureAwait(false))
-            {
-                jobsScope.ServiceProvider
-                    .GetRequiredService<KernelJobsStore>()
-                    .Should().NotBeNull();
-                jobsScope.ServiceProvider
-                    .GetRequiredService<KernelJobsCoordinator>()
-                    .Should().NotBeNull();
-            }
-        }
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
-        await registrationSet.ConnectCapabilitiesAsync(app.Services).ConfigureAwait(false);
-        await adapter.StartAsync("test-host").ConfigureAwait(false);
+        await AssertKernelHostGraphAsync(app, adapter).ConfigureAwait(false);
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await registrationSet.ConnectCapabilitiesAsync(app.Services, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await adapter.StartAsync("test-host", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
 
         try
         {
-            await app.StartAsync().ConfigureAwait(false);
-            var cliContext = adapter.CreateCliExecutionContext(RequestPrincipal.Anonymous);
-            var firstCli = await registrationSet.Application.TryInvokeCliAsync(
-                "test-harness-scope",
-                [],
-                adapter,
-                cliContext,
-                CancellationToken.None).ConfigureAwait(false);
-            var secondCli = await registrationSet.Application.TryInvokeCliAsync(
-                "test-harness-scope",
-                [],
-                adapter,
-                cliContext,
-                CancellationToken.None).ConfigureAwait(false);
-            var thirdCli = await registrationSet.Application.TryInvokeCliAsync(
-                "test-harness-scope",
-                [],
-                adapter,
-                cliContext,
-                CancellationToken.None).ConfigureAwait(false);
-            firstCli.Should().NotBeNull();
-            secondCli.Should().NotBeNull();
-            thirdCli.Should().NotBeNull();
-            using var firstCliState = JsonDocument.Parse(firstCli!.Output.Single().Text);
-            using var secondCliState = JsonDocument.Parse(secondCli!.Output.Single().Text);
-            using var thirdCliState = JsonDocument.Parse(thirdCli!.Output.Single().Text);
-            firstCliState.RootElement.GetProperty("instanceId").GetGuid()
-                .Should().NotBe(secondCliState.RootElement.GetProperty("instanceId").GetGuid());
-            secondCliState.RootElement.GetProperty("disposed").GetInt32().Should().Be(1);
-            thirdCliState.RootElement.GetProperty("disposed").GetInt32().Should().Be(2);
-            thirdCliState.RootElement.GetProperty("active").GetInt32().Should().Be(1);
+            await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await AssertScopedCliLifetimeAsync(registrationSet, adapter).ConfigureAwait(false);
 
-            using var client = new HttpClient
-            {
-                BaseAddress = new Uri(app.Urls.Single()),
-            };
-            using var response = await client.PostAsJsonAsync(
-                "/chat",
-                new { message = "hello" }).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-
-            response.StatusCode.Should().Be(HttpStatusCode.OK, body);
-            body.Should().Contain("test harness response");
-
-            using var streamResponse = await client.PostAsJsonAsync(
-                "/chat/stream",
-                new { message = "stream hello" }).ConfigureAwait(false);
-            var streamBody = await streamResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-
-            streamResponse.StatusCode.Should().Be(HttpStatusCode.OK, streamBody);
-            streamResponse.Content.Headers.ContentType!.MediaType
-                .Should().Be("text/event-stream");
-            streamBody.Should().Contain("test harness response");
-            streamBody.Split("data: ", StringSplitOptions.RemoveEmptyEntries)
-                .Should().HaveCountGreaterThan(1);
-            readiness.IsReady.Should().BeTrue();
+            await AssertHarnessChatAsync(app, readiness).ConfigureAwait(false);
         }
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync().ConfigureAwait(false);
-            await app.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -201,18 +103,7 @@ internal sealed class RuntimeHostCompositionTests
     public async Task CanonicalJobsHttpPath_SubmitsAndDispatchesThroughProductionGraphAsync()
     {
         using var workspace = new TemporaryWorkspace();
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
-            {
-                ["Provider:Key"] = "sharpclaw-test",
-                ["Provider:Model"] = "test-harness-model",
-                ["Packages:sharpclaw_providers_anthropic"] = "false",
-                ["Packages:sharpclaw_providers_google"] = "false",
-                ["Packages:sharpclaw_providers_llamasharp"] = "false",
-                ["Packages:sharpclaw_providers_ollama"] = "false",
-                ["Packages:sharpclaw_providers_openai_compat"] = "false",
-            })
-            .Build();
+        var configuration = CreateHarnessConfiguration();
         using var registrationSet = PackagedDotNetRegistrationSet.Load(
             [
                 Path.Combine(AppContext.BaseDirectory, "contributions"),
@@ -221,210 +112,39 @@ internal sealed class RuntimeHostCompositionTests
             configuration);
         var jobCapture = new JobProbeCapture();
         var jobRegistration = new JobProbeRegistration(jobCapture);
-        var jobServices = SharpClawModuleCompiler.Compile(jobRegistration).Services;
-        var modules = registrationSet.Services
-            .Concat(jobServices)
-            .ToArray();
-        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
-
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-        {
-            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
-        });
-        builder.Configuration.Sources.Clear();
-        builder.Configuration.AddConfiguration(configuration);
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Host.UseDefaultServiceProvider(options =>
-        {
-            options.ValidateScopes = true;
-            options.ValidateOnBuild = true;
-        });
-        RuntimeHostComposition.RegisterServices(
-            builder.Services,
-            configuration,
-            workspace.InstancePaths,
-            new EncryptionOptions { Key = new byte[32] },
-            databaseOptions,
-            modules);
-        builder.Services.AddSingleton(new KernelGraphCompileOptions
-        {
-            ActionRegistrationCapabilityGrants = new Dictionary<
-                string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
-            {
-                [jobRegistration.Identity.Id] = new Dictionary<
-                    string,
-                    ActionInterceptionCapabilities>(StringComparer.Ordinal)
-                {
-                    [JobProbeHandler.Action.Value] =
-                        ActionInterceptionCapabilities.Inspect |
-                        ActionInterceptionCapabilities.Wrap |
-                        ActionInterceptionCapabilities.Observe,
-                },
-            },
-        });
-
-        var app = builder.Build();
+        var app = CreateJobsApplication(workspace, configuration, registrationSet, jobRegistration);
         await using var appAsyncDisposal_ = app.ConfigureAwait(false);
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        using (var jobsScope = app.Services.CreateScope())
-        {
-            jobsScope.ServiceProvider
-                .GetRequiredService<KernelJobsCoordinator>()
-                .Should().NotBeNull();
-        }
+        AssertJobsCoordinatorResolvesInScope(app.Services);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
-        await adapter.StartAsync("jobs-http-test").ConfigureAwait(false);
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await adapter.StartAsync("jobs-http-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
         app.MapHandlers(typeof(KernelJobsHandlers).Assembly);
 
         try
         {
-            await app.StartAsync().ConfigureAwait(false);
+            await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
             using var client = new HttpClient
             {
-                BaseAddress = new Uri(app.Urls.Single()),
+                BaseAddress = new Uri(app.Urls.Should().ContainSingle().Which),
             };
-            using var submitResponse = await client.PostAsJsonAsync(
-                "/jobs",
-                new
-                {
-                    actionKey = JobProbeHandler.Action.Value,
-                    input = new
-                    {
-                        contractName = JobProbeHandler.ContractName,
-                        schemaVersion = 1,
-                        value = JsonSerializer.Serialize(new
-                        {
-                            value = "queued-value",
-                        }),
-                    },
-                }).ConfigureAwait(false);
-            var submitBody = await submitResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var jobId = await SubmitAndDispatchProbeJobAsync(client, jobCapture).ConfigureAwait(false);
 
-            submitResponse.StatusCode.Should().Be(HttpStatusCode.OK, submitBody);
-            using var submitted = JsonDocument.Parse(submitBody);
-            var jobId = submitted.RootElement.GetProperty("id").GetGuid();
-            submitted.RootElement.GetProperty("status").GetInt32()
-                .Should().Be((int)JobStatus.Queued);
+            await AssertJobReadbackAsync(client, jobId).ConfigureAwait(false);
 
-            using var dispatchResponse = await client.PostAsync(
-                $"/jobs/{jobId:D}/dispatch",
-                content: null).ConfigureAwait(false);
-            var dispatchBody = await dispatchResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+            await AssertJobRecoveryAndReplayAsync(client, jobId, jobCapture).ConfigureAwait(false);
 
-            dispatchResponse.StatusCode.Should().Be(HttpStatusCode.OK, dispatchBody);
-            using var dispatched = JsonDocument.Parse(dispatchBody);
-            dispatched.RootElement.GetProperty("outcome").GetInt32()
-                .Should().Be((int)ActionOutcomeKind.Completed);
-            var resultValue = dispatched.RootElement
-                .GetProperty("result")
-                .GetProperty("value")
-                .GetString();
-            resultValue.Should().NotBeNull();
-            using var resultPayload = JsonDocument.Parse(resultValue!);
-            resultPayload.RootElement.GetProperty("value").GetString()
-                .Should().Be("queued-value-executed");
-            jobCapture.ExecutionCount.Should().Be(1);
+            await AssertSecondJobOwnsItsExecutionScopeAsync(client, jobCapture).ConfigureAwait(false);
 
-            using var progressResponse = await client.GetAsync(
-                $"/jobs/{jobId:D}/progress").ConfigureAwait(false);
-            progressResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-            using (var progress = JsonDocument.Parse(
-                await progressResponse.Content.ReadAsStringAsync().ConfigureAwait(false)))
-            {
-                progress.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
-            }
-
-            using var attemptsResponse = await client.GetAsync(
-                $"/jobs/{jobId:D}/attempts").ConfigureAwait(false);
-            attemptsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-            using (var attempts = JsonDocument.Parse(
-                await attemptsResponse.Content.ReadAsStringAsync().ConfigureAwait(false)))
-            {
-                attempts.RootElement.GetArrayLength().Should().Be(1);
-            }
-
-            using var artifactResponse = await client.GetAsync(
-                $"/jobs/{jobId:D}/artifact").ConfigureAwait(false);
-            artifactResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-            var artifact = await artifactResponse.Content
-                .ReadFromJsonAsync<JobPayloadEnvelope>().ConfigureAwait(false);
-            artifact.Should().NotBeNull();
-            artifact!.Value.Should().Contain("queued-value-executed");
-
-            using var recoveryResponse = await client.PostAsync(
-                $"/jobs/{jobId:D}/recover",
-                content: null).ConfigureAwait(false);
-            recoveryResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-            using (var recovered = JsonDocument.Parse(
-                await recoveryResponse.Content.ReadAsStringAsync().ConfigureAwait(false)))
-            {
-                recovered.RootElement.GetProperty("status").GetInt32()
-                    .Should().Be((int)JobStatus.Completed);
-            }
-
-            using var replayResponse = await client.PostAsync(
-                $"/jobs/{jobId:D}/dispatch",
-                content: null).ConfigureAwait(false);
-            replayResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-            using (var replay = JsonDocument.Parse(
-                await replayResponse.Content.ReadAsStringAsync().ConfigureAwait(false)))
-            {
-                replay.RootElement.GetProperty("outcome").GetInt32()
-                    .Should().Be((int)ActionOutcomeKind.Completed);
-            }
-            jobCapture.ExecutionCount.Should().Be(1);
-
-            using var secondSubmitResponse = await client.PostAsJsonAsync(
-                "/jobs",
-                new
-                {
-                    actionKey = JobProbeHandler.Action.Value,
-                    input = new
-                    {
-                        contractName = JobProbeHandler.ContractName,
-                        schemaVersion = 1,
-                        value = JsonSerializer.Serialize(new
-                        {
-                            value = "second-value",
-                        }),
-                    },
-                }).ConfigureAwait(false);
-            secondSubmitResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-            using var secondSubmitted = JsonDocument.Parse(
-                await secondSubmitResponse.Content.ReadAsStringAsync().ConfigureAwait(false));
-            var secondJobId = secondSubmitted.RootElement.GetProperty("id").GetGuid();
-
-            using var secondDispatchResponse = await client.PostAsync(
-                $"/jobs/{secondJobId:D}/dispatch",
-                content: null).ConfigureAwait(false);
-            secondDispatchResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-            jobCapture.ExecutionCount.Should().Be(2);
-            jobCapture.ExecutionInstanceIds.Should().OnlyHaveUniqueItems();
-            jobCapture.ExecutionInstanceIds.Should().HaveCount(2);
-
-            using var secondDeleteResponse = await client.DeleteAsync(
-                $"/jobs/{secondJobId:D}").ConfigureAwait(false);
-            secondDeleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
-
-            using var deleteResponse = await client.DeleteAsync(
-                $"/jobs/{jobId:D}").ConfigureAwait(false);
-            deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
-
-            using var deletedResponse = await client.GetAsync(
-                $"/jobs/{jobId:D}").ConfigureAwait(false);
-            deletedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
-            jobCapture.ActiveCount.Should().Be(0);
-            jobCapture.DisposedCount.Should().Be(jobCapture.CreatedCount);
+            await AssertJobDeletionReleasesHandlersAsync(client, jobId, jobCapture).ConfigureAwait(false);
         }
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync().ConfigureAwait(false);
-            await app.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -443,21 +163,7 @@ internal sealed class RuntimeHostCompositionTests
             })
             .Build();
         var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
-        var receiveKey = new SharpClawActionKey("runtime.request.receive");
-        var receiveManifest = KernelActionCatalog.DescriptorFor(receiveKey);
-        var receiveDescriptor = receiveManifest.ToDescriptor();
-        var receiveTypes = KernelSchemaIdentity.ActionTypes(
-            receiveDescriptor,
-            typeof(KernelActionEnvelope),
-            typeof(object));
-
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-        {
-            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
-        });
-        builder.Configuration.Sources.Clear();
-        builder.Configuration.AddConfiguration(configuration);
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        var builder = CreateHostBuilder(configuration);
         RuntimeHostComposition.RegisterServices(
             builder.Services,
             configuration,
@@ -465,146 +171,32 @@ internal sealed class RuntimeHostCompositionTests
             new EncryptionOptions { Key = new byte[32] },
             databaseOptions,
             TestServiceGraph.Collect([module, new JSONColdStorePersistenceModule()]));
-        builder.Services.AddSingleton(new KernelGraphCompileOptions
-        {
-            ActionRegistrationCapabilityGrants = new Dictionary<
-                string,
-                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
-            {
-                [module.Identity.Id] = new Dictionary<string, ActionInterceptionCapabilities>(
-                    StringComparer.Ordinal)
-                {
-                    [receiveKey.Value] = receiveManifest.Capabilities,
-                },
-            },
-            SensitiveActionApprovals =
-            [
-                new KernelSensitiveActionApproval(
-                    module.Identity.Id,
-                    receiveKey,
-                    receiveDescriptor.Version,
-                    receiveTypes.ActionType.AssemblyQualifiedName!,
-                    receiveTypes.ResultType.AssemblyQualifiedName!,
-                    KernelSchemaIdentity.Action(
-                        receiveDescriptor,
-                        typeof(KernelActionEnvelope),
-                        typeof(object))),
-            ],
-        });
+        RegisterRequestContextGrants(builder.Services, module);
 
         var app = builder.Build();
         await using var appAsyncDisposal__ = app.ConfigureAwait(false);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
-        await adapter.StartAsync("request-context-test").ConfigureAwait(false);
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await adapter.StartAsync("request-context-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         readiness.MarkReady();
-        app.Use(async (context, next) =>
-        {
-            var subject = context.Request.Headers["X-Test-Subject"].ToString();
-            context.User = new ClaimsPrincipal(new ClaimsIdentity(
-                [
-                    new Claim(ClaimTypes.NameIdentifier, subject),
-                    new Claim(ClaimTypes.Name, subject),
-                    new Claim(ClaimTypes.Role, "operator"),
-                ],
-                "test"));
-            context.Items[typeof(ExtensionFeatureSet)] = new ExtensionFeatureSet(
-            [
-                new ExtensionFeature(
-                    $"test.{subject}",
-                    1,
-                    "request-context-probe",
-                    256,
-                    JsonSerializer.SerializeToElement(new { subject })),
-            ]);
-            await next(context).ConfigureAwait(false);
-        });
+        AddSyntheticRequestAuthority(app);
         KernelHostEndpoints.Map(app);
 
         try
         {
-            await app.StartAsync().ConfigureAwait(false);
+            await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
             using var client = new HttpClient
             {
-                BaseAddress = new Uri(app.Urls.Single()),
+                BaseAddress = new Uri(app.Urls.Should().ContainSingle().Which),
             };
-            var first = SendAuthenticatedChatAsync(client, "caller-a", "idempotency-a");
-            var second = SendAuthenticatedChatAsync(client, "caller-b", "idempotency-b");
-            await probe.Observed.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-            probe.Release.TrySetResult(true);
-            var responses = await Task.WhenAll(first, second).ConfigureAwait(false);
-            var completedResponse = await SendAuthenticatedChatAsync(
-                client,
-                "caller-c",
-                "idempotency-c").ConfigureAwait(false);
-            completedResponse.StatusCode.Should().Be(HttpStatusCode.OK, completedResponse.Body);
-
-            responses.Should().AllSatisfy(response =>
-            {
-                response.StatusCode.Should().Be(HttpStatusCode.OK, response.Body);
-                response.Body.Should().Contain("context probe response");
-            });
-            var observations = probe.Items.ToArray();
-            observations.Should().HaveCount(3);
-            observations.Select(item => item.Caller.SubjectId)
-                .Should().BeEquivalentTo(["caller-a", "caller-b", "caller-c"]);
-            observations.Should().AllSatisfy(item =>
-            {
-                item.Caller.IsAuthenticated.Should().BeTrue();
-                item.Caller.Roles.Should().Contain("operator");
-                item.Features.Items.Should().ContainSingle();
-                item.Features.Items[0].ContractName.Should().Be($"test.{item.Caller.SubjectId}");
-            });
-            var expectedFirst = new DefaultHttpContext();
-            expectedFirst.Request.Headers["Idempotency-Key"] = "idempotency-a";
-            var expectedSecond = new DefaultHttpContext();
-            expectedSecond.Request.Headers["Idempotency-Key"] = "idempotency-b";
-            var expectedThird = new DefaultHttpContext();
-            expectedThird.Request.Headers["Idempotency-Key"] = "idempotency-c";
-            observations.Select(item => item.IdempotencyKey)
-                .Should().BeEquivalentTo(
-                [
-                    KernelHostEndpoints.CreateExecutionContext(expectedFirst).IdempotencyKey,
-                    KernelHostEndpoints.CreateExecutionContext(expectedSecond).IdempotencyKey,
-                    KernelHostEndpoints.CreateExecutionContext(expectedThird).IdempotencyKey,
-                ]);
-            observations.Select(item => item.TraceId).Distinct().Should().HaveCount(3);
-            observations.Should().AllSatisfy(item => item.Depth.Should().Be(0));
-
-            probe.FailureSubject = "caller-fail";
-            var failedResponse = await SendAuthenticatedChatAsync(
-                client,
-                "caller-fail",
-                "idempotency-fail").ConfigureAwait(false);
-            failedResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-            failedResponse.Body.Should().Contain("An internal server error occurred.");
-            failedResponse.Body.Should().NotContain("request context probe failure");
-
-            var failedStreamResponse = await SendAuthenticatedAsync(
-                client,
-                "/chat/stream",
-                "caller-fail",
-                "idempotency-stream-fail").ConfigureAwait(false);
-            failedStreamResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-            failedStreamResponse.Body.Should().Contain("An internal server error occurred.");
-            failedStreamResponse.Body.Should().NotContain("request context probe failure");
-            failedStreamResponse.ContentType.Should().Be("application/json");
-            probe.FailureSubject = null;
-
-            var afterFailureResponse = await SendAuthenticatedChatAsync(
-                client,
-                "caller-d",
-                "idempotency-d").ConfigureAwait(false);
-            afterFailureResponse.StatusCode.Should().Be(HttpStatusCode.OK, afterFailureResponse.Body);
-            probe.Items.Should().Contain(item =>
-                item.Caller.SubjectId == "caller-d" && item.Depth == 0);
+            await AssertConcurrentRequestRootsAsync(client, probe).ConfigureAwait(false);
         }
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync().ConfigureAwait(false);
-            await app.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -615,49 +207,16 @@ internal sealed class RuntimeHostCompositionTests
         var providerServer = await FakeOpenAiServer.CreateAsync().ConfigureAwait(false);
         await using var providerServerAsyncDisposal = providerServer.ConfigureAwait(false);
         using var workspace = new TemporaryWorkspace();
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
-            {
-                ["Provider:Key"] = "custom",
-                ["Provider:Model"] = "gpt-3.5-turbo",
-                ["Provider:Endpoint"] = providerServer.Endpoint,
-                ["Provider:ApiKey"] = "normal-payload-test-key",
-            })
-            .Build();
+        var configuration = CreateNormalProviderConfiguration(providerServer.Endpoint, "normal-payload-test-key");
 
         using var registrationSet = PackagedDotNetRegistrationSet.Load(
             Path.Combine(AppContext.BaseDirectory, "contributions"),
             configuration);
-        registrationSet.SourceIds
-            .Should().BeEquivalentTo(
-                [
-                    "sharpclaw_providers_anthropic",
-                    "sharpclaw_providers_google",
-                    "sharpclaw_providers_llamasharp",
-                    "sharpclaw_providers_ollama",
-                    "sharpclaw_providers_openai_compat",
-                    "sharpclaw_persistence_jsoncoldstore",
-                    "sharpclaw_persistence_postgresql",
-                    "sharpclaw_persistence_sqlite",
-                    "sharpclaw_persistence_sqlserver",
-                ]);
-        File.Exists(Path.Combine(
-                AppContext.BaseDirectory,
-                "contributions",
-                "sharpclaw_providers_openai_compat",
-                "SharpClaw.Modules.Providers.OpenAICompatible.dll"))
-            .Should().BeTrue();
-        registrationSet.SourceIds.Should().NotContain("sharpclaw_test_harness_in_process");
+        AssertNormalPackagePayload(registrationSet);
 
         var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
 
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-        {
-            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
-        });
-        builder.Configuration.Sources.Clear();
-        builder.Configuration.AddConfiguration(configuration);
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        var builder = CreateHostBuilder(configuration);
         RuntimeHostComposition.RegisterServices(
             builder.Services,
             configuration,
@@ -675,22 +234,22 @@ internal sealed class RuntimeHostCompositionTests
         graphPlugins!.Should().Contain(plugin => plugin.ProviderKey == "custom");
 
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
-        await adapter.StartAsync("normal-provider-test").ConfigureAwait(false);
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await adapter.StartAsync("normal-provider-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
 
         try
         {
-            await app.StartAsync().ConfigureAwait(false);
+            await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
             using var client = new HttpClient
             {
-                BaseAddress = new Uri(app.Urls.Single()),
+                BaseAddress = new Uri(app.Urls.Should().ContainSingle().Which),
             };
-            using var response = await client.PostAsJsonAsync(
+            using var response = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(client,
                 "/chat",
-                new { message = "normal packaged provider" }).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                new { message = "normal packaged provider" }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
             response.StatusCode.Should().Be(HttpStatusCode.OK, body);
             body.Should().Contain("normal packaged provider response");
@@ -699,8 +258,8 @@ internal sealed class RuntimeHostCompositionTests
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync().ConfigureAwait(false);
-            await app.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -730,12 +289,12 @@ internal sealed class RuntimeHostCompositionTests
             {
                 using var client = new HttpClient
                 {
-                    BaseAddress = new Uri(app.Urls.Single()),
+                    BaseAddress = new Uri(app.Urls.Should().ContainSingle().Which),
                 };
-                using var response = await client.PostAsJsonAsync(
+                using var response = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(client,
                     "/chat",
-                    new { message = "packaged restart" }).ConfigureAwait(false);
-                var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    new { message = "packaged restart" }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
                 response.StatusCode.Should().Be(HttpStatusCode.OK, body);
                 body.Should().Contain("normal packaged provider response");
@@ -823,68 +382,9 @@ internal sealed class RuntimeHostCompositionTests
             databaseOptions,
             async (runtime, _) =>
             {
-                var adapter = runtime.Services.GetRequiredService<RuntimeKernelAdapter>();
-                runtime.Services.GetRequiredService<IActionDispatcher>()
-                    .Should().BeSameAs(adapter.ActionDispatcher);
-                {
-                    var storageScope = runtime.Services.CreateAsyncScope();
-                    await using (storageScope.ConfigureAwait(false))
-                    {
-                        storageScope.ServiceProvider.GetServices<IScopedStorageGateway>()
-                            .Should().ContainSingle();
-                    }
-                }
+                await AssertLlamaRuntimeEndpointAsync(runtime).ConfigureAwait(false);
 
-                using (var runtimeClient = new HttpClient
-                {
-                    BaseAddress = new Uri(runtime.Urls.Single()),
-                })
-                using (var runtimeResponse = await runtimeClient.GetAsync("/models/local/").ConfigureAwait(false))
-                {
-                    var body = await runtimeResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    runtimeResponse.StatusCode.Should().Be(HttpStatusCode.OK, body);
-                    JsonDocument.Parse(body).RootElement.ValueKind.Should().Be(JsonValueKind.Array);
-                }
-
-                var gatewayConfiguration = new ConfigurationBuilder()
-                    .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
-                    {
-                        [$"{InternalApiOptions.SectionName}:BaseUrl"] = runtime.Urls.Single(),
-                        [$"{InternalApiOptions.SectionName}:ApiKey"] = "scope-test-key",
-                    })
-                    .Build();
-                var gatewayBuilder = WebApplication.CreateBuilder();
-                gatewayBuilder.Configuration.Sources.Clear();
-                gatewayBuilder.Configuration.AddConfiguration(gatewayConfiguration);
-                gatewayBuilder.WebHost.UseUrls("http://127.0.0.1:0");
-                gatewayBuilder.Services.Configure<InternalApiOptions>(
-                    gatewayBuilder.Configuration.GetSection(InternalApiOptions.SectionName));
-                gatewayBuilder.Services.AddHttpContextAccessor();
-                gatewayBuilder.Services.AddHttpClient<InternalApiClient>(client =>
-                {
-                    client.BaseAddress = new Uri(runtime.Urls.Single());
-                    client.Timeout = TimeSpan.FromSeconds(30);
-                });
-
-                var gateway = gatewayBuilder.Build();
-                await using var gatewayAsyncDisposal = gateway.ConfigureAwait(false);
-                gateway.MapGatewayProxyEndpoints();
-                await gateway.StartAsync().ConfigureAwait(false);
-                try
-                {
-                    using var gatewayClient = new HttpClient
-                    {
-                        BaseAddress = new Uri(gateway.Urls.Single()),
-                    };
-                    using var gatewayResponse = await gatewayClient.GetAsync("/api/models/local/").ConfigureAwait(false);
-                    var body = await gatewayResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    gatewayResponse.StatusCode.Should().Be(HttpStatusCode.OK, body);
-                    JsonDocument.Parse(body).RootElement.ValueKind.Should().Be(JsonValueKind.Array);
-                }
-                finally
-                {
-                    await gateway.StopAsync().ConfigureAwait(false);
-                }
+                await AssertLlamaGatewayEndpointAsync(runtime).ConfigureAwait(false);
             }).ConfigureAwait(false);
     }
 
@@ -915,12 +415,12 @@ internal sealed class RuntimeHostCompositionTests
             {
                 using var client = new HttpClient
                 {
-                    BaseAddress = new Uri(app.Urls.Single()),
+                    BaseAddress = new Uri(app.Urls.Should().ContainSingle().Which),
                 };
-                using var response = await client.PostAsJsonAsync(
+                using var response = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(client,
                     "/chat",
-                    new { message = "restart me" }).ConfigureAwait(false);
-                var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    new { message = "restart me" }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
                 response.StatusCode.Should().Be(HttpStatusCode.OK, body);
                 body.Should().Contain("test harness response");
@@ -1008,19 +508,7 @@ internal sealed class RuntimeHostCompositionTests
         using var registrationRoot = new TemporaryRegistrationRoot();
         registrationRoot.WriteManifest(
             "invalid-enabled",
-            $$"""
-            {
-              "id": "invalid-enabled",
-              "displayName": "Invalid enabled",
-              "version": "0.1.0",
-              "toolPrefix": "invalid",
-              "runtime": "dotnet",
-              "hostMode": "inprocess",
-              "entryAssembly": "unused.dll",
-              "entryType": "Unused.Module",
-              "enabled": {{enabledJson}}
-            }
-            """);
+            $"{{\n  \"id\": \"invalid-enabled\",\n  \"displayName\": \"Invalid enabled\",\n  \"version\": \"0.1.0\",\n  \"toolPrefix\": \"invalid\",\n  \"runtime\": \"dotnet\",\n  \"hostMode\": \"inprocess\",\n  \"entryAssembly\": \"unused.dll\",\n  \"entryType\": \"Unused.Module\",\n  \"enabled\": {enabledJson}\n}}");
 
         var act = () => PackagedDotNetRegistrationSet.Load(
             registrationRoot.Path,
@@ -1033,19 +521,7 @@ internal sealed class RuntimeHostCompositionTests
     public void PackagedRegistrationSet_RejectsDuplicateManifestIdentityBeforeLoad()
     {
         using var registrationRoot = new TemporaryRegistrationRoot();
-        const string manifest = """
-            {
-              "id": "duplicate-module",
-              "displayName": "Duplicate module",
-              "version": "0.1.0",
-              "toolPrefix": "duplicate",
-              "runtime": "dotnet",
-              "hostMode": "inprocess",
-              "entryAssembly": "unused.dll",
-              "entryType": "Unused.Module",
-              "enabled": false
-            }
-            """;
+        const string manifest = "{\n  \"id\": \"duplicate-module\",\n  \"displayName\": \"Duplicate module\",\n  \"version\": \"0.1.0\",\n  \"toolPrefix\": \"duplicate\",\n  \"runtime\": \"dotnet\",\n  \"hostMode\": \"inprocess\",\n  \"entryAssembly\": \"unused.dll\",\n  \"entryType\": \"Unused.Module\",\n  \"enabled\": false\n}";
         registrationRoot.WriteManifest("first", manifest);
         registrationRoot.WriteManifest("second", manifest);
 
@@ -1082,6 +558,597 @@ internal sealed class RuntimeHostCompositionTests
             response.Content.Headers.ContentType?.MediaType);
     }
 
+    private static WebApplication CreateJobsApplication(TemporaryWorkspace workspace, IConfiguration configuration, PackagedDotNetRegistrationSet registrationSet, JobProbeRegistration jobRegistration)
+    {
+        var jobServices = SharpClawModuleCompiler.Compile(jobRegistration).Services;
+        var modules = registrationSet.Services
+            .Concat(jobServices)
+            .ToArray();
+        var databaseOptions = PersistenceOptions(workspace.DatabaseDirectory);
+
+        var builder = CreateValidatedHostBuilder(configuration);
+        RuntimeHostComposition.RegisterServices(
+            builder.Services,
+            configuration,
+            workspace.InstancePaths,
+            new EncryptionOptions { Key = new byte[32] },
+            databaseOptions,
+            modules);
+        RegisterJobProbeGrants(builder.Services, jobRegistration);
+
+        return builder.Build();
+    }
+
+    private static IConfigurationRoot CreateNormalProviderConfiguration(string endpoint, string apiKey)
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["Provider:Key"] = "custom",
+                ["Provider:Model"] = "gpt-3.5-turbo",
+                ["Provider:Endpoint"] = endpoint,
+                ["Provider:ApiKey"] = apiKey,
+            })
+            .Build();
+    }
+
+    private static WebApplicationBuilder CreateHostBuilder(IConfiguration configuration)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
+        });
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddConfiguration(configuration);
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        return builder;
+    }
+
+    private static async Task AssertJobDeletionReleasesHandlersAsync(HttpClient client, Guid jobId, JobProbeCapture jobCapture)
+    {
+        using var deleteResponse = await client.DeleteAsync(new Uri(
+            $"/jobs/{jobId:D}", UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        using var deletedResponse = await client.GetAsync(new Uri(
+            $"/jobs/{jobId:D}", UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        deletedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        jobCapture.ActiveCount.Should().Be(0);
+        jobCapture.DisposedCount.Should().Be(jobCapture.CreatedCount);
+    }
+
+    private static void AssertJobsCoordinatorResolvesInScope(IServiceProvider services)
+    {
+        using var scope = services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<KernelJobsCoordinator>().Should().NotBeNull();
+    }
+
+    private static void AssertNormalPackagePayload(PackagedDotNetRegistrationSet registrationSet)
+    {
+        registrationSet.SourceIds
+            .Should().BeEquivalentTo(
+                [
+                    "sharpclaw_providers_anthropic",
+                    "sharpclaw_providers_google",
+                    "sharpclaw_providers_llamasharp",
+                    "sharpclaw_providers_ollama",
+                    "sharpclaw_providers_openai_compat",
+                    "sharpclaw_persistence_jsoncoldstore",
+                    "sharpclaw_persistence_postgresql",
+                    "sharpclaw_persistence_sqlite",
+                    "sharpclaw_persistence_sqlserver",
+                ]);
+        File.Exists(Path.Combine(
+                AppContext.BaseDirectory,
+                "contributions",
+                "sharpclaw_providers_openai_compat",
+                "SharpClaw.Modules.Providers.OpenAICompatible.dll"))
+            .Should().BeTrue();
+        registrationSet.SourceIds.Should().NotContain("sharpclaw_test_harness_in_process");
+    }
+
+    private static async Task AssertLlamaRuntimeEndpointAsync(WebApplication runtime)
+    {
+        var adapter = runtime.Services.GetRequiredService<RuntimeKernelAdapter>();
+        runtime.Services.GetRequiredService<IActionDispatcher>()
+            .Should().BeSameAs(adapter.ActionDispatcher);
+        {
+            var storageScope = runtime.Services.CreateAsyncScope();
+            await using (storageScope.ConfigureAwait(false))
+            {
+                storageScope.ServiceProvider.GetServices<IScopedStorageGateway>()
+                    .Should().ContainSingle();
+            }
+        }
+
+        using (var runtimeClient = new HttpClient
+        {
+            BaseAddress = new Uri(runtime.Urls.Should().ContainSingle().Which),
+        })
+        using (var runtimeResponse = await runtimeClient.GetAsync(new Uri("/models/local/", UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false))
+        {
+            var body = await runtimeResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            runtimeResponse.StatusCode.Should().Be(HttpStatusCode.OK, body);
+            using var document = JsonDocument.Parse(body);
+            document.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        }
+    }
+
+    private static async Task AssertLlamaGatewayEndpointAsync(WebApplication runtime)
+    {
+        var gatewayConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                [$"{InternalApiOptions.SectionName}:BaseUrl"] = runtime.Urls.Should().ContainSingle().Which,
+                [$"{InternalApiOptions.SectionName}:ApiKey"] = "scope-test-key",
+            })
+            .Build();
+        var gatewayBuilder = WebApplication.CreateBuilder();
+        gatewayBuilder.Configuration.Sources.Clear();
+        gatewayBuilder.Configuration.AddConfiguration(gatewayConfiguration);
+        gatewayBuilder.WebHost.UseUrls("http://127.0.0.1:0");
+        gatewayBuilder.Services.Configure<InternalApiOptions>(
+            gatewayBuilder.Configuration.GetSection(InternalApiOptions.SectionName));
+        gatewayBuilder.Services.AddHttpContextAccessor();
+        gatewayBuilder.Services.AddHttpClient<InternalApiClient>(client =>
+        {
+            client.BaseAddress = new Uri(runtime.Urls.Should().ContainSingle().Which);
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+
+        var gateway = gatewayBuilder.Build();
+        await using var gatewayAsyncDisposal = gateway.ConfigureAwait(false);
+        gateway.MapGatewayProxyEndpoints();
+        await gateway.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var gatewayClient = new HttpClient
+            {
+                BaseAddress = new Uri(gateway.Urls.Should().ContainSingle().Which),
+            };
+            using var gatewayResponse = await gatewayClient.GetAsync(new Uri("/api/models/local/", UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            var body = await gatewayResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            gatewayResponse.StatusCode.Should().Be(HttpStatusCode.OK, body);
+            using var document = JsonDocument.Parse(body);
+            document.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        }
+        finally
+        {
+            await gateway.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private static IConfigurationRoot CreateHarnessConfiguration()
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["Provider:Key"] = "sharpclaw-test",
+                ["Provider:Model"] = "test-harness-model",
+                ["Packages:sharpclaw_providers_anthropic"] = "false",
+                ["Packages:sharpclaw_providers_google"] = "false",
+                ["Packages:sharpclaw_providers_llamasharp"] = "false",
+                ["Packages:sharpclaw_providers_ollama"] = "false",
+                ["Packages:sharpclaw_providers_openai_compat"] = "false",
+            })
+            .Build();
+    }
+
+    private static WebApplicationBuilder CreateValidatedHostBuilder(IConfiguration configuration)
+    {
+        var builder = CreateHostBuilder(configuration);
+        builder.Host.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateScopes = true;
+            options.ValidateOnBuild = true;
+        });
+        return builder;
+    }
+
+    private static async Task AssertKernelHostGraphAsync(WebApplication app, RuntimeKernelAdapter adapter)
+    {
+        app.Services.GetService<IConversationStore>().Should().BeNull();
+        app.Services.GetRequiredService<IActionDispatcher>()
+            .Should().BeSameAs(adapter.ActionDispatcher);
+        adapter.Graph.ContainsAction(new SharpClawActionKey("runtime.request.receive"))
+            .Should().BeTrue();
+        adapter.Graph.ContainsAction(new SharpClawActionKey("jobs.submit"))
+            .Should().BeTrue();
+        adapter.Graph.ContainsAction(new SharpClawActionKey("jobs.dispatch"))
+            .Should().BeTrue();
+        adapter.Graph.ContainsAction(new SharpClawActionKey("jobs.cancel"))
+            .Should().BeTrue();
+        adapter.Graph.ContainsAction(new SharpClawActionKey("storage.query"))
+            .Should().BeTrue();
+        {
+            var jobsScope = app.Services.CreateAsyncScope();
+            await using (jobsScope.ConfigureAwait(false))
+            {
+                jobsScope.ServiceProvider
+                    .GetRequiredService<KernelJobsStore>()
+                    .Should().NotBeNull();
+                jobsScope.ServiceProvider
+                    .GetRequiredService<KernelJobsCoordinator>()
+                    .Should().NotBeNull();
+            }
+        }
+    }
+
+    private static async Task AssertScopedCliLifetimeAsync(PackagedDotNetRegistrationSet registrationSet, RuntimeKernelAdapter adapter)
+    {
+        var cliContext = RuntimeKernelAdapter.CreateCliExecutionContext(RequestPrincipal.Anonymous);
+        var firstCli = await registrationSet.Application.TryInvokeCliAsync(
+            "test-harness-scope",
+            [],
+            adapter,
+            cliContext,
+            CancellationToken.None).ConfigureAwait(false);
+        var secondCli = await registrationSet.Application.TryInvokeCliAsync(
+            "test-harness-scope",
+            [],
+            adapter,
+            cliContext,
+            CancellationToken.None).ConfigureAwait(false);
+        var thirdCli = await registrationSet.Application.TryInvokeCliAsync(
+            "test-harness-scope",
+            [],
+            adapter,
+            cliContext,
+            CancellationToken.None).ConfigureAwait(false);
+        firstCli.Should().NotBeNull();
+        secondCli.Should().NotBeNull();
+        thirdCli.Should().NotBeNull();
+        using var firstCliState = JsonDocument.Parse(firstCli!.Output.Should().ContainSingle().Which.Text);
+        using var secondCliState = JsonDocument.Parse(secondCli!.Output.Should().ContainSingle().Which.Text);
+        using var thirdCliState = JsonDocument.Parse(thirdCli!.Output.Should().ContainSingle().Which.Text);
+        firstCliState.RootElement.GetProperty("instanceId").GetGuid()
+            .Should().NotBe(secondCliState.RootElement.GetProperty("instanceId").GetGuid());
+        secondCliState.RootElement.GetProperty("disposed").GetInt32().Should().Be(1);
+        thirdCliState.RootElement.GetProperty("disposed").GetInt32().Should().Be(2);
+        thirdCliState.RootElement.GetProperty("active").GetInt32().Should().Be(1);
+    }
+
+    private static async Task AssertHarnessChatAsync(WebApplication app, RuntimeReadinessState readiness)
+    {
+        using var client = new HttpClient
+        {
+            BaseAddress = new Uri(app.Urls.Should().ContainSingle().Which),
+        };
+        using var response = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(client,
+            "/chat",
+            new { message = "hello" }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        body.Should().Contain("test harness response");
+
+        using var streamResponse = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(client,
+            "/chat/stream",
+            new { message = "stream hello" }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        var streamBody = await streamResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+
+        streamResponse.StatusCode.Should().Be(HttpStatusCode.OK, streamBody);
+        streamResponse.Content.Headers.ContentType!.MediaType
+            .Should().Be("text/event-stream");
+        streamBody.Should().Contain("test harness response");
+        streamBody.Split("data: ", StringSplitOptions.RemoveEmptyEntries)
+            .Should().HaveCountGreaterThan(1);
+        readiness.IsReady.Should().BeTrue();
+    }
+
+    private static void RegisterJobProbeGrants(IServiceCollection services, JobProbeRegistration jobRegistration)
+    {
+        services.AddSingleton(new KernelGraphCompileOptions
+        {
+            ActionRegistrationCapabilityGrants = new Dictionary<
+                string,
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
+            {
+                [jobRegistration.Identity.Id] = new Dictionary<
+                    string,
+                    ActionInterceptionCapabilities>(StringComparer.Ordinal)
+                {
+                    [JobProbeHandler.Action.Value] =
+                        ActionInterceptionCapabilities.Inspect |
+                        ActionInterceptionCapabilities.Wrap |
+                        ActionInterceptionCapabilities.Observe,
+                },
+            },
+        });
+
+    }
+
+    private static async Task<Guid> SubmitAndDispatchProbeJobAsync(HttpClient client, JobProbeCapture jobCapture)
+    {
+        using var submitResponse = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(client,
+            "/jobs",
+            new
+            {
+                actionKey = JobProbeHandler.Action.Value,
+                input = new
+                {
+                    contractName = JobProbeHandler.ContractName,
+                    schemaVersion = 1,
+                    value = JsonSerializer.Serialize(new
+                    {
+                        value = "queued-value",
+                    }),
+                },
+            }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        var submitBody = await submitResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+
+        submitResponse.StatusCode.Should().Be(HttpStatusCode.OK, submitBody);
+        using var submitted = JsonDocument.Parse(submitBody);
+        var jobId = submitted.RootElement.GetProperty("id").GetGuid();
+        submitted.RootElement.GetProperty("status").GetInt32()
+            .Should().Be((int)JobStatus.Queued);
+
+        using var dispatchResponse = await client.PostAsync(new Uri(
+            $"/jobs/{jobId:D}/dispatch", UriKind.RelativeOrAbsolute),
+            content: null, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        var dispatchBody = await dispatchResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+
+        dispatchResponse.StatusCode.Should().Be(HttpStatusCode.OK, dispatchBody);
+        using var dispatched = JsonDocument.Parse(dispatchBody);
+        dispatched.RootElement.GetProperty("outcome").GetInt32()
+            .Should().Be((int)ActionOutcomeKind.Completed);
+        var resultValue = dispatched.RootElement
+            .GetProperty("result")
+            .GetProperty("value")
+            .GetString();
+        resultValue.Should().NotBeNull();
+        using var resultPayload = JsonDocument.Parse(resultValue!);
+        resultPayload.RootElement.GetProperty("value").GetString()
+            .Should().Be("queued-value-executed");
+        jobCapture.ExecutionCount.Should().Be(1);
+
+        return jobId;
+    }
+
+    private static async Task AssertJobReadbackAsync(HttpClient client, Guid jobId)
+    {
+        using var progressResponse = await client.GetAsync(new Uri(
+            $"/jobs/{jobId:D}/progress", UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        progressResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var progress = JsonDocument.Parse(
+            await progressResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)))
+        {
+            progress.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        }
+
+        using var attemptsResponse = await client.GetAsync(new Uri(
+            $"/jobs/{jobId:D}/attempts", UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        attemptsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var attempts = JsonDocument.Parse(
+            await attemptsResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)))
+        {
+            attempts.RootElement.GetArrayLength().Should().Be(1);
+        }
+
+        using var artifactResponse = await client.GetAsync(new Uri(
+            $"/jobs/{jobId:D}/artifact", UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        artifactResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var artifact = await artifactResponse.Content
+            .ReadFromJsonAsync<JobPayloadEnvelope>(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        artifact.Should().NotBeNull();
+        artifact!.Value.Should().Contain("queued-value-executed");
+    }
+
+    private static async Task AssertJobRecoveryAndReplayAsync(HttpClient client, Guid jobId, JobProbeCapture jobCapture)
+    {
+        using var recoveryResponse = await client.PostAsync(new Uri(
+            $"/jobs/{jobId:D}/recover", UriKind.RelativeOrAbsolute),
+            content: null, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        recoveryResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var recovered = JsonDocument.Parse(
+            await recoveryResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)))
+        {
+            recovered.RootElement.GetProperty("status").GetInt32()
+                .Should().Be((int)JobStatus.Completed);
+        }
+
+        using var replayResponse = await client.PostAsync(new Uri(
+            $"/jobs/{jobId:D}/dispatch", UriKind.RelativeOrAbsolute),
+            content: null, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        replayResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var replay = JsonDocument.Parse(
+            await replayResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)))
+        {
+            replay.RootElement.GetProperty("outcome").GetInt32()
+                .Should().Be((int)ActionOutcomeKind.Completed);
+        }
+        jobCapture.ExecutionCount.Should().Be(1);
+    }
+
+    private static async Task AssertSecondJobOwnsItsExecutionScopeAsync(HttpClient client, JobProbeCapture jobCapture)
+    {
+        using var secondSubmitResponse = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(client,
+            "/jobs",
+            new
+            {
+                actionKey = JobProbeHandler.Action.Value,
+                input = new
+                {
+                    contractName = JobProbeHandler.ContractName,
+                    schemaVersion = 1,
+                    value = JsonSerializer.Serialize(new
+                    {
+                        value = "second-value",
+                    }),
+                },
+            }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        secondSubmitResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var secondSubmitted = JsonDocument.Parse(
+            await secondSubmitResponse.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false));
+        var secondJobId = secondSubmitted.RootElement.GetProperty("id").GetGuid();
+
+        using var secondDispatchResponse = await client.PostAsync(new Uri(
+            $"/jobs/{secondJobId:D}/dispatch", UriKind.RelativeOrAbsolute),
+            content: null, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        secondDispatchResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        jobCapture.ExecutionCount.Should().Be(2);
+        jobCapture.ExecutionInstanceIds.Should().OnlyHaveUniqueItems();
+        jobCapture.ExecutionInstanceIds.Should().HaveCount(2);
+
+        using var secondDeleteResponse = await client.DeleteAsync(new Uri(
+            $"/jobs/{secondJobId:D}", UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        secondDeleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    private static void AddSyntheticRequestAuthority(WebApplication app)
+    {
+        app.Use(async (context, next) =>
+        {
+            var subject = context.Request.Headers["X-Test-Subject"].ToString();
+            context.User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, subject),
+                    new Claim(ClaimTypes.Name, subject),
+                    new Claim(ClaimTypes.Role, "operator"),
+                ],
+                "test"));
+            context.Items[typeof(ExtensionFeatureSet)] = new ExtensionFeatureSet(
+            [
+                new ExtensionFeature(
+                    $"test.{subject}",
+                    1,
+                    "request-context-probe",
+                    256,
+                    JsonSerializer.SerializeToElement(new { subject })),
+            ]);
+            await next(context).ConfigureAwait(false);
+        });
+    }
+
+    private static void RegisterRequestContextGrants(IServiceCollection services, RequestContextProbeRegistration module)
+    {
+        var receiveKey = new SharpClawActionKey("runtime.request.receive");
+        var receiveManifest = KernelActionCatalog.DescriptorFor(receiveKey);
+        var receiveDescriptor = receiveManifest.ToDescriptor();
+        var receiveTypes = KernelSchemaIdentity.ActionTypes(
+            receiveDescriptor,
+            typeof(KernelActionEnvelope),
+            typeof(object));
+
+        services.AddSingleton(new KernelGraphCompileOptions
+        {
+            ActionRegistrationCapabilityGrants = new Dictionary<
+                string,
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
+            {
+                [module.Identity.Id] = new Dictionary<string, ActionInterceptionCapabilities>(
+                    StringComparer.Ordinal)
+                {
+                    [receiveKey.Value] = receiveManifest.Capabilities,
+                },
+            },
+            SensitiveActionApprovals =
+            [
+                new KernelSensitiveActionApproval(
+                    module.Identity.Id,
+                    receiveKey,
+                    receiveDescriptor.Version,
+                    receiveTypes.ActionType.AssemblyQualifiedName!,
+                    receiveTypes.ResultType.AssemblyQualifiedName!,
+                    KernelSchemaIdentity.Action(receiveDescriptor)),
+            ],
+        });
+
+    }
+
+    private static async Task AssertConcurrentRequestRootsAsync(HttpClient client, RequestContextProbe probe)
+    {
+        var first = SendAuthenticatedChatAsync(client, "caller-a", "idempotency-a");
+        var second = SendAuthenticatedChatAsync(client, "caller-b", "idempotency-b");
+        try
+        {
+            await probe.Observed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            probe.Release.TrySetResult(true);
+            var responses = await Task.WhenAll(first, second).ConfigureAwait(false);
+            var completedResponse = await SendAuthenticatedChatAsync(
+                client,
+                "caller-c",
+                "idempotency-c").ConfigureAwait(false);
+            completedResponse.StatusCode.Should().Be(HttpStatusCode.OK, completedResponse.Body);
+
+            responses.Should().AllSatisfy(response =>
+            {
+                response.StatusCode.Should().Be(HttpStatusCode.OK, response.Body);
+                response.Body.Should().Contain("context probe response");
+            });
+            AssertRequestRootObservations(probe);
+
+            await AssertRequestFailuresAreRedactedAsync(client, probe).ConfigureAwait(false);
+        }
+        finally
+        {
+            probe.Release.TrySetResult(true);
+            await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private static void AssertRequestRootObservations(RequestContextProbe probe)
+    {
+        var observations = probe.Items.ToArray();
+        observations.Should().HaveCount(3);
+        observations.Select(item => item.Caller.SubjectId)
+            .Should().BeEquivalentTo(["caller-a", "caller-b", "caller-c"]);
+        observations.Should().AllSatisfy(item =>
+        {
+            item.Caller.IsAuthenticated.Should().BeTrue();
+            item.Caller.Roles.Should().Contain("operator");
+            item.Features.Items.Should().ContainSingle();
+            item.Features.Items[0].ContractName.Should().Be($"test.{item.Caller.SubjectId}");
+        });
+        var expectedFirst = new DefaultHttpContext();
+        expectedFirst.Request.Headers["Idempotency-Key"] = "idempotency-a";
+        var expectedSecond = new DefaultHttpContext();
+        expectedSecond.Request.Headers["Idempotency-Key"] = "idempotency-b";
+        var expectedThird = new DefaultHttpContext();
+        expectedThird.Request.Headers["Idempotency-Key"] = "idempotency-c";
+        observations.Select(item => item.IdempotencyKey)
+            .Should().BeEquivalentTo(
+            [
+                KernelHostEndpoints.CreateExecutionContext(expectedFirst).IdempotencyKey,
+                KernelHostEndpoints.CreateExecutionContext(expectedSecond).IdempotencyKey,
+                KernelHostEndpoints.CreateExecutionContext(expectedThird).IdempotencyKey,
+            ]);
+        observations.Select(item => item.TraceId).Distinct().Should().HaveCount(3);
+        observations.Should().AllSatisfy(item => item.Depth.Should().Be(0));
+
+    }
+
+    private static async Task AssertRequestFailuresAreRedactedAsync(HttpClient client, RequestContextProbe probe)
+    {
+        probe.FailureSubject = "caller-fail";
+        var failedResponse = await SendAuthenticatedChatAsync(
+            client,
+            "caller-fail",
+            "idempotency-fail").ConfigureAwait(false);
+        failedResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        failedResponse.Body.Should().Contain("An internal server error occurred.");
+        failedResponse.Body.Should().NotContain("request context probe failure");
+
+        var failedStreamResponse = await SendAuthenticatedAsync(
+            client,
+            "/chat/stream",
+            "caller-fail",
+            "idempotency-stream-fail").ConfigureAwait(false);
+        failedStreamResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        failedStreamResponse.Body.Should().Contain("An internal server error occurred.");
+        failedStreamResponse.Body.Should().NotContain("request context probe failure");
+        failedStreamResponse.ContentType.Should().Be("application/json");
+        probe.FailureSubject = null;
+
+        var afterFailureResponse = await SendAuthenticatedChatAsync(
+            client,
+            "caller-d",
+            "idempotency-d").ConfigureAwait(false);
+        afterFailureResponse.StatusCode.Should().Be(HttpStatusCode.OK, afterFailureResponse.Body);
+        probe.Items.Should().Contain(item =>
+            item.Caller.SubjectId == "caller-d" && item.Depth == 0);
+    }
+
     private static SharpClawPersistenceOptions PersistenceOptions(string dataDirectory) =>
         new()
         {
@@ -1110,13 +1177,7 @@ internal sealed class RuntimeHostCompositionTests
                 "sharpclaw_test_harness_in_process",
             ]);
 
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-        {
-            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
-        });
-        builder.Configuration.Sources.Clear();
-        builder.Configuration.AddConfiguration(configuration);
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        var builder = CreateHostBuilder(configuration);
         builder.Host.UseDefaultServiceProvider(options =>
         {
             options.ValidateScopes = true;
@@ -1134,21 +1195,21 @@ internal sealed class RuntimeHostCompositionTests
         await using var appAsyncDisposal____ = app.ConfigureAwait(false);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
-        await adapter.StartAsync("test-host").ConfigureAwait(false);
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await adapter.StartAsync("test-host", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
 
         try
         {
-            await app.StartAsync().ConfigureAwait(false);
+            await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
             await operation(app).ConfigureAwait(false);
         }
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync().ConfigureAwait(false);
-            await app.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -1175,13 +1236,7 @@ internal sealed class RuntimeHostCompositionTests
                     "sharpclaw_persistence_sqlserver",
                 ]);
 
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-        {
-            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
-        });
-        builder.Configuration.Sources.Clear();
-        builder.Configuration.AddConfiguration(configuration);
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        var builder = CreateHostBuilder(configuration);
         RuntimeHostComposition.RegisterServices(
             builder.Services,
             configuration,
@@ -1194,23 +1249,23 @@ internal sealed class RuntimeHostCompositionTests
         await using var appAsyncDisposal_____ = app.ConfigureAwait(false);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
-        await registrationSet.ConnectCapabilitiesAsync(app.Services).ConfigureAwait(false);
-        await adapter.StartAsync("normal-provider-restart-test").ConfigureAwait(false);
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await registrationSet.ConnectCapabilitiesAsync(app.Services, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await adapter.StartAsync("normal-provider-restart-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
         registrationSet.Application.MapEndpoints(app, adapter);
 
         try
         {
-            await app.StartAsync().ConfigureAwait(false);
+            await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
             await operation(app, registrationSet.Services).ConfigureAwait(false);
         }
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync().ConfigureAwait(false);
-            await app.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -1309,7 +1364,12 @@ internal sealed class RuntimeHostCompositionTests
         {
             probe.Record(context);
             if (probe.ShouldFail(context.Caller.SubjectId))
+            {
+                // An injected non-domain failure verifies production response redaction.
+#pragma warning disable CA2201, MA0014
                 throw new ApplicationException("request context probe failure");
+#pragma warning restore CA2201, MA0014
+            }
             await probe.Release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -1520,8 +1580,13 @@ internal sealed class RuntimeHostCompositionTests
                 if (Directory.Exists(_root))
                     Directory.Delete(_root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }
@@ -1561,7 +1626,7 @@ internal sealed class RuntimeHostCompositionTests
             _app = app;
         }
 
-        public string Endpoint => _app.Urls.Single() + "/v1";
+        public string Endpoint => _app.Urls.Should().ContainSingle().Which + "/v1";
 
         public static async Task<FakeOpenAiServer> CreateAsync()
         {
@@ -1592,7 +1657,7 @@ internal sealed class RuntimeHostCompositionTests
                         completion_tokens = 1,
                     },
                 }));
-            await app.StartAsync().ConfigureAwait(false);
+            await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
             return new FakeOpenAiServer(app);
         }
 

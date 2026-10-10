@@ -71,8 +71,13 @@ internal sealed class ApiKeyProvider
 
             File.Delete(path);
         }
-        catch
+        catch (IOException)
         {
+            // Session cleanup is best effort when the owned file has already gone away.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // A permissions change must not prevent the remaining shutdown steps.
         }
     }
 }

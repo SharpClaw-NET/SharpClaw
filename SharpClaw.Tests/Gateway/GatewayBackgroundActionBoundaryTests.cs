@@ -1,3 +1,8 @@
+using System.Net;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using SharpClaw.Gateway.Configuration;
 using System.Collections.Concurrent;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -161,7 +166,7 @@ internal sealed class GatewayBackgroundActionBoundaryTests
             sourceRoot,
             "SharpClaw.Gateway",
             "Infrastructure",
-            "RequestQueueService.cs");
+            "RequestQueueProcessor.cs");
         var source = File.ReadAllText(sourcePath);
 
         source.Should().Contain("GatewayBackgroundActionBoundary backgroundActions");
@@ -199,7 +204,88 @@ internal sealed class GatewayBackgroundActionBoundaryTests
             .Where(static name => name is not null)
             .ToArray();
 
-        backgroundServiceFiles.Should().Equal("RequestQueueService.cs");
+        backgroundServiceFiles.Should().Equal("RequestQueueProcessor.cs");
+    }
+
+    [Test]
+    public async Task QueueShutdownJoinsCancelledChildrenBeforeStoppingItsActionServiceAsync()
+    {
+        var options = Options.Create(new RequestQueueOptions { MaxConcurrency = 2, MaxRetries = 0 });
+        using var handler = new HeldCancellationHandler();
+        using var http = new HttpClient(handler, disposeHandler: false) { BaseAddress = new Uri("https://fixture.invalid") };
+        var core = new InternalApiClient(http, Options.Create(new InternalApiOptions { ApiKey = "fixture-key" }),
+            new HttpContextAccessor(), NullLogger<InternalApiClient>.Instance);
+        using var queue = new RequestQueueService(options, new QueueMetrics(), NullLogger<RequestQueueService>.Instance);
+        var probe = new BackgroundProbe();
+        using var processor = new RequestQueueProcessor(queue, core, options, NullLogger<RequestQueueProcessor>.Instance,
+            CreateBoundary(probe));
+        var first = new QueuedRequest { Method = HttpMethod.Post, Path = "/first" };
+        var second = new QueuedRequest { Method = HttpMethod.Post, Path = "/second" };
+        var waiting = new QueuedRequest { Method = HttpMethod.Post, Path = "/waiting" };
+        queue.TryEnqueue(first).Should().BeTrue();
+        queue.TryEnqueue(second).Should().BeTrue();
+        queue.TryEnqueue(waiting).Should().BeTrue();
+        await processor.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        Task stopping = Task.CompletedTask;
+        try
+        {
+            await handler.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            queue.PendingCount.Should().Be(1, "the third request waits behind the two controlled HTTP operations");
+            stopping = processor.StopAsync(CancellationToken.None);
+            await handler.Cancelled.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            stopping.IsCompleted.Should().BeFalse("both child cancellation callbacks still own their HTTP operations");
+            probe.ActionKeys.Should().NotContain("background.service.stop");
+        }
+        finally
+        {
+            handler.Release();
+            var stopOutcomes = await TestTaskOutcome.JoinAsync(
+                stopping,
+                processor.StopAsync(CancellationToken.None)).ConfigureAwait(false);
+            stopOutcomes.Should().OnlyContain(static exception => object.Equals(exception, null));
+            // These queue-owned receipts use asynchronous continuations. Both HTTP
+            // gates and shutdown receipts have settled before this context-free join.
+#pragma warning disable VSTHRD003
+            await TestTaskOutcome.JoinAsync(first.Completion.Task, second.Completion.Task, waiting.Completion.Task).ConfigureAwait(false);
+#pragma warning restore VSTHRD003
+        }
+        handler.Settled.Should().Be(2);
+        first.Completion.Task.IsCanceled.Should().BeTrue();
+        second.Completion.Task.IsCanceled.Should().BeTrue();
+        waiting.Completion.Task.IsCanceled.Should().BeTrue();
+        handler.HttpStarts.Should().Be(2, "shutdown must cancel waiting receipts without starting another HTTP operation");
+        probe.ActionKeys.Should().Contain("background.service.stop");
+    }
+
+    private sealed class HeldCancellationHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _startedCount;
+        private int _cancelledCount;
+        private int _settled;
+        public Task Started => _started.Task;
+        public Task Cancelled => _cancelled.Task;
+        public int Settled => Volatile.Read(ref _settled);
+        public int HttpStarts => Volatile.Read(ref _startedCount);
+        public void Release() => _release.TrySetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _startedCount) == 2) _started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+                throw new AssertionException("The controlled HTTP operation must be cancelled by processor shutdown.");
+            }
+            finally
+            {
+                if (Interlocked.Increment(ref _cancelledCount) == 2) _cancelled.TrySetResult();
+                await _release.Task.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
+                Interlocked.Increment(ref _settled);
+            }
+        }
     }
 
     private static GatewayBackgroundActionBoundary CreateBoundary(BackgroundProbe probe)

@@ -13,16 +13,24 @@ public sealed class EfPersistenceEntityResolver : IPersistenceEntityResolver
 {
     public async Task<T?> FindAsync<T>(SharpClawDbContext db, Guid id, CancellationToken ct = default)
         where T : BaseEntity
-        => await db.Set<T>().FindAsync([id], ct).ConfigureAwait(false);
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        return await db.Set<T>().FindAsync([id], ct).ConfigureAwait(false);
+    }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0026", Justification = "Preserve the existing interface's published optional overloads and their defaults.")]
     public async Task<IReadOnlyList<T>> QueryAsync<T>(
         SharpClawDbContext db,
         Expression<Func<T, bool>> predicate,
         PersistenceQueryHint? hint = null,
         CancellationToken ct = default)
         where T : BaseEntity
-        => await db.Set<T>().Where(predicate).OrderBy(e => e.CreatedAt).ToListAsync(ct).ConfigureAwait(false);
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        return await db.Set<T>().Where(predicate).OrderBy(e => e.CreatedAt).ToListAsync(ct).ConfigureAwait(false);
+    }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0026", Justification = "Preserve the existing interface's published optional overloads and their defaults.")]
     public async Task<IReadOnlyList<T>> QueryAsync<T>(
         SharpClawDbContext db,
         Expression<Func<T, bool>> predicate,
@@ -30,10 +38,13 @@ public sealed class EfPersistenceEntityResolver : IPersistenceEntityResolver
         PersistenceQueryHint? hint = null,
         CancellationToken ct = default)
         where T : BaseEntity
-        => await db.Set<T>()
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        return await db.Set<T>()
             .Where(predicate)
             .OrderByDescending(e => e.CreatedAt)
             .Take(limit)
             .OrderBy(e => e.CreatedAt)
             .ToListAsync(ct).ConfigureAwait(false);
+    }
 }

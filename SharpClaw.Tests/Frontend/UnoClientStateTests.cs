@@ -28,7 +28,7 @@ internal sealed class UnoClientStateTests
     [Test]
     public void DirectChatRequest_CanCarryExplicitConversationIdentity()
     {
-        var id = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var id = new Guid(0xaaaaaaaa, 0xaaaa, 0xaaaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa);
         var request = new UnoDirectChatRequest("hello", id);
 
         JsonSerializer.Serialize(request, Json).Should().Be(

@@ -13,6 +13,8 @@ internal sealed class ModulePackageSources : IDisposable
     public ModulePackageSources() : this(CreateHttpClient()) { }
     internal ModulePackageSources(HttpClient http) => _http = http;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2000",
+        Justification = "The returned HttpClient owns its handler through disposeHandler: true. Every constructor/configuration failure disposes the acquired handler/client before rethrowing; the analyzer cannot follow this explicit ownership transfer.")]
     private static HttpClient CreateHttpClient()
     {
         var handler = new HttpClientHandler { AllowAutoRedirect = false, CheckCertificateRevocationList = true };
@@ -44,60 +46,10 @@ internal sealed class ModulePackageSources : IDisposable
         }
         if (uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
         {
-            if (parts.Length >= 3 && string.Equals(parts[2], "releases", StringComparison.Ordinal) && SafePart(parts[0]) && SafePart(parts[1]))
-            {
-                if (parts.Length >= 6 && string.Equals(parts[3], "download", StringComparison.Ordinal) && IsArchive(parts[^1]))
-                    return [new(parts[^1], Download: uri)];
-                var suffix = parts.Length == 3 || (string.Equals(parts[3], "latest", StringComparison.Ordinal) && parts.Length == 4) ? "latest" : string.Equals(parts[3], "tag", StringComparison.Ordinal) && parts.Length >= 5
-                        ? "tags/" + Uri.EscapeDataString(string.Join('/', parts.Skip(4))) : null;
-                if (suffix is not null)
-                {
-                    using var release = await ReadJsonAsync(new($"https://api.github.com/repos/{parts[0]}/{parts[1]}/releases/{suffix}"),
-                        null, null, cancellationToken).ConfigureAwait(false);
-                    var assets = release.RootElement.GetProperty("assets").EnumerateArray()
-                        .Where(asset => IsArchive(asset.GetProperty("name").GetString()!))
-                        .Select(asset => new ModulePackageSource(asset.GetProperty("name").GetString()!,
-                            Download: new Uri(asset.GetProperty("browser_download_url").GetString()!)))
-                        .Take(65).ToArray();
-                    if (assets.Length is 0 or > 64) throw new InvalidDataException("The release must contain 1–64 .nupkg or .zip module assets.");
-                    foreach (var asset in assets) RequireDownloadUri(asset.Download!);
-                    return assets;
-                }
-            }
-            // A repository package page selects an explicit version, or exposes feed versions as choices.
-            if (parts.Length is 5 or 6 && string.Equals(parts[2], "pkgs", StringComparison.Ordinal) && string.Equals(parts[3], "nuget", StringComparison.Ordinal) &&
-                SafePart(parts[0]) && SafePart(parts[1]) && SafePart(parts[4]))
-            {
-                if (string.IsNullOrWhiteSpace(githubToken)) throw new InvalidDataException("GitHub Packages requires an explicit read:packages token.");
-                if (parts.Length == 5)
-                    return await ResolveNuGetAsync(new($"https://nuget.pkg.github.com/{parts[0]}/index.json"),
-                        parts[4], null, await ResolveGitHubUsernameAsync(githubToken, cancellationToken).ConfigureAwait(false),
-                        githubToken, cancellationToken).ConfigureAwait(false);
-                if (!long.TryParse(parts[5], out var versionId) || versionId <= 0)
-                    throw new InvalidDataException("Invalid GitHub package version identity.");
-                var api = new Uri($"https://api.github.com/orgs/{parts[0]}/packages/nuget/{parts[4]}/versions/{versionId}");
-                JsonDocument package;
-                try { package = await ReadJsonAsync(api, parts[0], githubToken, cancellationToken).ConfigureAwait(false); }
-                catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound)
-                {
-                    package = await ReadJsonAsync(new($"https://api.github.com/users/{parts[0]}/packages/nuget/{parts[4]}/versions/{versionId}"),
-                        parts[0], githubToken, cancellationToken).ConfigureAwait(false);
-                }
-                using (package)
-                    return await ResolveNuGetAsync(new($"https://nuget.pkg.github.com/{parts[0]}/index.json"),
-                        parts[4], package.RootElement.GetProperty("name").GetString(),
-                        await ResolveGitHubUsernameAsync(githubToken, cancellationToken).ConfigureAwait(false),
-                        githubToken, cancellationToken).ConfigureAwait(false);
-            }
-            if (parts.Length == 5 && parts[0] is "orgs" or "users" && string.Equals(parts[2], "packages", StringComparison.Ordinal) &&
-                string.Equals(parts[3], "nuget", StringComparison.Ordinal) && SafePart(parts[1]) && SafePart(parts[4]))
-            {
-                if (string.IsNullOrWhiteSpace(githubToken)) throw new InvalidDataException("GitHub Packages requires an explicit read:packages token.");
-                return await ResolveNuGetAsync(new($"https://nuget.pkg.github.com/{parts[1]}/index.json"),
-                    parts[4], null, await ResolveGitHubUsernameAsync(githubToken, cancellationToken).ConfigureAwait(false),
-                    githubToken, cancellationToken).ConfigureAwait(false);
-            }
+            var choices = await ResolveGitHubAsync(uri, parts, githubToken, cancellationToken).ConfigureAwait(false);
+            if (choices is not null) return choices;
         }
+
         if (IsArchive(uri.AbsolutePath))
         {
             var owner = string.Equals(uri.Host, "nuget.pkg.github.com", StringComparison.Ordinal) && parts.Length > 0 && SafePart(parts[0]) ? parts[0] : null;
@@ -107,6 +59,82 @@ internal sealed class ModulePackageSources : IDisposable
                 GitHubUsername: owner is null ? null : await ResolveGitHubUsernameAsync(githubToken!, cancellationToken).ConfigureAwait(false))];
         }
         throw new InvalidDataException("Unsupported package link. Use a NuGet gallery/version, GitHub release, package version, or direct module archive link.");
+    }
+
+    private async Task<IReadOnlyList<ModulePackageSource>?> ResolveGitHubAsync(
+        Uri uri, string[] parts, string? githubToken, CancellationToken cancellationToken)
+    {
+
+        if (parts.Length >= 3 && string.Equals(parts[2], "releases", StringComparison.Ordinal) && SafePart(parts[0]) && SafePart(parts[1]))
+        {
+            var assets = await ResolveGitHubReleaseAsync(uri, parts, cancellationToken).ConfigureAwait(false);
+            if (assets is not null) return assets;
+        }
+
+        // A repository package page selects an explicit version, or exposes feed versions as choices.
+        if (parts.Length is 5 or 6 && string.Equals(parts[2], "pkgs", StringComparison.Ordinal) && string.Equals(parts[3], "nuget", StringComparison.Ordinal) &&
+            SafePart(parts[0]) && SafePart(parts[1]) && SafePart(parts[4]))
+        {
+            if (string.IsNullOrWhiteSpace(githubToken)) throw new InvalidDataException("GitHub Packages requires an explicit read:packages token.");
+            if (parts.Length == 5)
+                return await ResolveNuGetAsync(new($"https://nuget.pkg.github.com/{parts[0]}/index.json"),
+                    parts[4], null, await ResolveGitHubUsernameAsync(githubToken, cancellationToken).ConfigureAwait(false),
+                    githubToken, cancellationToken).ConfigureAwait(false);
+            return await ResolveGitHubPackageVersionAsync(parts, githubToken, cancellationToken).ConfigureAwait(false);
+        }
+        if (parts.Length == 5 && (string.Equals(parts[0], "orgs", StringComparison.Ordinal) || string.Equals(parts[0], "users", StringComparison.Ordinal)) && string.Equals(parts[2], "packages", StringComparison.Ordinal) &&
+            string.Equals(parts[3], "nuget", StringComparison.Ordinal) && SafePart(parts[1]) && SafePart(parts[4]))
+        {
+            if (string.IsNullOrWhiteSpace(githubToken)) throw new InvalidDataException("GitHub Packages requires an explicit read:packages token.");
+            return await ResolveNuGetAsync(new($"https://nuget.pkg.github.com/{parts[1]}/index.json"),
+                parts[4], null, await ResolveGitHubUsernameAsync(githubToken, cancellationToken).ConfigureAwait(false),
+                githubToken, cancellationToken).ConfigureAwait(false);
+        }
+        return null;
+    }
+
+    private async Task<IReadOnlyList<ModulePackageSource>?> ResolveGitHubReleaseAsync(
+        Uri uri, string[] parts, CancellationToken cancellationToken)
+    {
+
+        if (parts.Length >= 6 && string.Equals(parts[3], "download", StringComparison.Ordinal) && IsArchive(parts[^1]))
+            return [new(parts[^1], Download: uri)];
+        var suffix = parts.Length == 3 || (string.Equals(parts[3], "latest", StringComparison.Ordinal) && parts.Length == 4) ? "latest" : string.Equals(parts[3], "tag", StringComparison.Ordinal) && parts.Length >= 5
+                ? "tags/" + Uri.EscapeDataString(string.Join('/', parts.Skip(4))) : null;
+        if (suffix is not null)
+        {
+            using var release = await ReadJsonAsync(new($"https://api.github.com/repos/{parts[0]}/{parts[1]}/releases/{suffix}"),
+                null, null, cancellationToken).ConfigureAwait(false);
+            var assets = release.RootElement.GetProperty("assets").EnumerateArray()
+                .Where(asset => IsArchive(asset.GetProperty("name").GetString()!))
+                .Select(asset => new ModulePackageSource(asset.GetProperty("name").GetString()!,
+                    Download: new Uri(asset.GetProperty("browser_download_url").GetString()!)))
+                .Take(65).ToArray();
+            if (assets.Length is 0 or > 64) throw new InvalidDataException("The release must contain 1–64 .nupkg or .zip module assets.");
+            foreach (var asset in assets) RequireDownloadUri(asset.Download!);
+            return assets;
+        }
+        return null;
+    }
+
+    private async Task<IReadOnlyList<ModulePackageSource>> ResolveGitHubPackageVersionAsync(
+        string[] parts, string githubToken, CancellationToken cancellationToken)
+    {
+        if (!long.TryParse(parts[5], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var versionId) || versionId <= 0)
+            throw new InvalidDataException("Invalid GitHub package version identity.");
+        var api = new Uri($"https://api.github.com/orgs/{parts[0]}/packages/nuget/{parts[4]}/versions/{versionId}");
+        JsonDocument package;
+        try { package = await ReadJsonAsync(api, parts[0], githubToken, cancellationToken).ConfigureAwait(false); }
+        catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound)
+        {
+            package = await ReadJsonAsync(new($"https://api.github.com/users/{parts[0]}/packages/nuget/{parts[4]}/versions/{versionId}"),
+                parts[0], githubToken, cancellationToken).ConfigureAwait(false);
+        }
+        using (package)
+            return await ResolveNuGetAsync(new($"https://nuget.pkg.github.com/{parts[0]}/index.json"),
+                parts[4], package.RootElement.GetProperty("name").GetString(),
+                await ResolveGitHubUsernameAsync(githubToken, cancellationToken).ConfigureAwait(false),
+                githubToken, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<string> ResolveGitHubUsernameAsync(string token, CancellationToken cancellationToken)
@@ -184,7 +212,7 @@ internal sealed class ModulePackageSources : IDisposable
             request.Headers.UserAgent.ParseAdd("SharpClaw/0.5.0");
             if (owner is not null && token is not null &&
                 current.Host.Equals(initial.Host, StringComparison.OrdinalIgnoreCase) &&
-                current.Host is "api.github.com" or "nuget.pkg.github.com")
+                (string.Equals(current.Host, "api.github.com", StringComparison.Ordinal) || string.Equals(current.Host, "nuget.pkg.github.com", StringComparison.Ordinal)))
             {
                 request.Headers.Authorization = string.Equals(current.Host, "api.github.com", StringComparison.Ordinal) ? new AuthenticationHeaderValue("Bearer", token)
                     : new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{owner}:{token}")));
@@ -229,7 +257,7 @@ internal sealed class ModulePackageSources : IDisposable
         }
     }
 
-    private static bool SafePart(string? value) => SharpClawModuleSettings.IsIdentifier(value) && value is not ("." or "..");
+    private static bool SafePart(string? value) => SharpClawModuleSettings.IsIdentifier(value) && !string.Equals(value, ".", StringComparison.Ordinal) && !string.Equals(value, "..", StringComparison.Ordinal);
     private static bool IsArchive(string value) => value.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase) ||
         value.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
     public void Dispose() => _http.Dispose();

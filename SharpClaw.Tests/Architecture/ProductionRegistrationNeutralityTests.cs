@@ -15,9 +15,7 @@ internal sealed class ProductionRegistrationNeutralityTests
     {
         var root = ResolveSourceRoot();
         var projectPaths = Directory.EnumerateFiles(root, "*.csproj", SearchOption.AllDirectories)
-            .Where(path => !path.Contains("SharpClaw.Tests", StringComparison.OrdinalIgnoreCase))
-            .Where(path => !path.Contains("SharpClaw.DefaultPackages", StringComparison.OrdinalIgnoreCase))
-            .Where(path => !path.Contains("SharpClaw.DefaultModules", StringComparison.OrdinalIgnoreCase))
+            .Where(path => ((!path.Contains("SharpClaw.Tests", StringComparison.OrdinalIgnoreCase)) && (!path.Contains("SharpClaw.DefaultPackages", StringComparison.OrdinalIgnoreCase))) && (!path.Contains("SharpClaw.DefaultModules", StringComparison.OrdinalIgnoreCase)))
             .ToArray();
 
         projectPaths.Should().NotBeEmpty();
@@ -70,7 +68,7 @@ internal sealed class ProductionRegistrationNeutralityTests
         var failures = new List<string>();
         foreach (var library in deps.RootElement.GetProperty("libraries").EnumerateObject())
         {
-            var separator = library.Name.IndexOf('/');
+            var separator = library.Name.IndexOf('/', StringComparison.Ordinal);
             if (separator <= 0)
                 continue;
 
@@ -79,12 +77,15 @@ internal sealed class ProductionRegistrationNeutralityTests
             if (!id.StartsWith("SharpClaw.", StringComparison.Ordinal))
                 continue;
 
+            // NuGet global-package folders require lowercase identifiers and versions.
+#pragma warning disable CA1308
             var packageDirectory = Path.Combine(
                 packageRoot,
                 id.ToLowerInvariant(),
                 version.ToLowerInvariant());
+#pragma warning restore CA1308
             var nuspecPath = Directory.Exists(packageDirectory)
-                ? Directory.GetFiles(packageDirectory, "*.nuspec").SingleOrDefault()
+                ? RequireSingleNuspecOrNone(packageDirectory)
                 : null;
             if (nuspecPath is null)
                 continue;
@@ -99,9 +100,9 @@ internal sealed class ProductionRegistrationNeutralityTests
                     continue;
 
                 if (dependencyVersion is null
-                    || !dependencyVersion.StartsWith("[", StringComparison.Ordinal)
-                    || !dependencyVersion.EndsWith("]", StringComparison.Ordinal)
-                    || dependencyVersion.Contains(",", StringComparison.Ordinal))
+                    || !dependencyVersion.StartsWith('[')
+                    || !dependencyVersion.EndsWith(']')
+                    || dependencyVersion.Contains(',', StringComparison.Ordinal))
                 {
                     failures.Add($"{id} -> {dependencyId} {dependencyVersion}");
                 }
@@ -109,6 +110,13 @@ internal sealed class ProductionRegistrationNeutralityTests
         }
 
         failures.Should().BeEmpty();
+    }
+
+    private static string? RequireSingleNuspecOrNone(string packageDirectory)
+    {
+        var paths = Directory.GetFiles(packageDirectory, "*.nuspec");
+        paths.Should().HaveCountLessThanOrEqualTo(1, "a restored package has one authoritative nuspec");
+        return paths.Length == 0 ? null : paths[0];
     }
 
     private static string ResolveSourceRoot()

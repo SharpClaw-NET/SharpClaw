@@ -15,6 +15,12 @@ internal sealed class ExceptionHandlingMiddleware(
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
+    private static readonly Action<ILogger, string, PathString, Exception?> LogCancelled =
+        LoggerMessage.Define<string, PathString>(LogLevel.Debug,
+            new EventId(1, nameof(LogCancelled)), "Request cancelled on {Method} {Path}");
+    private static readonly Action<ILogger, string, PathString, Exception?> LogUnhandled =
+        LoggerMessage.Define<string, PathString>(LogLevel.Error,
+            new EventId(2, nameof(LogUnhandled)), "Unhandled exception on {Method} {Path}");
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -24,7 +30,7 @@ internal sealed class ExceptionHandlingMiddleware(
         }
         catch (OperationCanceledException ex) when (context.RequestAborted.IsCancellationRequested)
         {
-            logger.LogDebug(ex, "Request cancelled on {Method} {Path}", context.Request.Method, context.Request.Path);
+            LogCancelled(logger, context.Request.Method, context.Request.Path, ex);
             if (context.Response.HasStarted)
                 throw;
 
@@ -32,7 +38,7 @@ internal sealed class ExceptionHandlingMiddleware(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unhandled exception on {Method} {Path}", context.Request.Method, context.Request.Path);
+            LogUnhandled(logger, context.Request.Method, context.Request.Path, ex);
             if (context.Response.HasStarted)
                 throw;
 
@@ -40,7 +46,7 @@ internal sealed class ExceptionHandlingMiddleware(
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(JsonSerializer.Serialize(
                 new { error = GenericServerError },
-                JsonOptions)).ConfigureAwait(false);
+                JsonOptions), context.RequestAborted).ConfigureAwait(false);
         }
     }
 }

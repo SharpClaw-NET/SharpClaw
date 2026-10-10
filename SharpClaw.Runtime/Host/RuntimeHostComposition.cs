@@ -57,6 +57,11 @@ internal static class RuntimeHostComposition
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>().ActionDispatcher);
         services.AddScoped<IModelRegistrar, RuntimeModelRegistrar>();
 
+        RegisterKernelServices(services, jobs);
+    }
+
+    private static void RegisterKernelServices(IServiceCollection services, KernelJobsBindings jobs)
+    {
         services.AddSingleton(jobs);
         services.AddSingleton<IStorageContractProvider>(serviceProvider =>
             new RuntimeScopedStorageContractProvider(

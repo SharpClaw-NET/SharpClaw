@@ -39,7 +39,7 @@ public readonly record struct DurableStreamKey
         if (string.IsNullOrWhiteSpace(canonicalValue))
             return false;
 
-        var firstSeparator = canonicalValue.IndexOf('/');
+        var firstSeparator = canonicalValue.IndexOf('/', StringComparison.Ordinal);
         var lastSeparator = canonicalValue.LastIndexOf('/');
         if (firstSeparator <= 0
             || lastSeparator <= firstSeparator + 1
@@ -90,7 +90,9 @@ public readonly record struct DurableStreamKey
     private static string NormalizeLogicalName(string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
+#pragma warning disable CA1308 // Canonical logical names are hashed into existing durable paths; retain lowercase identity and serialized values.
         var normalized = value.Trim().ToLowerInvariant();
+#pragma warning restore CA1308
         if (normalized.Length > 256 || normalized.Any(char.IsControl))
             throw new ArgumentException("Logical stream name is invalid.", nameof(value));
         return normalized;

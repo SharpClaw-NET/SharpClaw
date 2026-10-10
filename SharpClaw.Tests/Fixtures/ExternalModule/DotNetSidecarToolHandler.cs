@@ -6,6 +6,8 @@ using SharpClaw.ModuleSDK;
 namespace SharpClaw.TestFixtures.ExternalRegistration;
 
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+    Justification = "The module registration supplies this type to Microsoft DI, which activates its constructor through reflection.")]
 internal sealed class DotNetSidecarToolHandler : IToolHandler
 {
     public ValueTask<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct)

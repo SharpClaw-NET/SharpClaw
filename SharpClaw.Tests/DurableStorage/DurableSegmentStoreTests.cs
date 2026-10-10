@@ -18,8 +18,9 @@ internal sealed class DurableSegmentStoreTests
     [TearDown]
     public void TearDown()
     {
-        foreach (var root in _roots)
+        for (var index = 0; index < _roots.Count; index++)
         {
+            var root = _roots[index];
             if (Directory.Exists(root))
                 Directory.Delete(root, recursive: true);
         }
@@ -131,7 +132,7 @@ internal sealed class DurableSegmentStoreTests
         await store.FlushAsync(key).ConfigureAwait(false);
 
         var openPath = Directory.GetFiles(root, "*.open", SearchOption.AllDirectories)
-            .Single();
+            .Should().ContainSingle().Which;
         var frameBytes = ReadFrameEncodedBytes(openPath);
         var scanBudget = frameBytes.Take(5).Sum() + 1L;
         var matchingJsonBytes = JsonSerializer.SerializeToUtf8Bytes(
@@ -177,7 +178,7 @@ internal sealed class DurableSegmentStoreTests
         }
 
         var sealedPath = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
-            .Single();
+            .Should().ContainSingle().Which;
         var openPath = Path.ChangeExtension(sealedPath, ".open");
         File.Move(sealedPath, openPath);
 
@@ -301,7 +302,7 @@ internal sealed class DurableSegmentStoreTests
                 root,
                 ".idempotency",
                 SearchOption.AllDirectories)
-            .Single();
+            .Should().ContainSingle().Which;
         File.Delete(index);
 
         var recovered = CreateStore(root);
@@ -345,7 +346,7 @@ internal sealed class DurableSegmentStoreTests
         }
 
         var segment = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
-            .Single();
+            .Should().ContainSingle().Which;
         var bytes = await File.ReadAllBytesAsync(segment).ConfigureAwait(false);
         bytes[48] ^= 0x40;
         await File.WriteAllBytesAsync(segment, bytes).ConfigureAwait(false);
@@ -384,26 +385,7 @@ internal sealed class DurableSegmentStoreTests
                             processDirectory,
                             "*.scseg")
                         .Should().ContainSingle().Subject;
-                    using (var corrupt = new FileStream(
-                               processSegment,
-                               FileMode.Open,
-                               FileAccess.ReadWrite,
-                               FileShare.ReadWrite))
-                    using (var reader = new BinaryReader(
-                               corrupt,
-                               System.Text.Encoding.UTF8,
-                               leaveOpen: true))
-                    {
-                        corrupt.Position = 40;
-                        var frameLength = reader.ReadInt32();
-                        frameLength.Should().BeGreaterThan(0);
-                        var payloadPosition = corrupt.Position;
-                        var payload = corrupt.ReadByte();
-                        payload.Should().BeGreaterThanOrEqualTo(0);
-                        corrupt.Position = payloadPosition;
-                        corrupt.WriteByte((byte)(payload ^ 0xFF));
-                        corrupt.Flush(flushToDisk: true);
-                    }
+                    CorruptFramePayload(processSegment);
 
                     var catalog = await store.EnumerateOperationalStreamsAsync(
                         new DurableOperationalStreamEnumerationOptions
@@ -413,26 +395,7 @@ internal sealed class DurableSegmentStoreTests
                             MaxDuration = TimeSpan.FromSeconds(2),
                         }).ConfigureAwait(false);
 
-                    catalog.IdentityGaps.Should().BeEmpty();
-                    catalog.Streams.Should().HaveCount(2);
-                    var process = catalog.Streams.Single(summary =>
-                        summary.Stream.Kind == DurableStreamKind.ProcessLog);
-                    process.AppName.Should().Be("runtime/host");
-                    process.SourceId.Should().BeNull();
-                    process.BootId.Should().Be(Guid.Empty);
-                    process.HasActiveSegment.Should().BeFalse();
-                    process.HasSealedSegments.Should().BeTrue();
-                    process.RecordCount.Should().Be(1);
-                    process.FirstAvailableSequence.Should().Be(1);
-
-                    var module = catalog.Streams.Single(summary =>
-                        summary.Stream.Kind == DurableStreamKind.RegistrationLog);
-                    module.AppName.Should().BeNull();
-                    module.SourceId.Should().Be("source/one");
-                    module.BootId.Should().Be(registrationBoot);
-                    module.HasActiveSegment.Should().BeTrue();
-                    module.HasSealedSegments.Should().BeFalse();
-                    module.RecordCount.Should().Be(1);
+                    AssertOperationalCatalog(catalog, registrationBoot);
                 }
             }
 
@@ -478,9 +441,9 @@ internal sealed class DurableSegmentStoreTests
 
             var invalidDirectory = new DurableStreamPathEncoder(root)
                 .GetStreamDirectory(invalidKey);
-            File.WriteAllText(
+            await File.WriteAllTextAsync(
                 Path.Combine(invalidDirectory, ".stream.manifest"),
-                "{");
+                "{", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
             var reader = CreateStore(root);
             await using var readerAsyncDisposal = reader.ConfigureAwait(false);
@@ -631,7 +594,7 @@ internal sealed class DurableSegmentStoreTests
         }
 
         var segments = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
-            .OrderBy(path => path, StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
             .ToArray();
         File.SetLastWriteTimeUtc(segments[0], DateTime.UtcNow.AddDays(-10));
         File.SetLastWriteTimeUtc(segments[1], DateTime.UtcNow.AddDays(-10));
@@ -680,7 +643,7 @@ internal sealed class DurableSegmentStoreTests
 
         (await store.ReadArtifactReferencesAsync().ConfigureAwait(false)).Should().Contain(artifactId);
         var segment = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
-            .Single();
+            .Should().ContainSingle().Which;
         File.SetLastWriteTimeUtc(segment, DateTime.UtcNow.AddDays(-10));
 
         await store.ApplyRetentionAsync(new DurableRetentionOptions
@@ -706,7 +669,7 @@ internal sealed class DurableSegmentStoreTests
                 await writer.AppendAsync(key, Record("crash tail")).ConfigureAwait(false);
         }
         var sealedPath = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
-            .Single();
+            .Should().ContainSingle().Which;
         var openPath = Path.ChangeExtension(sealedPath, ".open");
         File.Move(sealedPath, openPath);
         File.SetLastWriteTimeUtc(openPath, DateTime.UtcNow.AddDays(-10));
@@ -787,7 +750,7 @@ internal sealed class DurableSegmentStoreTests
     private static string RandomMessage(string prefix) =>
         prefix + "-" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(120));
 
-    private static IReadOnlyList<int> ReadFrameEncodedBytes(string path)
+    private static List<int> ReadFrameEncodedBytes(string path)
     {
         using var stream = new FileStream(
             path,
@@ -811,63 +774,9 @@ internal sealed class DurableSegmentStoreTests
     private static void RewriteFirstFrameAsLegacyBody(string path)
     {
         var bytes = File.ReadAllBytes(path);
-        using var input = new MemoryStream(bytes, writable: false);
-        using var reader = new BinaryReader(input);
-        input.Position = 8;
-        var segmentId = new Guid(reader.ReadBytes(16));
-        input.Position = 40;
-        var oldFrameLength = reader.ReadInt32();
-        var oldFrame = reader.ReadBytes(oldFrameLength);
-        using var oldFrameStream = new MemoryStream(oldFrame, writable: false);
-        using var oldFrameReader = new BinaryReader(oldFrameStream);
-        var sequence = oldFrameReader.ReadInt64();
-        var recordId = new Guid(oldFrameReader.ReadBytes(16));
-        var timestamp = oldFrameReader.ReadInt64();
-        var flags = oldFrameReader.ReadByte();
-        var oldBodyLength = oldFrameReader.ReadInt32();
-        oldFrameReader.ReadBytes(12);
-        oldFrameReader.ReadBytes(16);
-        oldFrameReader.ReadBytes(32);
-        var oldPayloadLength = oldFrameReader.ReadInt32();
-        var oldPayload = oldFrameReader.ReadBytes(oldPayloadLength);
-        oldPayload.Should().HaveCount(oldPayloadLength);
-        flags.Should().Be(2);
+        var (segmentId, sequence, recordId, timestamp, flags, oldBodyLength, oldPayload) = ReadFrameParts(bytes);
 
-        byte[] oldBody;
-        using (var compressed = new MemoryStream(oldPayload, writable: false))
-        using (var brotli = new BrotliStream(compressed, CompressionMode.Decompress))
-        using (var body = new MemoryStream())
-        {
-            brotli.CopyTo(body);
-            oldBody = body.ToArray();
-        }
-        oldBody.Should().HaveCount(oldBodyLength);
-
-        var originalFields = new HashSet<string>(
-            [
-                "Level",
-                "EventName",
-                "Message",
-                "ExceptionType",
-                "CorrelationId",
-                "Artifact",
-            ],
-            StringComparer.Ordinal);
-        using var document = JsonDocument.Parse(oldBody);
-        using var legacyBodyStream = new MemoryStream();
-        using (var jsonWriter = new Utf8JsonWriter(legacyBodyStream))
-        {
-            jsonWriter.WriteStartObject();
-            foreach (var property in document.RootElement.EnumerateObject())
-            {
-                if (!originalFields.Contains(property.Name))
-                    continue;
-                jsonWriter.WritePropertyName(property.Name);
-                property.Value.WriteTo(jsonWriter);
-            }
-            jsonWriter.WriteEndObject();
-        }
-        var legacyBody = legacyBodyStream.ToArray();
+        var legacyBody = CreateLegacyRecordBody(oldPayload, oldBodyLength);
         var compressedLegacyBody = Compress(legacyBody);
         var associatedData = BuildAssociatedData(
             segmentId,
@@ -920,6 +829,124 @@ internal sealed class DurableSegmentStoreTests
             footerWriter.Write(prefixDigest);
         }
         File.WriteAllBytes(path, output.ToArray());
+    }
+
+    private static void CorruptFramePayload(string processSegment)
+    {
+        using (var corrupt = new FileStream(
+                   processSegment,
+                   FileMode.Open,
+                   FileAccess.ReadWrite,
+                   FileShare.ReadWrite))
+        using (var reader = new BinaryReader(
+                   corrupt,
+                   System.Text.Encoding.UTF8,
+                   leaveOpen: true))
+        {
+            corrupt.Position = 40;
+            var frameLength = reader.ReadInt32();
+            frameLength.Should().BeGreaterThan(0);
+            var payloadPosition = corrupt.Position;
+            var payload = corrupt.ReadByte();
+            payload.Should().BeGreaterThanOrEqualTo(0);
+            corrupt.Position = payloadPosition;
+            corrupt.WriteByte((byte)(payload ^ 0xFF));
+            // Flush(true) durably installs corruption; FlushAsync has no fsync option.
+#pragma warning disable CA1849
+            corrupt.Flush(flushToDisk: true);
+#pragma warning restore CA1849
+        }
+    }
+
+    private static void AssertOperationalCatalog(DurableOperationalStreamCatalog catalog, Guid registrationBoot)
+    {
+        catalog.IdentityGaps.Should().BeEmpty();
+        catalog.Streams.Should().HaveCount(2);
+        var process = catalog.Streams.Where(summary =>
+            summary.Stream.Kind == DurableStreamKind.ProcessLog).Should().ContainSingle().Which;
+        process.AppName.Should().Be("runtime/host");
+        process.SourceId.Should().BeNull();
+        process.BootId.Should().Be(Guid.Empty);
+        process.HasActiveSegment.Should().BeFalse();
+        process.HasSealedSegments.Should().BeTrue();
+        process.RecordCount.Should().Be(1);
+        process.FirstAvailableSequence.Should().Be(1);
+
+        var module = catalog.Streams.Where(summary =>
+            summary.Stream.Kind == DurableStreamKind.RegistrationLog).Should().ContainSingle().Which;
+        module.AppName.Should().BeNull();
+        module.SourceId.Should().Be("source/one");
+        module.BootId.Should().Be(registrationBoot);
+        module.HasActiveSegment.Should().BeTrue();
+        module.HasSealedSegments.Should().BeFalse();
+        module.RecordCount.Should().Be(1);
+    }
+
+    private static (Guid SegmentId, long Sequence, Guid RecordId, long Timestamp, byte Flags, int BodyLength, byte[] Payload)
+        ReadFrameParts(byte[] bytes)
+    {
+        using var input = new MemoryStream(bytes, writable: false);
+        using var reader = new BinaryReader(input);
+        input.Position = 8;
+        var segmentId = new Guid(reader.ReadBytes(16));
+        input.Position = 40;
+        var oldFrameLength = reader.ReadInt32();
+        var oldFrame = reader.ReadBytes(oldFrameLength);
+        using var oldFrameStream = new MemoryStream(oldFrame, writable: false);
+        using var oldFrameReader = new BinaryReader(oldFrameStream);
+        var sequence = oldFrameReader.ReadInt64();
+        var recordId = new Guid(oldFrameReader.ReadBytes(16));
+        var timestamp = oldFrameReader.ReadInt64();
+        var flags = oldFrameReader.ReadByte();
+        var oldBodyLength = oldFrameReader.ReadInt32();
+        oldFrameReader.ReadBytes(12);
+        oldFrameReader.ReadBytes(16);
+        oldFrameReader.ReadBytes(32);
+        var oldPayloadLength = oldFrameReader.ReadInt32();
+        var oldPayload = oldFrameReader.ReadBytes(oldPayloadLength);
+        oldPayload.Should().HaveCount(oldPayloadLength);
+        flags.Should().Be(2);
+
+        return (segmentId, sequence, recordId, timestamp, flags, oldBodyLength, oldPayload);
+    }
+
+    private static byte[] CreateLegacyRecordBody(byte[] oldPayload, int oldBodyLength)
+    {
+        byte[] oldBody;
+        using (var compressed = new MemoryStream(oldPayload, writable: false))
+        using (var brotli = new BrotliStream(compressed, CompressionMode.Decompress))
+        using (var body = new MemoryStream())
+        {
+            brotli.CopyTo(body);
+            oldBody = body.ToArray();
+        }
+        oldBody.Should().HaveCount(oldBodyLength);
+
+        var originalFields = new HashSet<string>(
+            [
+                "Level",
+                "EventName",
+                "Message",
+                "ExceptionType",
+                "CorrelationId",
+                "Artifact",
+            ],
+            StringComparer.Ordinal);
+        using var document = JsonDocument.Parse(oldBody);
+        using var legacyBodyStream = new MemoryStream();
+        using (var jsonWriter = new Utf8JsonWriter(legacyBodyStream))
+        {
+            jsonWriter.WriteStartObject();
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (!originalFields.Contains(property.Name))
+                    continue;
+                jsonWriter.WritePropertyName(property.Name);
+                property.Value.WriteTo(jsonWriter);
+            }
+            jsonWriter.WriteEndObject();
+        }
+        return legacyBodyStream.ToArray();
     }
 
     private static byte[] Compress(byte[] source)

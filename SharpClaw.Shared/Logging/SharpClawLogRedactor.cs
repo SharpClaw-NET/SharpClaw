@@ -16,55 +16,74 @@ using MsLogger = Microsoft.Extensions.Logging.ILogger;
 namespace SharpClaw.Shared.Logging;
 
 
-internal static class SharpClawLogRedactor
+internal static partial class SharpClawLogRedactor
 {
-    private static readonly Regex Authorization = new(
-        @"(authorization\s*[:=]\s*(?:[\x22']?bearer\s+)?[\x22']?)[^\s,;}'\x22]+",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private const RegexOptions RedactionOptions = RegexOptions.IgnoreCase
+        | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture;
 
-    private static readonly Regex Secrets = new(
-        @"((?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|cookie|client[_-]?secret|connection[_-]?string|encryption[_-]?key)\s*[:=]\s*(?:[\x22']?bearer\s+)?[\x22']?)[^\s,;}'\x22]+",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    [GeneratedRegex(@"(?<prefix>authorization\s*[:=]\s*(?:[\x22']?bearer\s+)?[\x22']?)[^\s,;}'\x22]+",
+        RedactionOptions, 1000)]
+    private static partial Regex Authorization();
 
-    private static readonly Regex UriCredentials = new(
-        @"(https?://[^/@\s:]+:)[^/@\s]+@",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    [GeneratedRegex(@"(?<prefix>(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|cookie|client[_-]?secret|connection[_-]?string|encryption[_-]?key)\s*[:=]\s*(?:[\x22']?bearer\s+)?[\x22']?)[^\s,;}'\x22]+",
+        RedactionOptions, 1000)]
+    private static partial Regex Secrets();
 
-    private static readonly Regex SensitiveLabeledValue = new(
-        @"((?:body|request[_-]?body|response[_-]?body|prompt|model[_-]?response)\s*[:=]\s*)(?:[\x22']?)[^\s,;}'\x22]+",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    [GeneratedRegex(@"(?<prefix>https?://[^/@\s:]+:)[^/@\s]+@", RedactionOptions, 1000)]
+    private static partial Regex UriCredentials();
 
-    private static readonly Regex UriQuery = new(
-        @"((?:https?://|/)[^\s?]*\?)[^\s,;}'\x22]+",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    [GeneratedRegex(@"(?<prefix>(?:body|request[_-]?body|response[_-]?body|prompt|model[_-]?response)\s*[:=]\s*)(?:[\x22']?)[^\s,;}'\x22]+",
+        RedactionOptions, 1000)]
+    private static partial Regex SensitiveLabeledValue();
+
+    [GeneratedRegex(@"(?<prefix>(?:https?://|/)[^\s?]*\?)[^\s,;}'\x22]+", RedactionOptions, 1000)]
+    private static partial Regex UriQuery();
 
     public static string Redact(string value)
     {
-        var result = Authorization.Replace(value, "$1[REDACTED]");
-        result = Secrets.Replace(result, "$1[REDACTED]");
-        result = SensitiveLabeledValue.Replace(result, "$1[REDACTED]");
-        result = UriCredentials.Replace(result, "$1[REDACTED]@");
-        return UriQuery.Replace(result, "$1[REDACTED]");
+        try
+        {
+            var result = Authorization().Replace(value, "${prefix}[REDACTED]");
+            result = Secrets().Replace(result, "${prefix}[REDACTED]");
+            result = SensitiveLabeledValue().Replace(result, "${prefix}[REDACTED]");
+            result = UriCredentials().Replace(result, "${prefix}[REDACTED]@");
+            return UriQuery().Replace(result, "${prefix}[REDACTED]");
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // A redaction budget failure cannot make the original value safe to log.
+            return "[REDACTED: matching budget exceeded]";
+        }
     }
 
     public static bool IsSecretPropertyName(string name)
     {
         var normalized = name.Replace("_", string.Empty, StringComparison.Ordinal)
-            .Replace("-", string.Empty, StringComparison.Ordinal)
-            .ToLowerInvariant();
-        return normalized.Contains("authorization", StringComparison.Ordinal)
-            || normalized.Contains("apikey", StringComparison.Ordinal)
-            || normalized.Contains("accesstoken", StringComparison.Ordinal)
-            || normalized.Contains("refreshtoken", StringComparison.Ordinal)
-            || normalized.Contains("password", StringComparison.Ordinal)
-            || normalized.Contains("cookie", StringComparison.Ordinal)
-            || normalized.Contains("clientsecret", StringComparison.Ordinal)
-            || normalized.Contains("connectionstring", StringComparison.Ordinal)
-            || normalized.Contains("encryptionkey", StringComparison.Ordinal)
-            || normalized is "body" or "requestbody" or "responsebody"
-            || normalized is "prompt" or "modelresponse"
-            || normalized is "uri" or "url" or "query" or "querystring"
-            || normalized is "headers" or "requestheaders" or "responseheaders"
-            || normalized.Equals("secret", StringComparison.Ordinal);
+            .Replace("-", string.Empty, StringComparison.Ordinal);
+        return normalized.Contains("authorization", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("apikey", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("accesstoken", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("refreshtoken", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("password", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("cookie", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("clientsecret", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("connectionstring", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("encryptionkey", StringComparison.OrdinalIgnoreCase)
+            || IsSensitiveLabel(normalized);
     }
+
+    private static bool IsSensitiveLabel(string value) =>
+        string.Equals(value, "body", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "requestbody", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "responsebody", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "prompt", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "modelresponse", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "uri", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "url", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "query", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "querystring", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "headers", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "requestheaders", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "responseheaders", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "secret", StringComparison.OrdinalIgnoreCase);
 }

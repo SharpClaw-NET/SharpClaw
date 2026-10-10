@@ -85,7 +85,7 @@ internal sealed class RuntimeKernelAdapterTests
         try
         {
             var result = await adapter.RunRequestAsync(
-                adapter.CreateCliExecutionContext(RequestPrincipal.Anonymous), "setup",
+                RuntimeKernelAdapter.CreateCliExecutionContext(RequestPrincipal.Anonymous), "setup",
                 static (value, _) => ValueTask.FromResult(value)).ConfigureAwait(false);
             result.Should().Be("setup");
             factory.Plugins.Should().BeNull();
@@ -219,7 +219,7 @@ internal sealed class RuntimeKernelAdapterTests
         var calls = 0;
         var completed = false;
 
-        async ValueTask<string> Buffered(string value, CancellationToken cancellationToken)
+        async ValueTask<string> BufferedAsync(string value, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref calls);
             await Task.Delay(TimeSpan.FromSeconds(32), cancellationToken).ConfigureAwait(false);
@@ -227,7 +227,7 @@ internal sealed class RuntimeKernelAdapterTests
             return value;
         }
 
-        async IAsyncEnumerable<string> Stream(string value,
+        async IAsyncEnumerable<string> StreamAsync(string value,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref calls);
@@ -240,7 +240,7 @@ internal sealed class RuntimeKernelAdapterTests
         if (streaming)
         {
             var chunks = new List<string>();
-            await foreach (var chunk in adapter.RunRequestStreamAsync(context, "after", Stream,
+            await foreach (var chunk in adapter.RunRequestStreamAsync(context, "after", StreamAsync,
                 TestContext.CurrentContext.CancellationToken).ConfigureAwait(false))
             {
                 if (chunks.Count == 0)
@@ -251,7 +251,7 @@ internal sealed class RuntimeKernelAdapterTests
         }
         else
         {
-            (await adapter.RunRequestAsync(context, "after", Buffered,
+            (await adapter.RunRequestAsync(context, "after", BufferedAsync,
                 TestContext.CurrentContext.CancellationToken).ConfigureAwait(false))
                 .Should().Be("after");
         }
@@ -274,16 +274,11 @@ internal sealed class RuntimeKernelAdapterTests
         var adapter = RuntimeKernelAdapterTestFactory.Create(new ConfigurationBuilder().Build(), [module],
             workspace.CreateInstancePaths(), new RecordingProviderClientFactory(new RecordingProviderClient()),
             RequestStageApprovals(module.Identity.Id));
-        var features = new ExtensionFeatureSet([
-            new ExtensionFeature("test.request", 1, "request-stage-probe", 128,
-                JsonSerializer.SerializeToElement("request-feature"))]);
-        var context = new KernelActionExecutionContext(new RequestPrincipal("request-caller", "Request caller",
-            new HashSet<string>(StringComparer.Ordinal) { "operator" }, true),
-            features, Guid.NewGuid(), Guid.NewGuid());
+        var context = CreateRequestStageCaller();
         var calls = 0;
         var chunks = new List<string>();
         var expected = string.Equals(mode, "replace", StringComparison.Ordinal) ? "rewritten-request" : "request";
-        async IAsyncEnumerable<string> Stream(string value,
+        async IAsyncEnumerable<string> StreamAsync(string value,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -291,11 +286,11 @@ internal sealed class RuntimeKernelAdapterTests
             await Task.Yield();
             yield return value;
         }
-        async Task Consume()
+        async Task ConsumeAsync()
         {
             if (streaming)
             {
-                await foreach (var item in adapter.RunRequestStreamAsync(context, "request", Stream).ConfigureAwait(false))
+                await foreach (var item in adapter.RunRequestStreamAsync(context, "request", StreamAsync).ConfigureAwait(false))
                     chunks.Add(item);
             }
             else
@@ -309,7 +304,7 @@ internal sealed class RuntimeKernelAdapterTests
                 chunks.Add(result);
             }
         }
-        Func<Task> consume = Consume;
+        Func<Task> consume = ConsumeAsync;
         if (mode.StartsWith("cancel-", StringComparison.Ordinal))
         {
             await consume.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
@@ -330,16 +325,7 @@ internal sealed class RuntimeKernelAdapterTests
             chunks.Should().Equal(expected);
         }
 
-        probe.Contexts.Select(item => item.ActionKey.Value).Should().Equal(string.Equals(mode, "cancel-receive", StringComparison.Ordinal) ? ["runtime.request.receive"] : ["runtime.request.receive", "runtime.request.handler.invoke"]);
-        foreach (var observation in probe.Contexts)
-        {
-            observation.Caller.SubjectId.Should().Be(context.Caller.SubjectId);
-            observation.Caller.IsAuthenticated.Should().BeTrue();
-            observation.Caller.Roles.Should().ContainSingle().Which.Should().Be("operator");
-            observation.TraceId.Should().Be(context.TraceId);
-            observation.IdempotencyKey.Should().Be(context.IdempotencyKey);
-            observation.Features.Items.Should().ContainSingle().Which.Value.GetString().Should().Be("request-feature");
-        }
+        AssertRequestStageAuthority(probe, context, mode);
     }
 
     [TestCase(false), TestCase(true)]
@@ -353,7 +339,7 @@ internal sealed class RuntimeKernelAdapterTests
         var context = new KernelActionExecutionContext(RequestPrincipal.Anonymous,
             ExtensionFeatureSet.Empty, Guid.NewGuid(), Guid.NewGuid());
         var calls = 0;
-        async IAsyncEnumerable<string> Stream(string value,
+        async IAsyncEnumerable<string> StreamAsync(string value,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -365,7 +351,7 @@ internal sealed class RuntimeKernelAdapterTests
         {
             if (streaming)
             {
-                await foreach (var unused in adapter.RunRequestStreamAsync(context, "request", Stream,
+                await foreach (var unused in adapter.RunRequestStreamAsync(context, "request", StreamAsync,
                     cancellation.Token).ConfigureAwait(false))
                     Assert.Fail("A canceled ingress must not emit a chunk: " + unused);
             }
@@ -473,7 +459,7 @@ internal sealed class RuntimeKernelAdapterTests
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider));
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync().ConfigureAwait(false);
         var terminalCalls = 0;
 
         Func<Task> run = async () =>
@@ -525,44 +511,12 @@ internal sealed class RuntimeKernelAdapterTests
             .Build();
         using var workspace = new TemporaryWorkspace();
         var conversationStore = new InMemoryConversationStore();
-        var actionKey = new SharpClawActionKey("runtime.request.receive");
-        var descriptor = KernelActionCatalog.DescriptorFor(actionKey).ToDescriptor();
-        var types = KernelSchemaIdentity.ActionTypes(
-            descriptor,
-            typeof(KernelActionEnvelope),
-            typeof(object));
         var adapter = RuntimeKernelAdapterTestFactory.Create(
             configuration,
             [module],
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider),
-            new KernelGraphCompileOptions
-            {
-                ActionRegistrationCapabilityGrants = new Dictionary<
-                    string,
-                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
-                {
-                    [module.Identity.Id] = new Dictionary<
-                        string,
-                        ActionInterceptionCapabilities>(StringComparer.Ordinal)
-                    {
-                        [actionKey.Value] = descriptor.Capabilities,
-                    },
-                },
-                SensitiveActionApprovals =
-                [
-                    new KernelSensitiveActionApproval(
-                        module.Identity.Id,
-                        actionKey,
-                        descriptor.Version,
-                        types.ActionType.AssemblyQualifiedName!,
-                        types.ResultType.AssemblyQualifiedName!,
-                        KernelSchemaIdentity.Action(
-                            descriptor,
-                            typeof(KernelActionEnvelope),
-                            typeof(object))),
-                ],
-            });
+            StreamReplacementApprovals(module.Identity.Id));
         var conversationId = Guid.NewGuid();
         var executionContext = new KernelActionExecutionContext(
             RequestPrincipal.Anonymous,
@@ -648,6 +602,65 @@ internal sealed class RuntimeKernelAdapterTests
             .Should().BeEmpty();
     }
 
+    private static KernelActionExecutionContext CreateRequestStageCaller()
+    {
+        var features = new ExtensionFeatureSet([
+            new ExtensionFeature("test.request", 1, "request-stage-probe", 128,
+                JsonSerializer.SerializeToElement("request-feature"))]);
+        return new KernelActionExecutionContext(new RequestPrincipal("request-caller", "Request caller",
+            new HashSet<string>(StringComparer.Ordinal) { "operator" }, true),
+            features, Guid.NewGuid(), Guid.NewGuid());
+    }
+
+    private static void AssertRequestStageAuthority(RequestStageProbe probe, KernelActionExecutionContext context, string mode)
+    {
+        probe.Contexts.Select(item => item.ActionKey.Value).Should().Equal(string.Equals(mode, "cancel-receive", StringComparison.Ordinal) ? ["runtime.request.receive"] : ["runtime.request.receive", "runtime.request.handler.invoke"]);
+        for (var index = 0; index < probe.Contexts.Count; index++)
+        {
+            var observation = probe.Contexts[index];
+            observation.Caller.SubjectId.Should().Be(context.Caller.SubjectId);
+            observation.Caller.IsAuthenticated.Should().BeTrue();
+            observation.Caller.Roles.Should().ContainSingle().Which.Should().Be("operator");
+            observation.TraceId.Should().Be(context.TraceId);
+            observation.IdempotencyKey.Should().Be(context.IdempotencyKey);
+            observation.Features.Items.Should().ContainSingle().Which.Value.GetString().Should().Be("request-feature");
+        }
+    }
+
+    private static KernelGraphCompileOptions StreamReplacementApprovals(string moduleId)
+    {
+        var actionKey = new SharpClawActionKey("runtime.request.receive");
+        var descriptor = KernelActionCatalog.DescriptorFor(actionKey).ToDescriptor();
+        var types = KernelSchemaIdentity.ActionTypes(
+            descriptor,
+            typeof(KernelActionEnvelope),
+            typeof(object));
+        return new KernelGraphCompileOptions
+        {
+            ActionRegistrationCapabilityGrants = new Dictionary<
+                string,
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(StringComparer.Ordinal)
+            {
+                [moduleId] = new Dictionary<
+                    string,
+                    ActionInterceptionCapabilities>(StringComparer.Ordinal)
+                {
+                    [actionKey.Value] = descriptor.Capabilities,
+                },
+            },
+            SensitiveActionApprovals =
+            [
+                new KernelSensitiveActionApproval(
+                    moduleId,
+                    actionKey,
+                    descriptor.Version,
+                    types.ActionType.AssemblyQualifiedName!,
+                    types.ResultType.AssemblyQualifiedName!,
+                    KernelSchemaIdentity.Action(descriptor)),
+            ],
+        };
+    }
+
     private static ChatOperationContext TestOperationContext() =>
         new(
             Guid.NewGuid(),
@@ -685,8 +698,13 @@ internal sealed class RuntimeKernelAdapterTests
                 if (Directory.Exists(_root))
                     Directory.Delete(_root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }
@@ -755,7 +773,7 @@ internal sealed class RuntimeKernelAdapterTests
     private sealed class StreamReplacementRegistration(IProviderPlugin provider) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } =
-            new("stream-replacement-module", "Stream replacement module", "stream-replace");
+            new("stream-replacement-module", "StreamAsync replacement module", "stream-replace");
 
         public void ConfigureServices(IServiceCollection module)
         {

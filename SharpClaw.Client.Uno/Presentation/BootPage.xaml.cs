@@ -10,6 +10,10 @@ using Windows.ApplicationModel.DataTransfer;
 
 namespace SharpClaw.Presentation;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1010",
+    Justification = "This Uno view inherits nongeneric enumeration from the framework for XAML children; it is not a public collection API and adding generic enumeration would change framework semantics.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
+    Justification = "Uno owns reusable page instances. RetireBootWork cancels/disposes per-visit retry and inspection sources and stops timers; the reusable connection gate never allocates AvailableWaitHandle and releases acquisitions in finally.")]
 public sealed partial class BootPage : Page
 {
     private static readonly string[] DotsFrames = [".", "..", "..."];
@@ -46,7 +50,9 @@ public sealed partial class BootPage : Page
     private CancellationTokenSource? _retryCts;
     private ImmutableArray<DiagnosticLine> _lastDiag;
 
-    protected override async void OnNavigatedTo(NavigationEventArgs e)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    protected override void OnNavigatedTo(NavigationEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         base.OnNavigatedTo(e);
         _isActive = true;
@@ -60,14 +66,19 @@ public sealed partial class BootPage : Page
             services.GetRequiredService<ClientActionDispatcher>());
         _model.IsAwaitingInput = false;
 
-        // Cancel any in-flight connection attempt from a previous visit.
-        _retryCts?.Cancel();
-        _retryCts?.Dispose();
-
+        // Publish this visit before cancellation can suspend and navigation can retire it.
+        var previous = _retryCts;
+        var visit = new CancellationTokenSource();
+        _retryCts = visit;
+        var token = visit.Token;
+        if (previous is not null)
+        {
+            try { await previous.CancelAsync().ConfigureAwait(true); }
+            finally { previous.Dispose(); }
+        }
+        token.ThrowIfCancellationRequested();
         ResetAllVisuals();
         this.Focus(FocusState.Programmatic);
-
-        _retryCts = new CancellationTokenSource();
         var backend = services.GetRequiredService<BackendProcessManager>();
         if (backend.IsAvailable && !backend.SkipLaunch && !backend.IsExternal &&
             Uri.TryCreate(backend.ApiUrl, UriKind.Absolute, out var target) && target.IsLoopback)
@@ -84,14 +95,15 @@ public sealed partial class BootPage : Page
                     return;
                 }
             }
-            catch
+            catch (Exception exception)
             {
+                ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
                 Cursor.SetCommand("Module configuration unavailable. Open Settings or install modules.");
                 return;
             }
         }
-        await RunConnectionFlowAsync(customUrl: null, _retryCts.Token).ConfigureAwait(true);
-    }
+        await RunConnectionFlowAsync(customUrl: null, token).ConfigureAwait(true);
+    });
 
     // ---------------------------------------------------------------
     // Main connection flow — page drives everything sequentially
@@ -107,6 +119,8 @@ public sealed partial class BootPage : Page
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
     private async Task RunConnectionCoreAsync(string? customUrl, CancellationToken ct)
     {
         _model!.IsAwaitingInput = false;
@@ -131,92 +145,35 @@ public sealed partial class BootPage : Page
                     Cursor.ClearCommand();
                 }
 
-                // -- Step 1: Backend (silent) --
-                var backendResult = await _model.RunBackendStepAsync(ct).ConfigureAwait(true);
-                ct.ThrowIfCancellationRequested();
-                diag.Add(backendResult.Line);
-
-                if (!backendResult.Ok)
-                {
-                    ShowFailure(diag.ToImmutable());
-                    if (_model.ShouldRetry(backendResult, attempt))
-                    {
-                        await RetryPauseAsync(attempt, diag.ToImmutable(), ct).ConfigureAwait(true);
-                        continue;
-                    }
-                    break;
-                }
-
-                // -- Step 2: Type "sharpclaw echo" → run echo probe --
-                await Cursor.TypeCommandAsync("sharpclaw echo").ConfigureAwait(true);
-                StartDots(DotsBlock);
-
-                var echoResult = await _model.RunEchoStepAsync(ct).ConfigureAwait(true);
-                ct.ThrowIfCancellationRequested();
-                diag.Add(echoResult.Line);
-
-                StopDots();
-                ShowStepResult(EchoResultPanel, EchoIconBlock, EchoTextBlock, echoResult);
-
-                if (!echoResult.Ok)
-                {
-                    if (_model.ShouldRetry(echoResult, attempt))
-                    {
-                        await RetryPauseAsync(attempt, diag.ToImmutable(), ct).ConfigureAwait(true);
-                        continue;
-                    }
-                    break;
-                }
-
-                // -- Step 3: Type "sharpclaw ping" → run ping probe --
-                Cursor.Freeze();
-                PingCursor.Visibility = Visibility.Visible;
-                await PingCursor.TypeCommandAsync("sharpclaw ping").ConfigureAwait(true);
-                StartDots(PingDotsBlock);
-
-                var (pingResult, apiKeyLine) = await _model.RunPingStepAsync(ct).ConfigureAwait(true);
-                ct.ThrowIfCancellationRequested();
-                if (apiKeyLine is not null) diag.Add(apiKeyLine);
-                diag.Add(pingResult.Line);
-
-                StopDots();
-                ShowStepResult(StatusPanel, StatusIconBlock, StatusTextBlock, pingResult);
-
-                if (pingResult.Ok)
-                {
-                    // Optional: start the public gateway (non-blocking, non-fatal).
-                    var gatewayResult = await _model.RunGatewayStepAsync(ct).ConfigureAwait(true);
-                    if (gatewayResult is not null)
-                        diag.Add(gatewayResult.Line);
-
-                    // Readiness is status, never permission to leave the home page.
-                    _model.IsAwaitingInput = false;
-                    return;
-                }
-
-                if (_model.ShouldRetry(pingResult, attempt))
-                {
+                var attemptResult = await RunBootAttemptAsync(diag, ct).ConfigureAwait(true);
+                if (attemptResult.Result.Ok) return;
+                if (_model.ShouldRetry(attemptResult.Result, attempt))
                     await RetryPauseAsync(attempt, diag.ToImmutable(), ct).ConfigureAwait(true);
-                    continue;
-                }
+                else if (!attemptResult.ReachedPing) break;
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-        catch (Exception)
+        catch (Exception exception)
         {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
             diag.Add(new DiagnosticLine("Connection", "Connection failed or was denied. Check the service configuration and diagnostics.", true));
         }
         finally { StopDots(); }
 
+        ShowStoppedConnection(diag.ToImmutable(), ct);
+    }
+
+    private void ShowStoppedConnection(ImmutableArray<DiagnosticLine> log, CancellationToken ct)
+    {
         if (!_isActive) return;
 
         // -- All attempts exhausted or cancelled --
         StopDots();
         Cursor.Freeze();
         PingCursor.Freeze();
-        _model.IsAwaitingInput = true;
+        _model!.IsAwaitingInput = true;
 
-        var finalDiag = _model.RefreshBackendDiagnostic(diag.ToImmutable());
+        var finalDiag = _model.RefreshBackendDiagnostic(log);
         if (ct.IsCancellationRequested)
         {
             ShowFinalStatus("—", GrayColor, "Connection cancelled.", LightGrayColor);
@@ -232,6 +189,40 @@ public sealed partial class BootPage : Page
         UrlPanel.Visibility = Visibility.Visible;
         UrlBox.Text = _model.ApiUrl.TrimEnd('/');
         this.Focus(FocusState.Programmatic);
+    }
+
+    private async Task<(StepResult Result, bool ReachedPing)> RunBootAttemptAsync(
+        ImmutableArray<DiagnosticLine>.Builder diag, CancellationToken ct)
+    {
+        var backendResult = await _model!.RunBackendStepAsync(ct).ConfigureAwait(true);
+        ct.ThrowIfCancellationRequested();
+        diag.Add(backendResult.Line);
+        if (!backendResult.Ok) { ShowFailure(diag.ToImmutable()); return (backendResult, false); }
+        await Cursor.TypeCommandAsync("sharpclaw echo").ConfigureAwait(true);
+        StartDots(DotsBlock);
+        var echoResult = await _model.RunEchoStepAsync(ct).ConfigureAwait(true);
+        ct.ThrowIfCancellationRequested();
+        diag.Add(echoResult.Line);
+        StopDots();
+        ShowStepResult(EchoResultPanel, EchoIconBlock, EchoTextBlock, echoResult);
+        if (!echoResult.Ok) return (echoResult, false);
+        Cursor.Freeze();
+        PingCursor.Visibility = Visibility.Visible;
+        await PingCursor.TypeCommandAsync("sharpclaw ping").ConfigureAwait(true);
+        StartDots(PingDotsBlock);
+        var (pingResult, apiKeyLine) = await _model.RunPingStepAsync(ct).ConfigureAwait(true);
+        ct.ThrowIfCancellationRequested();
+        if (apiKeyLine is not null) diag.Add(apiKeyLine);
+        diag.Add(pingResult.Line);
+        StopDots();
+        ShowStepResult(StatusPanel, StatusIconBlock, StatusTextBlock, pingResult);
+        if (pingResult.Ok)
+        {
+            var gatewayResult = await _model.RunGatewayStepAsync(ct).ConfigureAwait(true);
+            if (gatewayResult is not null) diag.Add(gatewayResult.Line);
+            _model.IsAwaitingInput = false;
+        }
+        return (pingResult, true);
     }
 
     // ---------------------------------------------------------------
@@ -334,63 +325,7 @@ public sealed partial class BootPage : Page
             return;
         }
 
-        foreach (var entry in log)
-        {
-            var icon = new TextBlock
-            {
-                Text = entry.IsError ? "✗" : "✓",
-                FontSize = 12,
-                Foreground = BrushFrom(entry.IsError ? RedColor : GreenColor),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-
-            var label = new TextBlock
-            {
-                Text = entry.Label,
-                FontSize = 12,
-                Foreground = BrushFrom(GrayColor),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-
-            var result = new TextBlock
-            {
-                Text = entry.Result,
-                FontSize = 12,
-                Foreground = BrushFrom(entry.IsError ? LightRedColor : LightGrayColor),
-                VerticalAlignment = VerticalAlignment.Center,
-                TextWrapping = TextWrapping.Wrap,
-                MaxWidth = 360,
-            };
-
-            if (Resources.TryGetValue("TerminalText", out var style)
-                || Application.Current.Resources.TryGetValue("TerminalText", out style))
-            {
-                if (style is Style textStyle)
-                {
-                    icon.Style = textStyle;
-                    label.Style = textStyle;
-                    result.Style = textStyle;
-                    icon.FontSize = 12;
-                    label.FontSize = 12;
-                    result.FontSize = 12;
-                    icon.Foreground = BrushFrom(entry.IsError ? RedColor : GreenColor);
-                    label.Foreground = BrushFrom(GrayColor);
-                    result.Foreground = BrushFrom(entry.IsError ? LightRedColor : LightGrayColor);
-                    result.TextWrapping = TextWrapping.Wrap;
-                    result.MaxWidth = 360;
-                }
-            }
-
-            var row = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 6,
-            };
-            row.Children.Add(icon);
-            row.Children.Add(label);
-            row.Children.Add(result);
-            DiagLines.Children.Add(row);
-        }
+        foreach (var entry in log) DiagLines.Children.Add(CreateDiagnosticRow(entry));
 
         // Show backend process output if available
         var backend = App.Services!.GetRequiredService<BackendProcessManager>();
@@ -408,12 +343,77 @@ public sealed partial class BootPage : Page
         DiagPanel.Visibility = Visibility.Visible;
     }
 
+    private StackPanel CreateDiagnosticRow(DiagnosticLine entry)
+    {
+
+        var icon = new TextBlock
+        {
+            Text = entry.IsError ? "✗" : "✓",
+            FontSize = 12,
+            Foreground = BrushFrom(entry.IsError ? RedColor : GreenColor),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var label = new TextBlock
+        {
+            Text = entry.Label,
+            FontSize = 12,
+            Foreground = BrushFrom(GrayColor),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var result = new TextBlock
+        {
+            Text = entry.Result,
+            FontSize = 12,
+            Foreground = BrushFrom(entry.IsError ? LightRedColor : LightGrayColor),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 360,
+        };
+
+        ApplyDiagnosticStyle(icon, label, result, entry);
+
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+        };
+        row.Children.Add(icon);
+        row.Children.Add(label);
+        row.Children.Add(result);
+        return row;
+    }
+
+    private void ApplyDiagnosticStyle(TextBlock icon, TextBlock label, TextBlock result, DiagnosticLine entry)
+    {
+        if (Resources.TryGetValue("TerminalText", out var style)
+            || Application.Current.Resources.TryGetValue("TerminalText", out style))
+        {
+            if (style is Style textStyle)
+            {
+                icon.Style = textStyle;
+                label.Style = textStyle;
+                result.Style = textStyle;
+                icon.FontSize = 12;
+                label.FontSize = 12;
+                result.FontSize = 12;
+                icon.Foreground = BrushFrom(entry.IsError ? RedColor : GreenColor);
+                label.Foreground = BrushFrom(GrayColor);
+                result.Foreground = BrushFrom(entry.IsError ? LightRedColor : LightGrayColor);
+                result.TextWrapping = TextWrapping.Wrap;
+                result.MaxWidth = 360;
+            }
+        }
+
+    }
+
     private static SolidColorBrush BrushFrom(Windows.UI.Color color) => new(color);
 
     // ---------------------------------------------------------------
     // Clipboard
     // ---------------------------------------------------------------
-    private async void OnCopyLogsClick(object sender, RoutedEventArgs e)
+    private void OnCopyLogsClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         if (_model is null) return;
 
@@ -423,14 +423,14 @@ public sealed partial class BootPage : Page
         Clipboard.SetContent(dp);
 
         CopyLogsLabel.Text = "Copied!";
-        await Task.Delay(2000).ConfigureAwait(true);
+        await Task.Delay(2000, _retryCts?.Token ?? CancellationToken.None).ConfigureAwait(true);
         CopyLogsLabel.Text = "Copy";
-    }
+    });
 
     // ---------------------------------------------------------------
     // Keyboard / input
     // ---------------------------------------------------------------
-    private async void OnKeyDown(object sender, KeyRoutedEventArgs e)
+    private void OnKeyDown(object sender, KeyRoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         if (e.OriginalSource is TextBox or PasswordBox or ComboBox or Button) return;
         if (e.Key == Windows.System.VirtualKey.Escape)
@@ -445,7 +445,7 @@ public sealed partial class BootPage : Page
 
             if (_retryCts is { IsCancellationRequested: false })
             {
-                _retryCts.Cancel();
+                await _retryCts.CancelAsync().ConfigureAwait(true);
                 return;
             }
 
@@ -463,7 +463,7 @@ public sealed partial class BootPage : Page
             _retryCts = new CancellationTokenSource();
             await RunConnectionFlowAsync(url, _retryCts.Token).ConfigureAwait(true);
         }
-    }
+    });
 
     private void OnPageTapped(object sender, TappedRoutedEventArgs e)
     {

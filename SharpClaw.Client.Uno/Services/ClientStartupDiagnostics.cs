@@ -10,7 +10,7 @@ namespace SharpClaw.Services;
 /// </summary>
 internal sealed class ClientStartupDiagnostics
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     internal ClientStartupDiagnostics(string directory)
     {

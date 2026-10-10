@@ -10,8 +10,8 @@ public sealed partial class BootPage
     private bool _moduleInstalling;
     private bool _settingAssets;
 
-    private ModulePackageStore ModuleStore => App.Services!.GetRequiredService<ModulePackageStore>();
-    private ClientActionDispatcher Actions => App.Services!.GetRequiredService<ClientActionDispatcher>();
+    private static ModulePackageStore ModuleStore => App.Services!.GetRequiredService<ModulePackageStore>();
+    private static ClientActionDispatcher Actions => App.Services!.GetRequiredService<ClientActionDispatcher>();
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
@@ -22,8 +22,13 @@ public sealed partial class BootPage
     private void RetireBootWork()
     {
         _isActive = false;
+        StopDots();
         _retryCts?.Cancel();
+        _retryCts?.Dispose();
+        _retryCts = null;
         _moduleInspection?.Cancel();
+        _moduleInspection?.Dispose();
+        _moduleInspection = null;
         _moduleCandidate?.Dispose();
         _moduleCandidate = null;
         ModuleGitHubToken.Password = string.Empty;
@@ -35,21 +40,31 @@ public sealed partial class BootPage
             ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private async void OnSettingsClick(object sender, RoutedEventArgs e)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    private void OnSettingsClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         if (_moduleInstalling) return;
-        _retryCts?.Cancel();
-        try { await App.Services!.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Settings").ConfigureAwait(true); }
-        catch (Exception) { ModuleInstallStatus.Text = "Navigation was not accepted. Please retry."; }
-    }
+        if (_retryCts is { } retry) await retry.CancelAsync().ConfigureAwait(true);
+        try { await App.Services!.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Settings", cancellationToken: CancellationToken.None).ConfigureAwait(true); }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception); ModuleInstallStatus.Text = "Navigation was not accepted. Please retry.";
+        }
+    });
 
-    private async void OnStatelessChatClick(object sender, RoutedEventArgs e)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    private void OnStatelessChatClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         if (_moduleInstalling) return;
-        _retryCts?.Cancel();
-        try { await App.Services!.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Main").ConfigureAwait(true); }
-        catch (Exception) { ModuleInstallStatus.Text = "Navigation was not accepted. Please retry."; }
-    }
+        if (_retryCts is { } retry) await retry.CancelAsync().ConfigureAwait(true);
+        try { await App.Services!.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Main", cancellationToken: CancellationToken.None).ConfigureAwait(true); }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception); ModuleInstallStatus.Text = "Navigation was not accepted. Please retry.";
+        }
+    });
 
     private void OnModuleSourceChanged(object sender, TextChangedEventArgs e)
     {
@@ -72,14 +87,22 @@ public sealed partial class BootPage
         ModuleAssetPicker.IsEnabled = !busy;
     }
 
-    private async void OnInspectModuleClick(object sender, RoutedEventArgs e)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    private void OnInspectModuleClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         if (_moduleBusy) return;
         SetModuleBusy(true);
-        _moduleInspection?.Cancel();
-        _moduleInspection?.Dispose();
-        _moduleInspection = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        var token = _moduleInspection.Token;
+        var previous = _moduleInspection;
+        var inspection = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        _moduleInspection = inspection;
+        var token = inspection.Token;
+        if (previous is not null)
+        {
+            try { await previous.CancelAsync().ConfigureAwait(true); }
+            finally { previous.Dispose(); }
+        }
+        token.ThrowIfCancellationRequested();
         _moduleCandidate?.Dispose();
         _moduleCandidate = null;
         ModuleConfirmButton.Visibility = Visibility.Collapsed;
@@ -100,15 +123,18 @@ public sealed partial class BootPage
             if (assets.Count == 1) await PrepareModuleAsync(assets[0], token).ConfigureAwait(true);
             else ModuleInstallStatus.Text = "Select the exact release asset or package version to inspect.";
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
             if (!token.IsCancellationRequested)
                 ModuleInstallStatus.Text = "Unable to inspect this source. Check the local path/package link and required GitHub read:packages credential.";
         }
         finally { _settingAssets = false; SetModuleBusy(false); }
-    }
+    });
 
-    private async void OnModuleAssetChanged(object sender, SelectionChangedEventArgs e)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    private void OnModuleAssetChanged(object sender, SelectionChangedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         if (_settingAssets || _moduleBusy || ModuleAssetPicker.SelectedItem is not ModulePackageSource source) return;
         SetModuleBusy(true);
@@ -116,12 +142,13 @@ public sealed partial class BootPage
         _moduleInspection = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         var token = _moduleInspection.Token;
         try { await PrepareModuleAsync(source, token).ConfigureAwait(true); }
-        catch (Exception)
+        catch (Exception exception)
         {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
             if (!token.IsCancellationRequested) ModuleInstallStatus.Text = "The selected asset is not a compatible module payload or could not be read. Nothing was activated.";
         }
         finally { SetModuleBusy(false); }
-    }
+    });
 
     private async Task PrepareModuleAsync(ModulePackageSource source, CancellationToken token)
     {
@@ -139,7 +166,7 @@ public sealed partial class BootPage
             token.ThrowIfCancellationRequested();
             _moduleCandidate = prepared;
             prepared = null;
-            ModuleInstallStatus.Text = string.Join("\n", _moduleCandidate!.Modules.Select(module =>
+            ModuleInstallStatus.Text = string.Join('\n', _moduleCandidate!.Modules.Select(module =>
                 $"{module.DisplayName} / {module.Id} / {module.Version}")) +
                 "\nInstall only code you trust. Confirmation enables it in a new Runtime graph; this is not a signature or safety certification.";
             ModuleConfirmButton.Visibility = Visibility.Visible;
@@ -147,13 +174,17 @@ public sealed partial class BootPage
         finally { prepared?.Dispose(); }
     }
 
-    private async void OnConfirmModuleClick(object sender, RoutedEventArgs e)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    private void OnConfirmModuleClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         if (_moduleBusy || _moduleCandidate is not { } candidate) return;
+        using var candidateOwner = candidate;
+        _moduleCandidate = null; // Transfer the payload to this operation before cancellation can suspend.
         SetModuleBusy(true);
         _moduleInstalling = true;
         ModuleConfirmButton.IsEnabled = false;
-        _retryCts?.Cancel();
+        if (_retryCts is { } retry) await retry.CancelAsync().ConfigureAwait(true);
         var services = App.Services!;
         var backend = services.GetRequiredService<BackendProcessManager>();
         var frontend = services.GetRequiredService<FrontendInstanceService>();
@@ -166,31 +197,16 @@ public sealed partial class BootPage
             await _connectionGate.WaitAsync(deadline.Token).ConfigureAwait(true);
             connectionClaimed = true;
             BundledModuleSetup.RequireOwnedTarget(backend);
-            var invoked = 0;
-            await Actions.RunCommandAsync("client.module.install", async token =>
-            {
-                if (Interlocked.Exchange(ref invoked, 1) != 0)
-                    throw new InvalidOperationException("The confirmed installation may run only once.");
-                await ModuleStore.CommitAsync(candidate,
-                    Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"),
-                    ct => BundledModuleSetup.StopAsync(backend, services.GetService<GatewayProcessManager>(), ct),
-                    (root, modules, ct) => BundledModuleSetup.ConfigureAsync(frontend, root, modules, true, ct), token).ConfigureAwait(true);
-                committed = true;
-            }, deadline.Token).ConfigureAwait(true);
+            await ExecuteConfirmedInstallAsync(candidate, backend, frontend, services,
+                () => committed = true, deadline.Token).ConfigureAwait(true);
             if (!committed) throw new InvalidOperationException("Installation was suppressed.");
             _connectionGate.Release();
             connectionClaimed = false;
-            candidate.Dispose();
-            _moduleCandidate = null;
-            ModuleConfirmButton.Visibility = Visibility.Collapsed;
-            ModuleGitHubToken.Password = string.Empty;
-            ModuleInstallStatus.Text = "Installed. Starting a new Runtime graph through the normal module loader.";
-            _retryCts?.Dispose();
-            _retryCts = new CancellationTokenSource();
-            await RunConnectionFlowAsync(null, _retryCts.Token).ConfigureAwait(true);
+            await RestartAfterInstallationAsync(candidate).ConfigureAwait(true);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
             candidate.Dispose();
             _moduleCandidate = null;
             ModuleConfirmButton.Visibility = Visibility.Collapsed;
@@ -205,5 +221,36 @@ public sealed partial class BootPage
             SetModuleBusy(false);
             ModuleConfirmButton.IsEnabled = true;
         }
+    });
+    private static async Task ExecuteConfirmedInstallAsync(
+        PreparedModulePackage candidate, BackendProcessManager backend,
+        FrontendInstanceService frontend, IServiceProvider services,
+        Action onCommitted, CancellationToken cancellationToken)
+    {
+        var invoked = 0;
+        await Actions.RunCommandAsync("client.module.install", async token =>
+        {
+            if (Interlocked.Exchange(ref invoked, 1) != 0)
+                throw new InvalidOperationException("The confirmed installation may run only once.");
+            await ModuleStore.CommitAsync(candidate,
+                Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"),
+                ct => BundledModuleSetup.StopAsync(backend, services.GetService<GatewayProcessManager>(), ct),
+                (root, modules, ct) => BundledModuleSetup.ConfigureAsync(frontend, root, modules, true, ct), token).ConfigureAwait(true);
+            onCommitted();
+        }, cancellationToken).ConfigureAwait(true);
     }
+
+    private async Task RestartAfterInstallationAsync(PreparedModulePackage candidate)
+    {
+        candidate.Dispose();
+        if (!_isActive) return;
+        _moduleCandidate = null;
+        ModuleConfirmButton.Visibility = Visibility.Collapsed;
+        ModuleGitHubToken.Password = string.Empty;
+        ModuleInstallStatus.Text = "Installed. Starting a new Runtime graph through the normal module loader.";
+        _retryCts?.Dispose();
+        _retryCts = new CancellationTokenSource();
+        await RunConnectionFlowAsync(null, _retryCts.Token).ConfigureAwait(true);
+    }
+
 }

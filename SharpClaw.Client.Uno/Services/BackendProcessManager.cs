@@ -21,6 +21,11 @@ namespace SharpClaw.Services;
 /// </summary>
 public sealed class BackendProcessManager : IDisposable
 {
+    private static readonly Action<ILogger, string, Exception?> LogStdout =
+        LoggerMessage.Define<string>(LogLevel.Information, new EventId(1, "BackendStdout"), "Backend process stdout: {Line}");
+    private static readonly Action<ILogger, string, Exception?> LogStderr =
+        LoggerMessage.Define<string>(LogLevel.Warning, new EventId(2, "BackendStderr"), "Backend process stderr: {Line}");
+
     private readonly FrontendInstanceService? _frontendInstance;
     private readonly ILogger<BackendProcessManager> _logger;
     private readonly Func<bool>? _processOnPortProbe;
@@ -33,7 +38,7 @@ public sealed class BackendProcessManager : IDisposable
     private string? _ownedApiUrl;
     private readonly SharpClawBoundedTextTail _processOutput =
         new(SharpClawLogBounds.SidecarTailBytes);
-    private readonly object _outputLock = new();
+    private readonly Lock _outputLock = new();
 
     /// <summary>
     /// <c>true</c> when we confirmed the API is reachable but was not
@@ -42,6 +47,8 @@ public sealed class BackendProcessManager : IDisposable
     public bool IsExternal { get; private set; }
 
     /// <summary>Current API base URL.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public string ApiUrl => _apiUrl;
 
     /// <summary>Full path to the bundled backend executable.</summary>
@@ -74,6 +81,8 @@ public sealed class BackendProcessManager : IDisposable
     /// <summary>Exit code of the bundled process, or <c>null</c> if still running or never started.</summary>
     public int? ExitCode => _process is { HasExited: true } p ? p.ExitCode : null;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public BackendProcessManager(
         string apiUrl,
         ILogger<BackendProcessManager> logger,
@@ -118,6 +127,8 @@ public sealed class BackendProcessManager : IDisposable
     /// <see cref="EnsureStartedAsync"/> call (does not restart a
     /// running bundled process).
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public void UpdateApiUrl(string apiUrl) => _apiUrl = apiUrl;
 
     /// <summary>
@@ -150,10 +161,11 @@ public sealed class BackendProcessManager : IDisposable
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            var response = await http.GetAsync($"{_apiUrl}/echo", ct).ConfigureAwait(true);
+            using var response = await http.GetAsync(new Uri($"{_apiUrl}/echo", UriKind.Absolute), ct).ConfigureAwait(true);
             return response.IsSuccessStatusCode;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or UriFormatException or NotSupportedException)
         {
             return false;
         }
@@ -238,7 +250,7 @@ public sealed class BackendProcessManager : IDisposable
             if (!portInUse)
                 return false;
         }
-        catch
+        catch (Exception exception) when (exception is NetworkInformationException or NotSupportedException or System.Security.SecurityException)
         {
             // IPGlobalProperties can fail on some restricted environments;
             // fall through to the HTTP probe instead of blocking startup.
@@ -249,14 +261,13 @@ public sealed class BackendProcessManager : IDisposable
         try
         {
             var candidates = Process.GetProcessesByName("SharpClaw.Runtime.Host");
-            if (candidates.Length > 0)
+            try { return candidates.Length > 0; }
+            finally
             {
-                // At least one SharpClaw API process is running and the port
-                // is occupied — safe to assume it's the one listening.
-                return true;
+                foreach (var candidate in candidates) candidate.Dispose();
             }
         }
-        catch
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException or System.Security.SecurityException)
         {
             // Process enumeration may fail under restricted permissions
             // (e.g. AppContainer). Fall through to the HTTP probe.
@@ -267,17 +278,8 @@ public sealed class BackendProcessManager : IDisposable
 
     private bool TryGetPortFromApiUrl(out int port)
     {
-        port = 0;
-        try
-        {
-            var uri = new Uri(_apiUrl);
-            port = uri.Port;
-            return port > 0;
-        }
-        catch
-        {
-            return false;
-        }
+        port = Uri.TryCreate(_apiUrl, UriKind.Absolute, out var uri) ? uri.Port : 0;
+        return port > 0;
     }
 
     /// <summary>
@@ -332,17 +334,23 @@ public sealed class BackendProcessManager : IDisposable
             return;
         }
 
-        _process = Process.Start(psi);
+        LaunchProcess(psi);
+    }
+
+    private void LaunchProcess(ProcessStartInfo psi)
+    {
+        _process = Process.Start(psi)
+            ?? throw new InvalidOperationException("The bundled process did not start.");
 
         // Consume stdout/stderr asynchronously to prevent pipe-buffer
         // deadlock — ASP.NET Core writes startup logs that fill the OS
         // buffer and block the process before Kestrel binds the port.
-        _process!.OutputDataReceived += (_, e) =>
+        _process.OutputDataReceived += (_, e) =>
         {
             if (e.Data is not null)
             {
                 lock (_outputLock) _processOutput.AppendLine(e.Data);
-                _logger.LogInformation("Backend process stdout: {Line}", e.Data);
+                LogStdout(_logger, e.Data, null);
             }
         };
         _process.ErrorDataReceived += (_, e) =>
@@ -350,7 +358,7 @@ public sealed class BackendProcessManager : IDisposable
             if (e.Data is not null)
             {
                 lock (_outputLock) _processOutput.AppendLine($"[stderr] {e.Data}");
-                _logger.LogWarning("Backend process stderr: {Line}", e.Data);
+                LogStderr(_logger, e.Data, null);
             }
         };
         _process.BeginOutputReadLine();
@@ -379,7 +387,7 @@ public sealed class BackendProcessManager : IDisposable
 
             _process.WaitForExit(TimeSpan.FromSeconds(5));
         }
-        catch { /* best-effort */ }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { /* The process may already have exited or be inaccessible. */ }
     }
 
     /// <summary>
@@ -398,7 +406,7 @@ public sealed class BackendProcessManager : IDisposable
             _process.CancelOutputRead();
             _process.CancelErrorRead();
         }
-        catch { /* best-effort */ }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { /* The process may already have exited or be inaccessible. */ }
 
         _process.Dispose();
         _process = null;
@@ -412,5 +420,6 @@ public sealed class BackendProcessManager : IDisposable
             Stop();
 
         _process?.Dispose();
+        _process = null;
     }
 }

@@ -21,8 +21,7 @@ internal sealed class AntiSpamMiddleware(
         // ── Body size check ──────────────────────────────────────
         if (context.Request.ContentLength > MaxBodySizeBytes)
         {
-            logger.LogWarning("Anti-spam: oversized body from {Ip} ({Bytes} bytes)",
-                ip, context.Request.ContentLength);
+            GatewayLog.OversizedBody(logger, ip, context.Request.ContentLength);
             banService.RecordViolation(ip);
             await GatewayErrors.WriteAsync(context, StatusCodes.Status413PayloadTooLarge,
                 "Request body too large.", GatewayErrors.PayloadTooLarge).ConfigureAwait(false);
@@ -30,7 +29,8 @@ internal sealed class AntiSpamMiddleware(
         }
 
         // ── Missing Content-Type on POST/PUT ─────────────────────
-        if (context.Request.Method is "POST" or "PUT"
+        if ((string.Equals(context.Request.Method, "POST", StringComparison.Ordinal)
+            || string.Equals(context.Request.Method, "PUT", StringComparison.Ordinal))
             && context.Request.ContentType is null)
         {
             banService.RecordViolation(ip);

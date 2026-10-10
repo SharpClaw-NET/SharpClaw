@@ -43,7 +43,7 @@ internal sealed class CanonicalJobsRouteBoundaryTests
             .Should().BeTrue();
     }
 
-    private static IReadOnlyList<string> GetSourceFiles(string root, string relativeDirectory)
+    private static string[] GetSourceFiles(string root, string relativeDirectory)
     {
         var directory = Path.Combine(root, relativeDirectory);
         return Directory.Exists(directory)

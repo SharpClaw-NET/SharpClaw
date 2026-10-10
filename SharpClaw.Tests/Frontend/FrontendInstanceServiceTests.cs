@@ -314,8 +314,13 @@ internal sealed class FrontendInstanceServiceTests
         {
             Directory.Delete(path, recursive: true);
         }
-        catch
+        catch (IOException exception)
         {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
         }
     }
 
@@ -344,11 +349,7 @@ internal sealed class FrontendInstanceServiceTests
             LastSeenUtc = DateTimeOffset.UtcNow,
         };
 
-        var json = JsonSerializer.Serialize(entry, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = true,
-        });
+        var json = JsonSerializer.Serialize(entry, TestSerializationOptions.CamelCaseIndented);
 
         File.WriteAllText(discoveryPath, json);
     }
@@ -356,10 +357,6 @@ internal sealed class FrontendInstanceServiceTests
     private static SharpClawInstanceManifest LoadManifestFromDisk(string manifestPath)
     {
         var json = File.ReadAllText(manifestPath);
-        return JsonSerializer.Deserialize<SharpClawInstanceManifest>(json, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            PropertyNameCaseInsensitive = true,
-        })!;
+        return JsonSerializer.Deserialize<SharpClawInstanceManifest>(json, TestSerializationOptions.CamelCaseRead)!;
     }
 }

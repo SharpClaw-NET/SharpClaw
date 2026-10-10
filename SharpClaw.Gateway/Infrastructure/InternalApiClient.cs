@@ -47,10 +47,8 @@ internal sealed class InternalApiClient(
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            logger.LogWarning(
-                "Runtime returned unauthorized for {Method} {Path}; attempting credential refresh.",
-                request.Method,
-                SafePath(path));
+            if (logger.IsEnabled(LogLevel.Warning))
+                GatewayLog.UnauthorizedRuntime(logger, request.Method, SafePath(path));
 
             if (TryInvalidateAndReAttach(request))
             {
@@ -194,14 +192,20 @@ internal sealed class InternalApiClient(
         await upstream.ConnectAsync(CreateWebSocketUri(pathAndQuery), cancellationToken).ConfigureAwait(false);
         using var downstream = await context.WebSockets.AcceptWebSocketAsync(upstream.SubProtocol).ConfigureAwait(false);
         using var relayCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        await RunWebSocketRelaysAsync(downstream, upstream, relayCancellation).ConfigureAwait(false);
+    }
+
+    private static async Task RunWebSocketRelaysAsync(
+        WebSocket downstream, WebSocket upstream, CancellationTokenSource relayCancellation)
+    {
         var toRuntime = RelayWebSocketAsync(downstream, upstream, relayCancellation.Token);
         var toClient = RelayWebSocketAsync(upstream, downstream, relayCancellation.Token);
         await Task.WhenAny(toRuntime, toClient).ConfigureAwait(false);
-        relayCancellation.Cancel();
+        var cancellation = relayCancellation.CancelAsync();
 
         try
         {
-            await Task.WhenAll(toRuntime, toClient).ConfigureAwait(false);
+            await Task.WhenAll(toRuntime, toClient, cancellation).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (relayCancellation.IsCancellationRequested)
         {
@@ -236,11 +240,9 @@ internal sealed class InternalApiClient(
         if (!string.IsNullOrEmpty(authHeader) && !request.Headers.Contains("Authorization"))
             request.Headers.TryAddWithoutValidation("Authorization", authHeader);
 
-        logger.LogDebug(
-            "Attached internal credentials for {Method} {Path}; gateway token present={GatewayTokenPresent}.",
-            request.Method,
-            SafePath(request.RequestUri?.ToString() ?? string.Empty),
-            gatewayToken is not null);
+        if (logger.IsEnabled(LogLevel.Debug))
+            GatewayLog.CredentialsAttached(logger, request.Method,
+                SafePath(request.RequestUri?.ToString() ?? string.Empty), gatewayToken is not null);
     }
 
     private static string SafePath(string value)
@@ -263,7 +265,7 @@ internal sealed class InternalApiClient(
             var newKey = ResolveApiKey();
             return !string.Equals(newKey, oldKey, StringComparison.Ordinal);
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             // Key file missing or unreadable — nothing to retry with.
             return false;
@@ -437,7 +439,7 @@ internal sealed class InternalApiClient(
                 using var stream = File.OpenRead(filePath);
                 entry = JsonSerializer.Deserialize<SharpClawDiscoveryEntry>(stream, DiscoveryJsonOptions);
             }
-            catch
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
             {
                 continue;
             }

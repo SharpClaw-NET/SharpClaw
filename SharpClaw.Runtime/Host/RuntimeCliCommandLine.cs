@@ -25,7 +25,9 @@ internal static class RuntimeCliCommandLine
         if (switchIndex + 1 >= args.Count)
             throw new InvalidOperationException("The Runtime CLI command was not supplied.");
 
+#pragma warning disable CA1308 // Registration CLI names use lowercase wire identifiers; changing canonical casing would alter the parsed command contract.
         var command = args[switchIndex + 1].Trim().ToLowerInvariant();
+#pragma warning restore CA1308
         if (command.Length == 0)
             throw new InvalidOperationException("The Runtime CLI command was empty.");
 

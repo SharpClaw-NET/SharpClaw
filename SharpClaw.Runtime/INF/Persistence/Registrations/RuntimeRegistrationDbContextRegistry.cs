@@ -60,6 +60,7 @@ public sealed class RuntimeRegistrationDbContextRegistry
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1024", Justification = "This published method takes a locked, newly allocated registration snapshot; it is an operation rather than stable property state.")]
     public IReadOnlyList<RuntimeRegistrationDbContextRegistration> GetAll()
     {
         lock (_gate)

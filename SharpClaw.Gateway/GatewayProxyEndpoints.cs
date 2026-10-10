@@ -25,11 +25,11 @@ internal static class GatewayProxyEndpoints
     private static async Task ForwardAsync(
         HttpContext context,
         InternalApiClient client,
+        string? path,
         CancellationToken cancellationToken)
     {
-        var routePath = context.Request.RouteValues["path"] as string;
-        var path = string.IsNullOrEmpty(routePath) ? "/" : "/" + routePath;
-        var pathAndQuery = path + context.Request.QueryString;
+        var targetPath = string.IsNullOrEmpty(path) ? "/" : "/" + path;
+        var pathAndQuery = targetPath + context.Request.QueryString;
 
         if (context.WebSockets.IsWebSocketRequest)
         {

@@ -24,16 +24,18 @@ public sealed class RuntimeTransactionActionRunner(
             CancellationToken actionCancellationToken)
         {
             if (Interlocked.CompareExchange(ref terminalStarted, 1, 0) != 0)
+#pragma warning disable VSTHRD003 // A context-free transaction terminal joins its own once-only completion; no UI or JoinableTask context is involved.
                 return await completion.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
 
             try
             {
                 var transaction = await db.Database.BeginTransactionAsync(
                     IsolationLevel.Serializable,
                     actionCancellationToken).ConfigureAwait(false);
-                var result = new RuntimeTransactionActionResult(transaction);
-                completion.TrySetResult(result);
-                return result;
+                var terminalResult = new RuntimeTransactionActionResult(transaction);
+                completion.TrySetResult(terminalResult);
+                return terminalResult;
             }
             catch (Exception exception)
             {
@@ -86,7 +88,9 @@ public sealed class RuntimeTransactionActionRunner(
             CancellationToken actionCancellationToken)
         {
             if (Interlocked.CompareExchange(ref terminalStarted, 1, 0) != 0)
+#pragma warning disable VSTHRD003 // Repeated context-free terminal invocations must join the same transaction operation, not start it twice.
                 return await completion.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
 
             try
             {

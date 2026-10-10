@@ -48,7 +48,7 @@ public sealed class SharpClawInstancePaths
         DurableDirectory = Path.Combine(InstanceRoot, "durable", "v1");
         ConfigDirectory = Path.Combine(InstanceRoot, "config");
         DiscoveryDirectory = Path.Combine(SharedRoot, "discovery", "instances");
-        DiscoveryEntryPath = Path.Combine(DiscoveryDirectory, $"{instanceKind.ToString().ToLowerInvariant()}-{InstallFingerprint}.json");
+        DiscoveryEntryPath = Path.Combine(DiscoveryDirectory, $"{GetPersistedKindName(instanceKind)}-{InstallFingerprint}.json");
         _manifest = new Lazy<SharpClawInstanceManifest>(LoadOrCreateManifest, isThreadSafe: true);
     }
 
@@ -120,21 +120,30 @@ public sealed class SharpClawInstancePaths
         WriteJsonAtomically(ManifestPath, manifest);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "These existing published overloads accept and persist exact endpoint text. Adding Uri overloads makes existing null-literal source calls ambiguous; changing the parameter type breaks the CLR API and discovery JSON contract.")]
     public void PublishDiscoveryEntry(string baseUrl)
-        => PublishDiscoveryEntry(
+    {
+        using var process = Process.GetCurrentProcess();
+        PublishDiscoveryEntry(
             baseUrl,
-            Process.GetCurrentProcess().StartTime.ToUniversalTime(),
+            new DateTimeOffset(process.StartTime.ToUniversalTime()),
             Environment.ProcessId);
+    }
 
     /// <summary>
     /// Writes the current discovery entry with explicit process metadata.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "These existing published overloads accept and persist exact endpoint text. Adding Uri overloads makes existing null-literal source calls ambiguous; changing the parameter type breaks the CLR API and discovery JSON contract.")]
     public void PublishDiscoveryEntry(string baseUrl, DateTimeOffset startedAtUtc, int processId)
         => PublishDiscoveryEntry(baseUrl, startedAtUtc, processId, GatewayTokenFilePath);
 
     /// <summary>
     /// Writes the current discovery entry with an optional Gateway token path.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "These existing published overloads accept and persist exact endpoint text. Adding Uri overloads makes existing null-literal source calls ambiguous; changing the parameter type breaks the CLR API and discovery JSON contract.")]
     public void PublishDiscoveryEntry(
         string baseUrl,
         DateTimeOffset startedAtUtc,
@@ -178,7 +187,7 @@ public sealed class SharpClawInstancePaths
 
         foreach (var discoveryEntryPath in Directory.EnumerateFiles(
                      DiscoveryDirectory,
-                     $"{InstanceKind.ToString().ToLowerInvariant()}-*.json"))
+                     $"{GetPersistedKindName(InstanceKind)}-*.json"))
         {
             if (!TryReadDiscoveryEntry(discoveryEntryPath, out var entry) || entry is null)
             {
@@ -198,7 +207,7 @@ public sealed class SharpClawInstancePaths
             if (File.Exists(DiscoveryEntryPath))
                 File.Delete(DiscoveryEntryPath);
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
         }
     }
@@ -252,9 +261,13 @@ public sealed class SharpClawInstancePaths
         if (!string.IsNullOrWhiteSpace(explicitInstanceRoot))
             return Path.GetFullPath(explicitInstanceRoot);
 
-        var instanceKindDirectory = instanceKind.ToString().ToLowerInvariant();
+        var instanceKindDirectory = GetPersistedKindName(instanceKind);
         return Path.Combine(SharedRoot, "instances", instanceKindDirectory, InstallFingerprint);
     }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1308",
+        Justification = "The lowercase enum name is the existing persisted directory/discovery filename component; uppercase would select different files on case-sensitive systems and break published layout compatibility.")]
+    private static string GetPersistedKindName(SharpClawInstanceKind instanceKind) => instanceKind.ToString().ToLowerInvariant();
 
     private static string ResolveInstallAnchor()
     {
@@ -264,7 +277,7 @@ public sealed class SharpClawInstancePaths
     private static string ComputeInstallFingerprint(string installAnchor)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(installAnchor));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
+        return Convert.ToHexStringLower(bytes);
     }
 
     private static void WriteJsonAtomically<T>(string path, T value)
@@ -290,12 +303,12 @@ public sealed class SharpClawInstancePaths
             if (File.Exists(path))
                 File.Delete(path);
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
         }
     }
 
-    private bool TryReadDiscoveryEntry(string discoveryEntryPath, out SharpClawDiscoveryEntry? entry)
+    private static bool TryReadDiscoveryEntry(string discoveryEntryPath, out SharpClawDiscoveryEntry? entry)
     {
         try
         {
@@ -303,7 +316,7 @@ public sealed class SharpClawInstancePaths
             entry = JsonSerializer.Deserialize<SharpClawDiscoveryEntry>(stream, JsonOptions);
             return entry is not null;
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
             entry = null;
             return false;
@@ -328,7 +341,7 @@ public sealed class SharpClawInstancePaths
     {
         try
         {
-            var process = Process.GetProcessById(processId);
+            using var process = Process.GetProcessById(processId);
             return !process.HasExited;
         }
         catch (ArgumentException)

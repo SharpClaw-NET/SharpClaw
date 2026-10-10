@@ -20,6 +20,7 @@ public sealed class SingleConversationResolver(Guid conversationId) : IConversat
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(input);
         return ValueTask.FromResult(new ConversationSelection(
             input.ConversationId.GetValueOrDefault(_conversationId),
             input.ConversationId is null));

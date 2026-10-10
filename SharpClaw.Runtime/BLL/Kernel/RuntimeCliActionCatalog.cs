@@ -31,6 +31,8 @@ internal static class RuntimeCliActionCatalog
         All.Any(candidate => candidate.Equals(key));
 
     private static SharpClawActionKey Find(string value) =>
+#pragma warning disable HLQ005 // The published catalog must contain exactly one matching action; First would hide duplicate contract keys.
         SharpClawActionCatalog.Kernel.Single(key =>
             string.Equals(key.Value, value, StringComparison.Ordinal));
+#pragma warning restore HLQ005
 }

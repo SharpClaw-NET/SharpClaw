@@ -9,6 +9,7 @@ using Serilog;
 using Serilog.Events;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
+using System.Globalization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -102,7 +103,7 @@ builder.Services.AddHttpClient<InternalApiClient>(client =>
 {
     var section = builder.Configuration.GetSection(InternalApiOptions.SectionName);
     client.BaseAddress = new Uri(section["BaseUrl"] ?? "http://127.0.0.1:48923");
-    client.Timeout = int.TryParse(section["TimeoutSeconds"], out var t) && t > 0
+    client.Timeout = int.TryParse(section["TimeoutSeconds"], CultureInfo.InvariantCulture, out var t) && t > 0
         ? TimeSpan.FromSeconds(t)
         : TimeSpan.FromSeconds(300);
 });
@@ -189,7 +190,7 @@ app.Use(async (context, next) =>
         // X-RateLimit-Limit — applicable rate limit for this path
         var path = context.Request.Path.Value ?? string.Empty;
         context.Response.Headers["X-RateLimit-Limit"] =
-            RateLimiterConfiguration.ResolveRateLimit(path).ToString();
+            RateLimiterConfiguration.ResolveRateLimit(path).ToString(CultureInfo.InvariantCulture);
 
         // Cache-Control — short cache for reads, no-store for mutations
         if (!context.Response.Headers.ContainsKey("Cache-Control"))
@@ -201,17 +202,17 @@ app.Use(async (context, next) =>
         // Queue load indicators — present when the queue is enabled
         if (queueSvc?.Enabled == true)
         {
-            context.Response.Headers["X-Queue-Pending"] = queueSvc.PendingCount.ToString();
+            context.Response.Headers["X-Queue-Pending"] = queueSvc.PendingCount.ToString(CultureInfo.InvariantCulture);
             var avg = queueSvc.Metrics.AverageProcessingMs;
             if (avg > 0)
-                context.Response.Headers["X-Queue-Avg-Ms"] = avg.ToString("F0");
+                context.Response.Headers["X-Queue-Avg-Ms"] = avg.ToString("F0", CultureInfo.InvariantCulture);
         }
 
         // Per-request queue metadata — queued mutations only
         if (meta is not null)
         {
-            context.Response.Headers["X-Queue-Position"] = meta.Position.ToString();
-            context.Response.Headers["X-Queue-Processing-Ms"] = meta.ProcessingMs.ToString("F0");
+            context.Response.Headers["X-Queue-Position"] = meta.Position.ToString(CultureInfo.InvariantCulture);
+            context.Response.Headers["X-Queue-Processing-Ms"] = meta.ProcessingMs.ToString("F0", CultureInfo.InvariantCulture);
         }
 
         // Retry-After on 503 (queue full) — estimated wait in seconds
@@ -220,8 +221,8 @@ app.Use(async (context, next) =>
             var avgMs = queueSvc?.Metrics.AverageProcessingMs > 0
                 ? queueSvc.Metrics.AverageProcessingMs : 5000;
             var pending = queueSvc?.PendingCount ?? 0;
-            context.Response.Headers["Retry-After"] = Math.Max(5,
-                (int)Math.Ceiling(pending * avgMs / 1000.0)).ToString();
+            context.Response.Headers.RetryAfter = Math.Max(5,
+                (int)Math.Ceiling(pending * avgMs / 1000.0)).ToString(CultureInfo.InvariantCulture);
         }
 
         return Task.CompletedTask;
@@ -235,14 +236,14 @@ app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
 
-    if (path.StartsWithSegments("/healthz"))
+    if (path.StartsWithSegments("/healthz", StringComparison.OrdinalIgnoreCase))
     {
         context.Response.StatusCode = 200;
-        await context.Response.WriteAsJsonAsync(new { status = "healthy" }).ConfigureAwait(false);
+        await context.Response.WriteAsJsonAsync(new { status = "healthy" }, context.RequestAborted).ConfigureAwait(false);
         return;
     }
 
-    if (path.StartsWithSegments("/readyz"))
+    if (path.StartsWithSegments("/readyz", StringComparison.OrdinalIgnoreCase))
     {
         var queueSvc = context.RequestServices.GetRequiredService<RequestQueueService>();
         var coreApiClient = context.RequestServices.GetRequiredService<InternalApiClient>();
@@ -255,17 +256,23 @@ app.Use(async (context, next) =>
         try
         {
             using var probe = new HttpRequestMessage(HttpMethod.Get, "/health");
-            using var response = await coreApiClient.SendRawAsync(probe, CancellationToken.None).ConfigureAwait(false);
+            using var response = await coreApiClient.SendRawAsync(probe, context.RequestAborted).ConfigureAwait(false);
             checks["coreApi"] = response.IsSuccessStatusCode ? "ok" : $"status:{(int)response.StatusCode}";
         }
-        catch
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is HttpRequestException
+            or OperationCanceledException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             checks["coreApi"] = "unreachable";
         }
 
-        var ready = checks.Values.All(v => v is "ok" or "disabled");
+        var ready = checks.Values.All(v => string.Equals(v, "ok", StringComparison.Ordinal)
+            || string.Equals(v, "disabled", StringComparison.Ordinal));
         context.Response.StatusCode = ready ? 200 : 503;
-        await context.Response.WriteAsJsonAsync(new { status = ready ? "ready" : "not_ready", checks }).ConfigureAwait(false);
+        await context.Response.WriteAsJsonAsync(new { status = ready ? "ready" : "not_ready", checks }, context.RequestAborted).ConfigureAwait(false);
         return;
     }
 
@@ -308,7 +315,7 @@ app.MapGatewayProxyEndpoints();
 
 try
 {
-    app.Run();
+    await app.RunAsync().ConfigureAwait(false);
 }
 finally
 {

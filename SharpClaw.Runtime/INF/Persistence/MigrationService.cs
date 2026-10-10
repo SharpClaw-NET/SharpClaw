@@ -13,6 +13,15 @@ public sealed class MigrationService(
     ILogger<MigrationService> logger) : IDisposable
 {
     private readonly SemaphoreSlim _singleRun = new(1, 1);
+    private static readonly Action<ILogger, Exception?> LogDraining = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(1, nameof(LogDraining)),
+        "Migration requested. Draining in-flight requests...");
+    private static readonly Action<ILogger, Exception?> LogApplying = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(2, nameof(LogApplying)),
+        "All requests drained. Applying migrations...");
+    private static readonly Action<ILogger, int, string, Exception?> LogApplied = LoggerMessage.Define<int, string>(
+        LogLevel.Warning, new EventId(3, nameof(LogApplied)),
+        "Applied {Count} migration(s): {Names}");
 
     /// <inheritdoc />
     public void Dispose() => _singleRun.Dispose();
@@ -28,9 +37,9 @@ public sealed class MigrationService(
 
         try
         {
-            logger.LogWarning("Migration requested. Draining in-flight requests...");
+            LogDraining(logger, null);
             using var migrationLock = await gate.EnterMigrationAsync(ct).ConfigureAwait(false);
-            logger.LogWarning("All requests drained. Applying migrations...");
+            LogApplying(logger, null);
 
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
@@ -43,8 +52,8 @@ public sealed class MigrationService(
                 return MigrationResult.NoPending();
 
             await db.Database.MigrateAsync(ct).ConfigureAwait(false);
-            logger.LogWarning("Applied {Count} migration(s): {Names}",
-                pending.Count, string.Join(", ", pending));
+            if (logger.IsEnabled(LogLevel.Warning))
+                LogApplied(logger, pending.Count, string.Join(", ", pending), null);
 
             return MigrationResult.Success(pending);
             // Dispose releases gate → requests resume.

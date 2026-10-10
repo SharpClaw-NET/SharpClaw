@@ -192,13 +192,26 @@ internal sealed class ModulePackageStore : IDisposable
         if (specs.Length != 1) throw new InvalidDataException("A NuGet module must have one root nuspec.");
         using var reader = XmlReader.Create(specs[0], new XmlReaderSettings
         { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 512 * 1024 });
-        var metadata = XDocument.Load(reader).Root?.Elements().Single(element => string.Equals(element.Name.LocalName, "metadata", StringComparison.Ordinal))
+        var rootElement = XDocument.Load(reader).Root
             ?? throw new InvalidDataException("Missing NuGet metadata.");
-        var id = metadata.Elements().Single(element => string.Equals(element.Name.LocalName, "id", StringComparison.Ordinal)).Value;
-        var version = metadata.Elements().Single(element => string.Equals(element.Name.LocalName, "version", StringComparison.Ordinal)).Value;
+        var metadata = RequireSingleElement(rootElement, "metadata");
+        var id = RequireSingleElement(metadata, "id").Value;
+        var version = RequireSingleElement(metadata, "version").Value;
         if (source.PackageId is not null && (!string.Equals(source.PackageId, id, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(source.Version, version, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("The downloaded NuGet identity does not match the selected package/version.");
+    }
+
+    private static XElement RequireSingleElement(XElement parent, string name)
+    {
+        XElement? match = null;
+        foreach (var element in parent.Elements())
+        {
+            if (!string.Equals(element.Name.LocalName, name, StringComparison.Ordinal)) continue;
+            if (match is not null) throw new InvalidOperationException("Sequence contains more than one matching element.");
+            match = element;
+        }
+        return match ?? throw new InvalidOperationException("Sequence contains no matching element.");
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5389",
@@ -285,7 +298,7 @@ internal sealed class ModulePackageStore : IDisposable
     {
         if (string.IsNullOrEmpty(relative) || relative.Length > 512 || relative[0] == '/' ||
             relative.Contains('\\', StringComparison.Ordinal) || relative.Contains(':', StringComparison.Ordinal) || relative.Any(char.IsControl) ||
-            relative.Split('/').Any(part => part.Length is 0 or > 180 || part is "." or ".." ||
+            relative.Split('/').Any(part => part.Length is 0 or > 180 || (string.Equals(part, ".", StringComparison.Ordinal) || string.Equals(part, "..", StringComparison.Ordinal)) ||
                 part.EndsWith('.') || part.EndsWith(' ') || part.IndexOfAny(['<', '>', '"', '|', '?', '*']) >= 0 ||
                 IsDeviceName(part)))
             throw new InvalidDataException("Unsafe or nonportable module path.");
@@ -294,7 +307,7 @@ internal sealed class ModulePackageStore : IDisposable
     private static bool IsDeviceName(string part)
     {
         var name = part.Split('.')[0].ToUpperInvariant();
-        return name is "CON" or "PRN" or "AUX" or "NUL" ||
+        return (string.Equals(name, "CON", StringComparison.Ordinal) || string.Equals(name, "PRN", StringComparison.Ordinal) || string.Equals(name, "AUX", StringComparison.Ordinal) || string.Equals(name, "NUL", StringComparison.Ordinal)) ||
             (name.Length == 4 && (name.StartsWith("COM", StringComparison.Ordinal) || name.StartsWith("LPT", StringComparison.Ordinal)) &&
                 name[3] is >= '0' and <= '9');
     }
@@ -311,7 +324,7 @@ internal sealed class ModulePackageStore : IDisposable
         var current = Path.GetFullPath(path);
         while (!string.IsNullOrEmpty(current))
         {
-            if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+            if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
                 throw new InvalidDataException("Module paths cannot traverse symbolic links or reparse points.");
             current = Path.GetDirectoryName(current);
         }

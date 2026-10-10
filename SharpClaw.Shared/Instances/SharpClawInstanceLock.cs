@@ -9,19 +9,23 @@ public sealed class SharpClawInstanceLock : IDisposable
     private int _disposeState;
 
     public SharpClawInstanceLock(SharpClawInstancePaths instancePaths)
+        : this(instancePaths, static path => new FileStream(
+            path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+    {
+    }
+
+    internal SharpClawInstanceLock(SharpClawInstancePaths instancePaths, Func<string, FileStream> acquireStream)
     {
         ArgumentNullException.ThrowIfNull(instancePaths);
+        ArgumentNullException.ThrowIfNull(acquireStream);
 
         instancePaths.EnsureDirectories();
         LockFilePath = Path.Combine(instancePaths.InstanceRoot, ".instance.lock");
 
         try
         {
-            _lockStream = new FileStream(
-                LockFilePath,
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None);
+            _lockStream = acquireStream(LockFilePath)
+                ?? throw new InvalidOperationException("The instance lock stream was not acquired.");
         }
         catch (IOException ex)
         {
@@ -30,7 +34,18 @@ public sealed class SharpClawInstanceLock : IDisposable
                 ex);
         }
 
-        WriteOwnershipMetadata();
+        try { WriteOwnershipMetadata(); }
+        catch
+        {
+            // Acquisition does not transfer to the caller until metadata is
+            // durable. Closing this handle releases the exclusive path lease.
+            try { _lockStream.Dispose(); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Preserve the original metadata failure if release also fails.
+            }
+            throw;
+        }
     }
 
     public string LockFilePath { get; }
@@ -47,7 +62,7 @@ public sealed class SharpClawInstanceLock : IDisposable
             if (File.Exists(LockFilePath))
                 File.Delete(LockFilePath);
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
         }
     }

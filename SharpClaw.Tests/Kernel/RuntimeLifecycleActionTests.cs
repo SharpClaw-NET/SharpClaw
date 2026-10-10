@@ -205,10 +205,13 @@ internal sealed class RuntimeLifecycleActionTests
             }, cancellation.Token).AsTask();
         if (duringTerminal)
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
             await cancellation.CancelAsync().ConfigureAwait(false);
         }
+        // The test owns this operation/signal; it runs without a JoinableTaskFactory dependency.
+#pragma warning disable VSTHRD003
         Func<Task> observe = () => preparation;
+#pragma warning restore VSTHRD003
         await observe.Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
         calls.Should().Be(duringTerminal ? 1 : 0);
     }
@@ -275,38 +278,23 @@ internal sealed class RuntimeLifecycleActionTests
                 Interlocked.Increment(ref requestCount);
                 return Results.Ok();
             });
-        await app.StartAsync().ConfigureAwait(false);
+        await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
         using var client = new HttpClient
         {
-            BaseAddress = new Uri(app.Urls.Single()),
+            BaseAddress = new Uri(app.Urls.Should().ContainSingle().Which),
         };
         var cleanup = new RuntimeHostCleanup(
             () => probe.ShutdownEvents.Enqueue("not-ready"),
             () => probe.ShutdownEvents.Enqueue("discovery"),
             () => probe.ShutdownEvents.Enqueue("api-key"),
-            async () =>
-            {
-                probe.ShutdownEvents.Enqueue("listener");
-                await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                try
-                {
-                    await client.GetAsync("/shutdown-probe", timeout.Token).ConfigureAwait(false);
-                }
-                catch (HttpRequestException)
-                {
-                }
-                catch (TaskCanceledException)
-                {
-                }
-            });
+            async () => await StopListenerAndProbeAdmissionAsync(app, client, probe).ConfigureAwait(false));
 
         try
         {
             await adapter.StopAsync(
                 onPrepare: _ => cleanup.BeginAsync(),
-                onComplete: _ => cleanup.CompleteAsync()).ConfigureAwait(false);
+                onComplete: _ => cleanup.CompleteAsync(), cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
             requestCount.Should().Be(0);
             probe.RegistrationStopCount.Should().Be(1);
@@ -320,6 +308,26 @@ internal sealed class RuntimeLifecycleActionTests
         finally
         {
             await app.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static async Task StopListenerAndProbeAdmissionAsync(WebApplication app, HttpClient client, LifecycleProbe probe)
+    {
+        probe.ShutdownEvents.Enqueue("listener");
+        await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        try
+        {
+            using var response = await client.GetAsync(
+                new Uri("/shutdown-probe", UriKind.RelativeOrAbsolute), timeout.Token).ConfigureAwait(false);
+        }
+        catch (HttpRequestException)
+        {
+            // A stopped listener rejects admission at the transport boundary.
+        }
+        catch (TaskCanceledException)
+        {
+            // The existing bounded refusal probe can expire while the listener is closed.
         }
     }
 
@@ -671,8 +679,13 @@ internal sealed class RuntimeLifecycleActionTests
                 if (Directory.Exists(_root))
                     Directory.Delete(_root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }

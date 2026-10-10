@@ -59,18 +59,16 @@ internal sealed class RuntimePersistenceBoundaryTests
                 Path.Combine(sourceRoot, "SharpClaw.Runtime"),
                 "*.cs",
                 SearchOption.AllDirectories)
-            .Where(path => !path.Contains(
+            .Where(path => (!path.Contains(
                 $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
-                StringComparison.OrdinalIgnoreCase))
-            .Where(path => !path.Contains(
+                StringComparison.OrdinalIgnoreCase)) && (!path.Contains(
                 $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
-                StringComparison.OrdinalIgnoreCase));
+                StringComparison.OrdinalIgnoreCase))).ToArray();
 
         var offenders = runtimeSources
             .SelectMany(path => File.ReadLines(path)
                 .Select((line, index) => (Path: path, Line: index + 1, Text: line)))
-            .Where(entry => entry.Text.Contains("SaveChangesAsync(", StringComparison.Ordinal))
-            .Where(entry => !IsOwnedSaveBoundary(entry.Path, entry.Text))
+            .Where(entry => (entry.Text.Contains("SaveChangesAsync(", StringComparison.Ordinal)) && (!IsOwnedSaveBoundary(entry.Path, entry.Text)))
             .Select(entry => $"{entry.Path}:{entry.Line}")
             .ToArray();
 
@@ -80,10 +78,9 @@ internal sealed class RuntimePersistenceBoundaryTests
         var terminalCallers = runtimeSources
             .SelectMany(path => File.ReadLines(path)
                 .Select((line, index) => (Path: path, Line: index + 1, Text: line)))
-            .Where(entry => entry.Text.Contains(
+            .Where(entry => (entry.Text.Contains(
                 "SaveChangesTerminalAsync(",
-                StringComparison.Ordinal))
-            .Where(entry => !string.Equals(Path.GetFileName(entry.Path), "RuntimePersistenceActionRunner.cs", StringComparison.Ordinal))
+                StringComparison.Ordinal)) && (!string.Equals(Path.GetFileName(entry.Path), "RuntimePersistenceActionRunner.cs", StringComparison.Ordinal)))
             .Select(entry => $"{entry.Path}:{entry.Line}")
             .ToArray();
 
@@ -142,11 +139,11 @@ internal sealed class RuntimePersistenceBoundaryTests
         var actionBoundary = new TestPersistenceBoundary(runTerminal: true, repeatTerminal: true);
         var db = CreateDatabase(actionBoundary);
         await using var dbAsyncDisposal_ = db.ConfigureAwait(false);
-        db.Models.Add(new SharpClaw.Contracts.Entities.Core.ModelDB
+        await db.Models.AddAsync(new SharpClaw.Contracts.Entities.Core.ModelDB
         {
             Name = "one",
             ProviderId = Guid.NewGuid(),
-        });
+        }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
         var saved = await db.SaveChangesAsync(acceptAllChangesOnSuccess: true).ConfigureAwait(false);
 

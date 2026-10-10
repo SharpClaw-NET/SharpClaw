@@ -44,14 +44,7 @@ internal sealed class DefaultModuleSetHostGateTests
         var configuration = CreateConfiguration(provider.Endpoint, configured);
         var contributionRoot = Path.Combine(AppContext.BaseDirectory, "contributions");
 
-        Directory.Exists(contributionRoot).Should().BeTrue(
-            $"the test build must provide the default package payload at '{contributionRoot}'");
-        var packagedIds = Directory.EnumerateDirectories(contributionRoot)
-            .Select(Path.GetFileName)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .ToHashSet(StringComparer.Ordinal);
-        packagedIds.Should().NotContain(ArchivedRegistrationIds);
-        packagedIds.Should().Contain("sharpclaw_providers_openai_compat");
+        AssertDefaultPackagePayload(contributionRoot);
 
         {
             var registrationSet = await PackagedDotNetRegistrationSet.LoadProductionAsync(
@@ -62,108 +55,140 @@ internal sealed class DefaultModuleSetHostGateTests
                 registrationSet.SourceIds.Should().NotContain(ArchivedRegistrationIds);
                 registrationSet.SourceIds.Should().Contain("sharpclaw_providers_openai_compat");
 
-                var databaseOptions = new SharpClawPersistenceOptions
-                {
-                    ProviderKey = SharpClawPersistenceOptions.DefaultProviderKey,
-                    DataDirectory = workspace.DatabaseDirectory,
-                };
-
-                var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-                {
-                    ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
-                });
-                builder.Configuration.Sources.Clear();
-                builder.Configuration.AddConfiguration(configuration);
-                builder.WebHost.UseUrls("http://127.0.0.1:0");
-                RuntimeHostComposition.RegisterServices(
-                    builder.Services,
-                    configuration,
-                    workspace.InstancePaths,
-                    new EncryptionOptions { Key = new byte[32] },
-                    databaseOptions,
-                    registrationSet.Services);
-
-                var app = builder.Build();
+                var app = CreateApplication(workspace, configuration, registrationSet);
                 await using var appAsyncDisposal = app.ConfigureAwait(false);
                 var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
                 var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-                app.Services.GetRequiredService<IActionDispatcher>().Should().BeSameAs(adapter.ActionDispatcher);
-
-                await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync().ConfigureAwait(false);
-                await registrationSet.ConnectCapabilitiesAsync(app.Services).ConfigureAwait(false);
-                await adapter.StartAsync("default-package-production-gate").ConfigureAwait(false);
-                readiness.MarkReady();
-
-                app.Use((context, next) =>
-                {
-                    context.User = Administrator();
-                    return next();
-                });
-                app.UseMiddleware<ApiKeyMiddleware>();
-                app.UseWebSockets();
-                KernelHostEndpoints.Map(app);
-                registrationSet.Application.MapEndpoints(app, adapter);
+                await InitializeApplicationAsync(app, registrationSet, adapter, readiness).ConfigureAwait(false);
 
                 try
                 {
-                    await app.StartAsync().ConfigureAwait(false);
-                    using var client = new HttpClient
-                    {
-                        BaseAddress = new Uri(app.Urls.Single()),
-                        Timeout = TimeSpan.FromSeconds(30),
-                    };
-                    client.DefaultRequestHeaders.Add(
-                        "X-Api-Key",
-                        app.Services.GetRequiredService<ApiKeyProvider>().ApiKey);
-
-                    foreach (var path in new[] { "/echo", "/healthz", "/readyz", "/ping" })
-                    {
-                        using var health = await client.GetAsync(path).ConfigureAwait(false);
-                        health.StatusCode.Should().Be(HttpStatusCode.OK, path);
-                    }
-                    var setup = await client.GetFromJsonAsync<SharpClawProviderSetup>("/setup/provider").ConfigureAwait(false);
-                    setup!.SetupRequired.Should().Be(!configured);
-                    setup.Providers.Should().Contain(item => item.Key == "custom");
-                    using var anonymous = new HttpClient { BaseAddress = client.BaseAddress };
-                    using var unauthorized = await anonymous.GetAsync("/setup/provider").ConfigureAwait(false);
-                    unauthorized.StatusCode.Should().Be(HttpStatusCode.Locked,
-                        "the session-key middleware must still protect provider setup");
-
-                    using var response = await client.PostAsJsonAsync("/chat", new { message = "default gate" }).ConfigureAwait(false);
-                    var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-
-                    if (!configured)
-                    {
-                        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
-                        body.Should().Contain("provider_setup_required");
-                        using var blockedStream = await client.PostAsJsonAsync("/chat/stream", new { message = "stream" }).ConfigureAwait(false);
-                        blockedStream.StatusCode.Should().Be(HttpStatusCode.Conflict);
-                        provider.RequestCount.Should().Be(0);
-                        readiness.IsReady.Should().BeTrue();
-                    }
-                    else
-                    {
-                        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
-                        body.Should().Contain("default package graph response");
-                        provider.RequestCount.Should().Be(1);
-                    }
+                    await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+                    await AssertProviderSetupAndChatAsync(app, provider, configured).ConfigureAwait(false);
                 }
                 finally
                 {
                     readiness.MarkNotReady();
                     try
                     {
-                        await adapter.StopAsync().ConfigureAwait(false);
+                        await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
                     }
                     finally
                     {
-                        await app.StopAsync().ConfigureAwait(false);
+                        await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
                     }
                 }
             }
         }
 
         await AssertSidecarsStoppedAsync(initialSidecars).ConfigureAwait(false);
+    }
+
+    private static void AssertDefaultPackagePayload(string contributionRoot)
+    {
+        Directory.Exists(contributionRoot).Should().BeTrue(
+            $"the test build must provide the default package payload at '{contributionRoot}'");
+        var packagedIds = Directory.EnumerateDirectories(contributionRoot)
+            .Select(Path.GetFileName)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.Ordinal);
+        packagedIds.Should().NotContain(ArchivedRegistrationIds);
+        packagedIds.Should().Contain("sharpclaw_providers_openai_compat");
+    }
+
+    private static WebApplication CreateApplication(TemporaryWorkspace workspace, IConfiguration configuration, PackagedDotNetRegistrationSet registrationSet)
+    {
+        var databaseOptions = new SharpClawPersistenceOptions
+        {
+            ProviderKey = SharpClawPersistenceOptions.DefaultProviderKey,
+            DataDirectory = workspace.DatabaseDirectory,
+        };
+
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
+        });
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddConfiguration(configuration);
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        RuntimeHostComposition.RegisterServices(
+            builder.Services,
+            configuration,
+            workspace.InstancePaths,
+            new EncryptionOptions { Key = new byte[32] },
+            databaseOptions,
+            registrationSet.Services);
+        return builder.Build();
+    }
+
+    private static async Task InitializeApplicationAsync(WebApplication app, PackagedDotNetRegistrationSet registrationSet, RuntimeKernelAdapter adapter, RuntimeReadinessState readiness)
+    {
+        app.Services.GetRequiredService<IActionDispatcher>().Should().BeSameAs(adapter.ActionDispatcher);
+
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await registrationSet.ConnectCapabilitiesAsync(app.Services, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await adapter.StartAsync("default-package-production-gate", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        readiness.MarkReady();
+
+        app.Use((context, next) =>
+        {
+            context.User = Administrator();
+            return next();
+        });
+        app.UseMiddleware<ApiKeyMiddleware>();
+        app.UseWebSockets();
+        KernelHostEndpoints.Map(app);
+        registrationSet.Application.MapEndpoints(app, adapter);
+    }
+
+    private static async Task AssertProviderSetupAndChatAsync(WebApplication app, FakeOpenAiServer provider, bool configured)
+    {
+        using var client = new HttpClient
+        {
+            BaseAddress = new Uri(app.Urls.Should().ContainSingle().Which),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        client.DefaultRequestHeaders.Add(
+            "X-Api-Key",
+            app.Services.GetRequiredService<ApiKeyProvider>().ApiKey);
+
+        await AssertProviderSetupIsProtectedAsync(client, configured).ConfigureAwait(false);
+
+        using var response = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(client, "/chat", new { message = "default gate" }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+
+        if (!configured)
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+            body.Should().Contain("provider_setup_required");
+            using var blockedStream = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(client, "/chat/stream", new { message = "stream" }, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            blockedStream.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            provider.RequestCount.Should().Be(0);
+            app.Services.GetRequiredService<RuntimeReadinessState>().IsReady.Should().BeTrue();
+        }
+        else
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+            body.Should().Contain("default package graph response");
+            provider.RequestCount.Should().Be(1);
+        }
+    }
+
+    private static async Task AssertProviderSetupIsProtectedAsync(HttpClient client, bool configured)
+    {
+        foreach (var path in new[] { "/echo", "/healthz", "/readyz", "/ping" })
+        {
+            using var health = await client.GetAsync(new Uri(path, UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            health.StatusCode.Should().Be(HttpStatusCode.OK, path);
+        }
+        var setup = await client.GetFromJsonAsync<SharpClawProviderSetup>("/setup/provider", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        setup!.SetupRequired.Should().Be(!configured);
+        setup.Providers.Should().Contain(item => item.Key == "custom");
+        using var anonymous = new HttpClient { BaseAddress = client.BaseAddress };
+        using var unauthorized = await anonymous.GetAsync(new Uri("/setup/provider", UriKind.RelativeOrAbsolute), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        unauthorized.StatusCode.Should().Be(HttpStatusCode.Locked,
+            "the session-key middleware must still protect provider setup");
+
     }
 
     private static IConfiguration CreateConfiguration(string providerEndpoint, bool configured) =>
@@ -241,8 +266,13 @@ internal sealed class DefaultModuleSetHostGateTests
                 if (Directory.Exists(_root))
                     Directory.Delete(_root, true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }
@@ -257,7 +287,7 @@ internal sealed class DefaultModuleSetHostGateTests
             _app = app;
         }
 
-        public string Endpoint => _app.Urls.Single() + "/v1";
+        public string Endpoint => _app.Urls.Should().ContainSingle().Which + "/v1";
 
         public int RequestCount => Volatile.Read(ref _requestCount);
 
@@ -293,7 +323,7 @@ internal sealed class DefaultModuleSetHostGateTests
                     },
                 });
             });
-            await app.StartAsync().ConfigureAwait(false);
+            await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
             return server;
         }
 

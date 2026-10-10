@@ -61,6 +61,24 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Compiler integration tests use the same Roslyn binaries as the selected SDK. -->
+    <Reference Include="Microsoft.CodeAnalysis">
+      <HintPath>$(MSBuildToolsPath)/Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.CodeAnalysis.CSharp">
+      <HintPath>$(MSBuildToolsPath)/Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tests both load the real analyzer and instantiate it in compiler controls.
+         OutputItemType adds Analyzer output; true retains the normal reference. -->
+    <ProjectReference Include="..\build\SharpClaw.GeneratedCodeSuppressions\SharpClaw.GeneratedCodeSuppressions.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="true"
+                      PrivateAssets="all" />
     <ProjectReference Include="..\SharpClaw.Runtime\Host\SharpClaw.Runtime.Host.csproj" />
     <ProjectReference Include="..\SharpClaw.Client.Uno\SharpClaw.Client.Uno.csproj" />
     <ProjectReference Include="..\SharpClaw.Runtime\BLL\SharpClaw.Runtime.BLL.csproj" />

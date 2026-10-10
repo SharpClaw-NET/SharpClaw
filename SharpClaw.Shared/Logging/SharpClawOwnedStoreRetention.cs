@@ -25,7 +25,8 @@ public sealed class SharpClawOwnedStoreRetention : IAsyncDisposable
         TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Task _loop;
     private Exception? _failure;
-    private int _disposed;
+    private readonly Lock _disposeGate = new();
+    private Task? _disposeTask;
 
     public SharpClawOwnedStoreRetention(
         DurableSegmentStore records,
@@ -39,13 +40,14 @@ public sealed class SharpClawOwnedStoreRetention : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(options));
         }
 
-        _loop = Task.Run(RunAsync);
+        _loop = Task.Run(RunAsync, CancellationToken.None);
     }
 
     public Task FirstRun => _firstRun.Task;
     public Task Completion => _loop;
     public Exception? Failure => Volatile.Read(ref _failure);
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031", Justification = "Retention is a best-effort background sweep. Every failure is retained in the public Failure property and FirstRun always settles; disposal joins the owned loop.")]
     private async Task RunAsync()
     {
         try
@@ -90,16 +92,25 @@ public sealed class SharpClawOwnedStoreRetention : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        lock (_disposeGate)
         {
-            await _loop.ConfigureAwait(false);
-            return;
+            return new ValueTask(_disposeTask ??= StopAsync());
         }
+    }
 
-        _stop.Cancel();
-        await _loop.ConfigureAwait(false);
-        _stop.Dispose();
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD003", Justification = "This object starts and retains its background loop with Task.Run; no UI synchronization context or JoinableTaskFactory is involved.")]
+    private async Task StopAsync()
+    {
+        try
+        {
+            var cancellation = _stop.CancelAsync();
+            await Task.WhenAll(cancellation, _loop).ConfigureAwait(false);
+        }
+        finally
+        {
+            _stop.Dispose();
+        }
     }
 }

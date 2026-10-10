@@ -47,15 +47,26 @@ internal static class LocalRuntimeHost
             cancellationToken).ConfigureAwait(false);
         await using var registrationSetAsyncDisposal = registrationSet.ConfigureAwait(false);
 
+        var runtimeBaseUrl = earlyConfiguration["ASPNETCORE_URLS"]
+            ?? "http://127.0.0.1:48923";
+        var app = BuildApplication(args, earlyConfiguration, instancePaths, registrationSet);
+        await using var appAsyncDisposal = app.ConfigureAwait(false);
+        await RunApplicationAsync(args, instancePaths, registrationSet, app,
+            runtimeBaseUrl, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static WebApplication BuildApplication(
+        string[] args,
+        IConfiguration earlyConfiguration,
+        SharpClawInstancePaths instancePaths,
+        PackagedDotNetRegistrationSet registrationSet)
+    {
         var builder = WebApplication.CreateBuilder(args);
         builder.Configuration.Sources.Clear();
         builder.Configuration.AddConfiguration(earlyConfiguration);
         builder.WebHost.UseUrls(
             earlyConfiguration["ASPNETCORE_URLS"]
             ?? "http://127.0.0.1:48923");
-
-        var runtimeBaseUrl = earlyConfiguration["ASPNETCORE_URLS"]
-            ?? "http://127.0.0.1:48923";
 
         var encryptionKey = EncryptionKeyResolver.ResolveKey(instancePaths)
             ?? throw new InvalidOperationException(
@@ -77,8 +88,17 @@ internal static class LocalRuntimeHost
                 Path.Combine(instancePaths.DataDirectory, "database")),
             registrationSet.Services);
 
-        var app = builder.Build();
-        await using var appAsyncDisposal = app.ConfigureAwait(false);
+        return builder.Build();
+    }
+
+    private static async Task RunApplicationAsync(
+        string[] args,
+        SharpClawInstancePaths instancePaths,
+        PackagedDotNetRegistrationSet registrationSet,
+        WebApplication app,
+        string runtimeBaseUrl,
+        CancellationToken cancellationToken)
+    {
         var apiKeyProvider = app.Services.GetRequiredService<ApiKeyProvider>();
         var kernel = app.Services.GetRequiredService<RuntimeKernelAdapter>();
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
@@ -107,86 +127,119 @@ internal static class LocalRuntimeHost
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             runtimeStarted = true;
 
-            if (RuntimeCliCommandLine.IsRequested(args))
-            {
-                Environment.ExitCode = await RuntimeCliSession.RunAsync(
-                    args,
-                    kernel,
-                    kernel.Kernel,
-                    registrationSet.Application,
-                    Console.Out,
-                    Console.Error,
-                    cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            app.UseMiddleware<ApiKeyMiddleware>();
-            app.UseWebSockets();
-            KernelHostEndpoints.Map(app);
-            KernelHostEndpoints.MapModuleSettingsCatalog(app, registrationSet);
-            registrationSet.Application.MapEndpoints(app, kernel);
-            app.MapHandlers();
-
-            await kernel.RunRuntimeLifecycleActionAsync(
-                RuntimeLifecycleActionCatalog.StartBind,
-                runtimeBaseUrl,
-                async ct =>
-                {
-                    appStartAttempted = true;
-                    await app.StartAsync(ct).ConfigureAwait(false);
-                    readiness.MarkReady();
-                    instancePaths.PublishDiscoveryEntry(runtimeBaseUrl);
-                }, cancellationToken).ConfigureAwait(false);
-
-            await app.WaitForShutdownAsync().ConfigureAwait(false);
+            await RunRuntimeAsync(args, instancePaths, registrationSet, app, kernel, readiness,
+                runtimeBaseUrl, () => appStartAttempted = true, cancellationToken).ConfigureAwait(false);
         }
+#pragma warning disable CA1031 // Preserve the first startup/shutdown failure while all required cleanup operations settle; RunApplicationAsync rethrows it.
         catch (Exception exception)
         {
             failure = ExceptionDispatchInfo.Capture(exception);
         }
+#pragma warning restore CA1031
         finally
         {
-            if (runtimeStarted)
-            {
-                try
-                {
-                    await kernel.StopAsync(
-                        CancellationToken.None,
-                        _ => cleanup.BeginAsync(),
-                        _ => cleanup.CompleteAsync()).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    failure ??= ExceptionDispatchInfo.Capture(exception);
-                }
-            }
-
-            if (!cleanup.PreparationAttempted)
-            {
-                try
-                {
-                    await cleanup.BeginAsync().ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    failure ??= ExceptionDispatchInfo.Capture(exception);
-                }
-            }
-
-            if (!cleanup.CompletionAttempted)
-            {
-                try
-                {
-                    await cleanup.CompleteAsync().ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    failure ??= ExceptionDispatchInfo.Capture(exception);
-                }
-            }
+            failure = await StopAndCleanUpAsync(kernel, cleanup, runtimeStarted, failure).ConfigureAwait(false);
         }
 
         failure?.Throw();
+    }
+
+    private static async Task RunRuntimeAsync(
+        string[] args,
+        SharpClawInstancePaths instancePaths,
+        PackagedDotNetRegistrationSet registrationSet,
+        WebApplication app,
+        RuntimeKernelAdapter kernel,
+        RuntimeReadinessState readiness,
+        string runtimeBaseUrl,
+        Action markListenerStartAttempted,
+        CancellationToken cancellationToken)
+    {
+        if (RuntimeCliCommandLine.IsRequested(args))
+        {
+            Environment.ExitCode = await RuntimeCliSession.RunAsync(
+                args,
+                kernel,
+                kernel.Kernel,
+                registrationSet.Application,
+                Console.Out,
+                Console.Error,
+                cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        app.UseMiddleware<ApiKeyMiddleware>();
+        app.UseWebSockets();
+        KernelHostEndpoints.Map(app);
+        KernelHostEndpoints.MapModuleSettingsCatalog(app, registrationSet);
+        registrationSet.Application.MapEndpoints(app, kernel);
+        app.MapHandlers();
+
+        await kernel.RunRuntimeLifecycleActionAsync(
+            RuntimeLifecycleActionCatalog.StartBind,
+            runtimeBaseUrl,
+            async ct =>
+            {
+                markListenerStartAttempted();
+                await app.StartAsync(ct).ConfigureAwait(false);
+                readiness.MarkReady();
+                instancePaths.PublishDiscoveryEntry(runtimeBaseUrl);
+            }, cancellationToken).ConfigureAwait(false);
+
+        await app.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<ExceptionDispatchInfo?> StopAndCleanUpAsync(
+        RuntimeKernelAdapter kernel,
+        RuntimeHostCleanup cleanup,
+        bool runtimeStarted,
+        ExceptionDispatchInfo? failure)
+    {
+        if (runtimeStarted)
+        {
+            try
+            {
+                await kernel.StopAsync(
+                    CancellationToken.None,
+                    _ => cleanup.BeginAsync(),
+                    _ => cleanup.CompleteAsync()).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Continue later cleanup operations and return the first captured failure for rethrow.
+            catch (Exception exception)
+            {
+                failure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+#pragma warning restore CA1031
+        }
+
+        if (!cleanup.PreparationAttempted)
+        {
+            try
+            {
+                await cleanup.BeginAsync().ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Continue later cleanup operations and return the first captured failure for rethrow.
+            catch (Exception exception)
+            {
+                failure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+#pragma warning restore CA1031
+        }
+
+        if (!cleanup.CompletionAttempted)
+        {
+            try
+            {
+                await cleanup.CompleteAsync().ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Return this cleanup failure for rethrow after the earlier required steps have settled.
+            catch (Exception exception)
+            {
+                failure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+#pragma warning restore CA1031
+        }
+        return failure;
     }
 
 }

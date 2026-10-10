@@ -179,8 +179,8 @@ internal sealed class ClientActionBoundaryTests
             },
             cancellation.Token);
 
-        await terminalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-        cancellation.Cancel();
+        await terminalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await cancellation.CancelAsync().ConfigureAwait(false);
 
         await FluentActions.Invoking(async () => await command.ConfigureAwait(false))
             .Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
@@ -258,7 +258,7 @@ internal sealed class ClientActionBoundaryTests
         var groups = probe.Observations.GroupBy(static item => item.TraceId).ToArray();
         groups.Should().HaveCount(4);
         groups.Should().OnlyContain(group =>
-            group.Select(static item => item.IdempotencyKey).Distinct().Count() == 1);
+            group.Select(static item => item.IdempotencyKey).Distinct().Take(2).Count() == 1);
     }
 
     [Test]
@@ -276,7 +276,10 @@ internal sealed class ClientActionBoundaryTests
             async (_, _) =>
             {
                 firstStarted.SetResult(true);
+                // The test owns this operation/signal; it runs without a JoinableTaskFactory dependency.
+#pragma warning disable VSTHRD003
                 await releaseFirst.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
             });
         await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
@@ -346,24 +349,27 @@ internal sealed class ClientActionBoundaryTests
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
         var version = dispatcher.GetStateVersion("settings");
-        var firstStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseFirst = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
+        var firstGate = new ControlledOperationGate();
         var first = dispatcher.CommitStateAsync(
             "settings",
             version,
-            async _ =>
-            {
-                firstStarted.SetResult(true);
-                await releaseFirst.Task.ConfigureAwait(false);
-            });
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            _ => firstGate.RunAsync()).AsTask();
+        Task<long>? second = null;
+        Exception?[] outcomes;
+        try
+        {
+            await firstGate.WaitForEntryAsync().ConfigureAwait(false);
+            second = dispatcher.CommitStateAsync("settings", version, static _ => ValueTask.CompletedTask).AsTask();
+        }
+        finally
+        {
+            firstGate.Release();
+            outcomes = await TestTaskOutcome.JoinAsync(first, second ?? Task.CompletedTask).ConfigureAwait(false);
+        }
 
-        var second = dispatcher.CommitStateAsync("settings", version, static _ => ValueTask.CompletedTask);
-        releaseFirst.SetResult(true);
+        outcomes[0].Should().BeNull();
+        outcomes[1].Should().BeOfType<ClientActionConflictException>();
         (await first.ConfigureAwait(false)).Should().Be(version + 1);
-        await FluentActions.Invoking(async () => await second.ConfigureAwait(false))
-            .Should().ThrowAsync<ClientActionConflictException>().ConfigureAwait(false);
         dispatcher.GetStateVersion("settings").Should().Be(version + 1);
     }
 
@@ -487,7 +493,7 @@ internal sealed class ClientActionBoundaryTests
             using var authority = source.Push(new ClientActionRequestContext(
                 new RequestPrincipal("ui-caller"), ExtensionFeatureSet.Empty));
 
-            async ValueTask Terminal(CancellationToken token)
+            async ValueTask TerminalAsync(CancellationToken token)
             {
                 token.ThrowIfCancellationRequested();
                 observedThreads.Enqueue(Environment.CurrentManagedThreadId);
@@ -502,13 +508,13 @@ internal sealed class ClientActionBoundaryTests
             switch (operation)
             {
                 case "command":
-                    await dispatcher.RunCommandAsync("ui-command", Terminal).ConfigureAwait(true);
+                    await dispatcher.RunCommandAsync("ui-command", TerminalAsync).ConfigureAwait(true);
                     break;
                 case "navigation":
-                    await dispatcher.NavigateAsync("Main", null, (_, token) => Terminal(token)).ConfigureAwait(true);
+                    await dispatcher.NavigateAsync("Main", null, (_, token) => TerminalAsync(token)).ConfigureAwait(true);
                     break;
                 case "state":
-                    await dispatcher.CommitStateAsync("ui-state", 0, Terminal).ConfigureAwait(true);
+                    await dispatcher.CommitStateAsync("ui-state", 0, TerminalAsync).ConfigureAwait(true);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(operation));
@@ -539,7 +545,10 @@ internal sealed class ClientActionBoundaryTests
 
         ui.PendingCount.Should().Be(1);
         await cancellation.CancelAsync().ConfigureAwait(false);
+        // The test owns this operation/signal; it runs without a JoinableTaskFactory dependency.
+#pragma warning disable VSTHRD003
         await FluentActions.Invoking(async () => await work.ConfigureAwait(false))
+#pragma warning restore VSTHRD003
             .Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
         ui.Drain();
         calls.Should().Be(0);
@@ -556,7 +565,10 @@ internal sealed class ClientActionBoundaryTests
         var work = affinity.InvokeAsync(async _ =>
         {
             Interlocked.Increment(ref calls);
+            // The test owns this operation/signal; it runs without a JoinableTaskFactory dependency.
+#pragma warning disable VSTHRD003
             await release.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
             return "effect-completed";
         }, cancellation.Token).AsTask();
 
@@ -570,7 +582,7 @@ internal sealed class ClientActionBoundaryTests
         finally
         {
             release.TrySetResult();
-            await work.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await work.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         }
         (await work.ConfigureAwait(false)).Should().Be("effect-completed");
         calls.Should().Be(1);
@@ -590,7 +602,10 @@ internal sealed class ClientActionBoundaryTests
         }, CancellationToken.None).AsTask();
 
         ui.Drain();
+        // The test owns this operation/signal; it runs without a JoinableTaskFactory dependency.
+#pragma warning disable VSTHRD003
         var thrown = await FluentActions.Invoking(async () => await work.ConfigureAwait(false))
+#pragma warning restore VSTHRD003
             .Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
         thrown.Which.Should().BeSameAs(failure);
         ui.Drain();
@@ -641,8 +656,8 @@ internal sealed class ClientActionBoundaryTests
                 return ValueTask.FromResult(true);
             }, CancellationToken.None).AsTask();
         }
-        await FluentActions.Invoking(async () => await work.ConfigureAwait(false))
-            .Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
+        var failure = await TestTaskOutcome.CaptureAsync(work).ConfigureAwait(false);
+        failure.Should().BeOfType<InvalidOperationException>();
         ui.PendingCount.Should().Be(0);
         calls.Should().Be(0);
     }
@@ -720,7 +735,7 @@ internal sealed class ClientActionBoundaryTests
             },
             cancellation.Token);
 
-        await terminalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await terminalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         await cancellation.CancelAsync().ConfigureAwait(false);
 
         await FluentActions.Invoking(async () => await command.ConfigureAwait(false))
@@ -790,7 +805,7 @@ internal sealed class ClientActionBoundaryTests
                 "/accepted"),
         };
         var dispatcher = CreateDispatcher(probe);
-        var handler = new CapturingHandler();
+        using var handler = new CapturingHandler();
         using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         using var api = new SharpClawApiClient(
             http,
@@ -832,7 +847,7 @@ internal sealed class ClientActionBoundaryTests
                 : null,
         };
         var dispatcher = CreateDispatcher(probe);
-        var handler = new CapturingHandler();
+        using var handler = new CapturingHandler();
         using var http = new HttpClient(handler)
         {
             BaseAddress = new Uri("http://runtime-a.test:48923/"),
@@ -881,7 +896,7 @@ internal sealed class ClientActionBoundaryTests
     public async Task Scheme_bearing_request_target_is_rejected_before_transportAsync(string hostileTarget)
     {
         var dispatcher = CreateDispatcher(new ClientProbe());
-        var handler = new CapturingHandler();
+        using var handler = new CapturingHandler();
         using var http = new HttpClient(handler)
         {
             BaseAddress = new Uri("http://runtime-a.test:48923/"),
@@ -927,7 +942,7 @@ internal sealed class ClientActionBoundaryTests
                 PauseAction = ClientActionCatalog.CommandReceive.Value,
             };
             var dispatcher = CreateDispatcher(probe);
-            var handler = new CapturingHandler();
+            using var handler = new CapturingHandler();
             using var http = new HttpClient(handler) { BaseAddress = new Uri(targetA) };
             using var api = new SharpClawApiClient(
                 http,
@@ -953,14 +968,8 @@ internal sealed class ClientActionBoundaryTests
 
             using var responseB = await api.GetAsync("/turn-b").ConfigureAwait(false);
 
-            handler.Requests.Should().HaveCount(2);
-            handler.Requests.ElementAt(0).Should().Be(("GET", $"{targetA}turn-a", keyA));
-            handler.Requests.ElementAt(1).Should().Be(("GET", $"{targetB}turn-b", keyB));
-            api.CachedApiKey.Should().Be(keyB);
-            api.BaseUrl.Should().Be(targetB);
-            var manifest = ReadManifest(frontend.Paths.ManifestPath);
-            manifest.SelectedBackendBaseUrl.Should().Be(targetB);
-            manifest.SelectedBackendBindingKind.Should().Be("configured");
+            AssertRetargetedRequestsUseTheirOwnRuntimeKeys(
+                handler, api, frontend, (targetA, keyA), (targetB, keyB));
         }
         finally
         {
@@ -969,13 +978,30 @@ internal sealed class ClientActionBoundaryTests
         }
     }
 
+    private static void AssertRetargetedRequestsUseTheirOwnRuntimeKeys(
+        CapturingHandler handler,
+        SharpClawApiClient api,
+        FrontendInstanceService frontend,
+        (string Url, string ApiKey) previous,
+        (string Url, string ApiKey) current)
+    {
+        handler.Requests.Should().HaveCount(2);
+        handler.Requests.ElementAt(0).Should().Be(("GET", $"{previous.Url}turn-a", previous.ApiKey));
+        handler.Requests.ElementAt(1).Should().Be(("GET", $"{current.Url}turn-b", current.ApiKey));
+        api.CachedApiKey.Should().Be(current.ApiKey);
+        api.BaseUrl.Should().Be(current.Url);
+        var manifest = ReadManifest(frontend.Paths.ManifestPath);
+        manifest.SelectedBackendBaseUrl.Should().Be(current.Url);
+        manifest.SelectedBackendBindingKind.Should().Be("configured");
+    }
+
     [Test]
     public async Task Runtime_apply_retargets_after_readiness_with_one_state_transitionAsync()
     {
         const string targetA = "http://runtime-a.test:48923/";
         const string targetB = "http://runtime-b.test:48923/";
         var dispatcher = new ClientActionDispatcher();
-        var handler = new CapturingHandler();
+        using var handler = new CapturingHandler();
         using var http = new HttpClient(handler) { BaseAddress = new Uri(targetA) };
         using var api = new SharpClawApiClient(
             http,
@@ -1017,7 +1043,7 @@ internal sealed class ClientActionBoundaryTests
         const string targetA = "http://runtime-a.test:48923/";
         const string targetB = "http://runtime-b.test:48923/";
         var dispatcher = new ClientActionDispatcher();
-        var handler = new CapturingHandler
+        using var handler = new CapturingHandler
         {
             ResponseFactory = request => new HttpResponseMessage(
                 string.Equals(request.RequestUri!.Host, "runtime-a.test", StringComparison.Ordinal) ? HttpStatusCode.ServiceUnavailable
@@ -1064,7 +1090,7 @@ internal sealed class ClientActionBoundaryTests
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
-        var handler = new CapturingHandler
+        using var handler = new CapturingHandler
         {
             ResponseFactory = _ => new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -1091,10 +1117,13 @@ internal sealed class ClientActionBoundaryTests
             },
             cancellation.Token);
 
-        await Task.Delay(50).ConfigureAwait(false);
-        cancellation.Cancel();
+        await Task.Delay(50, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await cancellation.CancelAsync().ConfigureAwait(false);
 
+        // The test owns this operation/signal; it runs without a JoinableTaskFactory dependency.
+#pragma warning disable VSTHRD003
         await FluentActions.Invoking(async () => await operation.ConfigureAwait(false))
+#pragma warning restore VSTHRD003
             .Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(false);
         probe.Actions().Should().Contain("client.command.cancel");
         probe.Actions().Should().NotContain("client.command.complete");
@@ -1105,7 +1134,7 @@ internal sealed class ClientActionBoundaryTests
     {
         var probe = new ClientProbe();
         var dispatcher = CreateDispatcher(probe);
-        var handler = new CapturingHandler();
+        using var handler = new CapturingHandler();
         using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         using var api = new SharpClawApiClient(
             http,
@@ -1180,53 +1209,7 @@ internal sealed class ClientActionBoundaryTests
         var root = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT")
             ?? FindSourceRoot();
         var clientRoot = Path.Combine(root, "SharpClaw.Client.Uno");
-        var requiredSource = new Dictionary<string, string[]>(StringComparer.Ordinal)
-        {
-            ["App.xaml.cs"] = [
-                "ClientActionDispatcher.CreateProduction",
-                "client.app.close",
-            ],
-            [Path.Combine("Presentation", "BootModel.cs")] = [
-                "client.backend.start",
-                "client.gateway.start",
-                "_gateway.ApiKey = _api.CachedApiKey",
-                "ClientActionDispatcher",
-            ],
-            [Path.Combine("Presentation", "ShellModel.cs")] = [
-                "public sealed class ShellModel",
-            ],
-            [Path.Combine("Presentation", "MainPage.Chat.cs")] = [
-                "ConsumeStreamAsync",
-                "CommitStateAsync",
-                "\"/chat/stream\"",
-            ],
-            [Path.Combine("Presentation", "MainPage.xaml.cs")] = [
-                "CommitStateAsync",
-                "client.chat.ui",
-            ],
-            [Path.Combine("Presentation", "BootPage.Modules.cs")] = [
-                "NavigateRouteAsync(this, \"Main\"",
-                "Actions.RunCommandAsync",
-                "client.module.install",
-            ],
-            [Path.Combine("Presentation", "SettingsPage.xaml.cs")] = [
-                "actions.RunCommandAsync",
-                "client.runtime.target",
-            ],
-            [Path.Combine("Presentation", "SettingsPage.ModuleSettings.cs")] = [
-                "Actions.RunCommandAsync",
-                "client.module.enablement",
-            ],
-            [Path.Combine("Services", "SharpClawApiClient.cs")] = [
-                "_clientActions.RunCommandAsync",
-                "ConsumeStreamAsync",
-            ],
-            [Path.Combine("Services", "ClientNavigationService.cs")] = [
-                "actions.NavigateAsync",
-                "navigator.NavigateRouteAsync",
-                "navigator.NavigateViewModelAsync",
-            ],
-        };
+        var requiredSource = RequiredSource;
 
         foreach (var requirement in requiredSource)
         {
@@ -1235,9 +1218,183 @@ internal sealed class ClientActionBoundaryTests
                 source.Should().Contain(marker, requirement.Key);
         }
 
+        AssertClientAuthoritySurface(clientRoot);
+
+        AssertStatelessClientSurface(clientRoot);
+
+        AssertRemovedClientSurfaces(clientRoot);
+    }
+
+    [TestCase(false, "success")]
+    [TestCase(true, "success")]
+    [TestCase(false, "before-terminal")]
+    [TestCase(true, "before-terminal")]
+    [TestCase(false, "after-terminal")]
+    [TestCase(true, "after-terminal")]
+    public async Task ApiDisposalJoinsOneReceiptAndClosesOnlyOwnedHttpAsync(bool owned, string failureTiming)
+    {
+        using var handler = new DisposalProbeHandler();
+        using var borrowed = new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri("https://fixture.invalid") };
+        var probe = new ClientProbe { PauseAction = ClientActionCatalog.CommandDispatch.Value };
+        probe.FailureAction = string.Equals(failureTiming, "before-terminal", StringComparison.Ordinal)
+            ? ClientActionCatalog.CommandDispatch.Value
+            : string.Equals(failureTiming, "after-terminal", StringComparison.Ordinal)
+                ? ClientActionCatalog.CommandComplete.Value : null;
+        var dispatcher = CreateDispatcher(probe);
+        var api = new SharpClawApiClient(borrowed, NullLogger<SharpClawApiClient>.Instance, dispatcher,
+            fixedApiKey: "fixture-key", ownsHttp: owned);
+        var first = api.DisposeAsync().AsTask();
+        Task second = Task.CompletedTask;
+        Exception?[] outcomes;
+        try
+        {
+            await probe.PauseReached.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken)
+                .ConfigureAwait(false);
+            second = api.DisposeAsync().AsTask();
+            first.IsCompleted.Should().BeFalse();
+            second.IsCompleted.Should().BeFalse();
+        }
+        finally
+        {
+            probe.ReleasePause.TrySetResult(true);
+            outcomes = await TestTaskOutcome.JoinAsync(first, second).ConfigureAwait(false);
+        }
+        outcomes[0].Should().BeSameAs(outcomes[1]);
+        if (string.Equals(failureTiming, "success", StringComparison.Ordinal))
+            outcomes[0].Should().BeNull();
+        else
+            outcomes[0].Should().NotBeNull();
+        (await TestTaskOutcome.CaptureAsync(api.DisposeAsync().AsTask()).ConfigureAwait(false))
+            .Should().BeSameAs(outcomes[0]);
+        (await TestTaskOutcome.CaptureAsync(Task.Run(api.Dispose, CancellationToken.None)).ConfigureAwait(false))
+            .Should().BeSameAs(outcomes[0]);
+        probe.Attempts(ClientActionCatalog.CommandDispatch.Value).Should().Be(1);
+        await AssertHttpDispositionAsync(borrowed, handler, owned).ConfigureAwait(false);
+    }
+
+    [Test]
+    public async Task SynchronousApiDisposalRequiresNoUiPumpAndRetainsAmbientAuthorityAsync()
+    {
+        using var handler = new DisposalProbeHandler();
+        using var http = new HttpClient(handler, disposeHandler: false) { BaseAddress = new Uri("https://fixture.invalid") };
+        var contextSource = new ClientActionContextSource();
+        var probe = new ClientProbe();
+        var api = new SharpClawApiClient(http, NullLogger<SharpClawApiClient>.Instance,
+            CreateDispatcher(probe, contextSource), fixedApiKey: "fixture-key");
+        using var authority = contextSource.Push(new ClientActionRequestContext(
+            new RequestPrincipal("dispose-user", "Disposal user", new HashSet<string>(StringComparer.Ordinal), true),
+            ExtensionFeatureSet.Empty));
+        var ui = new HeldUiSynchronizationContext();
+        var previous = SynchronizationContext.Current;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(ui);
+            // This regression must exercise synchronous IDisposable while the UI
+            // queue is held, proving disposal completes without a UI pump.
+#pragma warning disable CA1849, VSTHRD103
+            api.Dispose();
+#pragma warning restore CA1849, VSTHRD103
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+        ui.PendingCount.Should().Be(0);
+        probe.Observations.Should().NotBeEmpty().And.OnlyContain(value => value.CallerSubjectId == "dispose-user");
+        handler.Disposals.Should().Be(0);
+        using var response = await http.GetAsync(new Uri("/alive", UriKind.Relative), TestContext.CurrentContext.CancellationToken)
+            .ConfigureAwait(false);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await api.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private static async Task AssertHttpDispositionAsync(HttpClient actualHttp, DisposalProbeHandler borrowedHandler, bool owned)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://fixture.invalid/alive");
+        if (owned)
+        {
+            borrowedHandler.Disposals.Should().Be(1, "the owned transport must be released once even when its action receipt fails");
+            // Precancellation prevents any network work if the resource was incorrectly left open.
+            Func<Task> send = async () =>
+            {
+                using var response = await actualHttp.SendAsync(request, new CancellationToken(canceled: true))
+                    .ConfigureAwait(false);
+            };
+            await send.Should().ThrowAsync<ObjectDisposedException>().ConfigureAwait(false);
+        }
+        else
+        {
+            borrowedHandler.Disposals.Should().Be(0);
+            using var response = await actualHttp.SendAsync(request, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+    }
+
+    private sealed class DisposalProbeHandler : HttpMessageHandler
+    {
+        private int _disposals;
+        public int Disposals => Volatile.Read(ref _disposals);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) Interlocked.Increment(ref _disposals);
+            base.Dispose(disposing);
+        }
+    }
+
+    private static readonly Dictionary<string, string[]> RequiredSource = new(StringComparer.Ordinal)
+    {
+        ["App.xaml.cs"] = [
+                "ClientActionDispatcher.CreateProduction",
+                "client.app.close",
+            ],
+        [Path.Combine("Presentation", "BootModel.cs")] = [
+                "client.backend.start",
+                "client.gateway.start",
+                "_gateway.ApiKey = _api.CachedApiKey",
+                "ClientActionDispatcher",
+            ],
+        [Path.Combine("Presentation", "ShellModel.cs")] = [
+                "public sealed class ShellModel",
+            ],
+        [Path.Combine("Presentation", "MainPage.Chat.cs")] = [
+                "ConsumeStreamAsync",
+                "CommitStateAsync",
+                "\"/chat/stream\"",
+            ],
+        [Path.Combine("Presentation", "MainPage.xaml.cs")] = [
+                "CommitStateAsync",
+                "client.chat.ui",
+            ],
+        [Path.Combine("Presentation", "BootPage.Modules.cs")] = [
+                "NavigateRouteAsync(this, \"Main\"",
+                "Actions.RunCommandAsync",
+                "client.module.install",
+            ],
+        [Path.Combine("Presentation", "SettingsPage.xaml.cs")] = [
+                "actions.RunCommandAsync",
+                "client.runtime.target",
+            ],
+        [Path.Combine("Presentation", "SettingsPage.ModuleSettings.cs")] = [
+                "Actions.RunCommandAsync",
+                "client.module.enablement",
+            ],
+        [Path.Combine("Services", "SharpClawApiClient.cs")] = [
+                "_clientActions.RunCommandAsync",
+                "ConsumeStreamAsync",
+            ],
+        [Path.Combine("Services", "ClientNavigationService.cs")] = [
+                "actions.NavigateAsync",
+                "navigator.NavigateRouteAsync",
+                "navigator.NavigateViewModelAsync",
+            ],
+    };
+
+    private static void AssertClientAuthoritySurface(string clientRoot)
+    {
         var allClientSource = Directory.EnumerateFiles(clientRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(path => !path.Contains("\\bin\\", StringComparison.OrdinalIgnoreCase))
-            .Where(path => !path.Contains("\\obj\\", StringComparison.OrdinalIgnoreCase))
+            .Where(path => (!path.Contains("\\bin\\", StringComparison.OrdinalIgnoreCase)) && (!path.Contains("\\obj\\", StringComparison.OrdinalIgnoreCase)))
             .Select(File.ReadAllText)
             .ToArray();
         string combinedSource = string.Join(Environment.NewLine, allClientSource);
@@ -1252,7 +1409,10 @@ internal sealed class ClientActionBoundaryTests
         combinedSource.Should().NotContain("/auth/me");
         combinedSource.Should().NotContain("SetAccessTokenAsync");
         combinedSource.Should().NotContain("ForAuthenticatedUser");
+    }
 
+    private static void AssertStatelessClientSurface(string clientRoot)
+    {
         foreach (var path in new[]
         {
             Path.Combine(clientRoot, "Presentation", "MainPage.xaml"),
@@ -1271,7 +1431,10 @@ internal sealed class ClientActionBoundaryTests
             source.Should().NotContain("ChannelCost", path);
             source.Should().NotContain("ChatMessageDto", path);
         }
+    }
 
+    private static void AssertRemovedClientSurfaces(string clientRoot)
+    {
         foreach (var path in new[]
         {
             Path.Combine("Presentation", "LoginModel.cs"),
@@ -1289,38 +1452,24 @@ internal sealed class ClientActionBoundaryTests
             Path.Combine("Services", "CoreEnvGuard.cs"),
             Path.Combine("Services", "RegistrationStateCache.cs"),
             Path.Combine("Services", "FrontendStateService.cs"),
+            Path.Combine("Presentation", "MainPage.Contributions.cs"),
+            Path.Combine("Presentation", "ChatActionContributionBuilders.cs"),
+            Path.Combine("Presentation", "SettingsPage.Contributions.cs"),
+            Path.Combine("Presentation", "SettingsContributionBuilders.cs"),
+            Path.Combine("Services", "FrontendContributionRegistry.cs"),
+            Path.Combine("Presentation", "MainModel.cs"),
+            Path.Combine("Presentation", "SecondModel.cs"),
+            Path.Combine("Presentation", "DashboardPage.xaml"),
+            Path.Combine("Presentation", "DashboardPage.xaml.cs"),
+            Path.Combine("Presentation", "SecondPage.xaml"),
+            Path.Combine("Presentation", "SecondPage.xaml.cs"),
+            Path.Combine("Presentation", "MainPage.ChannelSettings.cs"),
+            Path.Combine("Presentation", "MainPage.Jobs.cs"),
+            Path.Combine("Helpers", "PermissionEditorBuilder.cs"),
         })
         {
             File.Exists(Path.Combine(clientRoot, path)).Should().BeFalse(path);
         }
-        File.Exists(Path.Combine(clientRoot, "Presentation", "MainPage.Contributions.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "ChatActionContributionBuilders.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "SettingsPage.Contributions.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "SettingsContributionBuilders.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Services", "FrontendContributionRegistry.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "MainModel.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "SecondModel.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "DashboardPage.xaml"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "DashboardPage.xaml.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "SecondPage.xaml"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "SecondPage.xaml.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "MainPage.ChannelSettings.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Presentation", "MainPage.Jobs.cs"))
-            .Should().BeFalse();
-        File.Exists(Path.Combine(clientRoot, "Helpers", "PermissionEditorBuilder.cs"))
-            .Should().BeFalse();
         File.ReadAllText(Path.Combine(clientRoot, "Presentation", "MainPage.Navigation.cs"))
             .Should().NotContain("AssignRole");
         File.ReadAllText(Path.Combine(clientRoot, "Presentation", "MainPage.Chat.cs"))
@@ -1395,291 +1544,305 @@ internal sealed class ClientActionBoundaryTests
     }
 
     private sealed class ClientProbe
+{
+    public ConcurrentQueue<ClientObservation> Observations { get; } = new();
+
+    public string? RepeatAction { get; init; }
+
+    public string? ReplaceInputAction { get; init; }
+
+    public string? ReplaceResultAction { get; init; }
+
+    public object? ReplacementResult { get; init; }
+
+    public ClientCommandInvocation? Replacement { get; init; }
+
+    public string? CancelAction { get; set; }
+
+    public string? FailureAction { get; set; }
+
+    public string? PauseAction { get; init; }
+
+    public TaskCompletionSource<bool> PauseReached { get; } = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public TaskCompletionSource<bool> ReleasePause { get; } = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public int TerminalCalls;
+
+    private int _pauseClaimed;
+
+    public string[] Actions() =>
+        Observations.Select(static item => item.Action).ToArray();
+
+    public int Attempts(string action) =>
+        Observations.Count(item => string.Equals(item.Action, action, StringComparison.Ordinal));
+
+    public bool TryClaimPause(string action) => string.Equals(PauseAction, action, StringComparison.Ordinal) &&
+        Interlocked.CompareExchange(ref _pauseClaimed, 1, 0) == 0;
+
+    public void Record(ActionContext<KernelActionEnvelope> context) =>
+        Observations.Enqueue(new ClientObservation(
+            context.ActionKey.Value,
+            context.TraceId,
+            context.IdempotencyKey,
+            context.Attempt,
+            context.Caller.SubjectId,
+            context.Features.Items.Select(static item => item.ContractName).ToArray()));
+
+    public void ShouldHaveOneContext()
     {
-        public ConcurrentQueue<ClientObservation> Observations { get; } = new();
+        Observations.Select(static item => item.TraceId).Distinct().Should().ContainSingle();
+        Observations.Select(static item => item.IdempotencyKey).Distinct().Should().ContainSingle();
+    }
+}
 
-        public string? RepeatAction { get; init; }
+private sealed record ClientObservation(
+    string Action,
+    Guid TraceId,
+    Guid IdempotencyKey,
+    int Attempt,
+    string CallerSubjectId,
+    IReadOnlyList<string> FeatureNames);
 
-        public string? ReplaceInputAction { get; init; }
+private sealed class TestUiSynchronizationContext : SynchronizationContext, IDisposable
+{
+    private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
+    private readonly Thread _thread;
 
-        public string? ReplaceResultAction { get; init; }
-
-        public object? ReplacementResult { get; init; }
-
-        public ClientCommandInvocation? Replacement { get; init; }
-
-        public string? CancelAction { get; set; }
-
-        public string? FailureAction { get; set; }
-
-        public string? PauseAction { get; init; }
-
-        public TaskCompletionSource<bool> PauseReached { get; } = new(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public TaskCompletionSource<bool> ReleasePause { get; } = new(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public int TerminalCalls;
-
-        private int _pauseClaimed;
-
-        public IReadOnlyList<string> Actions() =>
-            Observations.Select(static item => item.Action).ToArray();
-
-        public int Attempts(string action) =>
-            Observations.Count(item => string.Equals(item.Action, action, StringComparison.Ordinal));
-
-        public bool TryClaimPause(string action) => string.Equals(PauseAction, action, StringComparison.Ordinal) &&
-            Interlocked.CompareExchange(ref _pauseClaimed, 1, 0) == 0;
-
-        public void Record(ActionContext<KernelActionEnvelope> context) =>
-            Observations.Enqueue(new ClientObservation(
-                context.ActionKey.Value,
-                context.TraceId,
-                context.IdempotencyKey,
-                context.Attempt,
-                context.Caller.SubjectId,
-                context.Features.Items.Select(static item => item.ContractName).ToArray()));
-
-        public void ShouldHaveOneContext()
+    public TestUiSynchronizationContext()
+    {
+        _thread = new Thread(() =>
         {
-            Observations.Select(static item => item.TraceId).Distinct().Should().ContainSingle();
-            Observations.Select(static item => item.IdempotencyKey).Distinct().Should().ContainSingle();
-        }
+            SetSynchronizationContext(this);
+            foreach (var work in _queue.GetConsumingEnumerable())
+                work.Callback(work.State);
+        })
+        { IsBackground = true, Name = "Client action UI regression" };
+        _thread.Start();
     }
 
-    private sealed record ClientObservation(
-        string Action,
-        Guid TraceId,
-        Guid IdempotencyKey,
-        int Attempt,
-        string CallerSubjectId,
-        IReadOnlyList<string> FeatureNames);
+    public override void Post(SendOrPostCallback callback, object? state) =>
+        _queue.Add((callback, state));
 
-    private sealed class TestUiSynchronizationContext : SynchronizationContext, IDisposable
+    [SuppressMessage("Usage", "MA0147", Justification =
+        "SynchronizationContext.Post requires a void callback. UiOperation preserves test UI affinity and transfers every failure into the completion task returned to its caller.")]
+    public Task RunAsync(Func<Task> operation)
     {
-        private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
-        private readonly Thread _thread;
+        var work = new UiOperation(operation);
+        Post(work.Execute, null);
+        return work.Completion;
+    }
 
-        public TestUiSynchronizationContext()
-        {
-            _thread = new Thread(() =>
-            {
-                SetSynchronizationContext(this);
-                foreach (var work in _queue.GetConsumingEnumerable())
-                    work.Callback(work.State);
-            })
-            { IsBackground = true, Name = "Client action UI regression" };
-            _thread.Start();
-        }
-
-        public override void Post(SendOrPostCallback callback, object? state) =>
-            _queue.Add((callback, state));
+    private sealed class UiOperation(Func<Task> operation)
+    {
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Completion => _completion.Task;
 
         [SuppressMessage("Design", "CA1031", Justification =
-            "The dedicated UI test pump transfers callback failures to the returned task so they fail the test instead of escaping its async-void callback.")]
-        public Task RunAsync(Func<Task> operation)
+            "The framework callback transfers every operation failure to its owned completion task, which RunAsync returns to the test.")]
+        [SuppressMessage("Usage", "VSTHRD100", Justification =
+            "SynchronizationContext.Post requires a void callback; this owner catches failures and exposes completion through an awaited Task.")]
+        public async void Execute(object? state)
         {
-            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            Post(async _ =>
-            {
-                try
-                {
-                    await operation().ConfigureAwait(true);
-                    completion.TrySetResult();
-                }
-                catch (Exception exception)
-                {
-                    completion.TrySetException(exception);
-                }
-            }, null);
-            return completion.Task;
-        }
-
-        public void Dispose()
-        {
-            _queue.CompleteAdding();
-            if (!_thread.Join(TimeSpan.FromSeconds(5)))
-                throw new TimeoutException("The client UI regression thread did not finish.");
-            _queue.Dispose();
-        }
-    }
-
-    private sealed class HeldUiSynchronizationContext : SynchronizationContext
-    {
-        private readonly Queue<(SendOrPostCallback Callback, object? State)> _queue = new();
-
-        public int PendingCount => _queue.Count;
-
-        public override void Post(SendOrPostCallback callback, object? state) =>
-            _queue.Enqueue((callback, state));
-
-        public void Drain()
-        {
-            var previous = Current;
-            SetSynchronizationContext(this);
             try
             {
-                while (_queue.TryDequeue(out var work))
-                    work.Callback(work.State);
+                await operation().ConfigureAwait(true);
+                _completion.TrySetResult();
             }
-            finally
+            catch (Exception exception)
             {
-                SetSynchronizationContext(previous);
+                _completion.TrySetException(exception);
             }
         }
     }
 
-    private sealed class RejectedUiSynchronizationContext : SynchronizationContext
+    public void Dispose()
     {
-        public override void Post(SendOrPostCallback callback, object? state) =>
-            throw new InvalidOperationException("The UI queue has stopped.");
+        _queue.CompleteAdding();
+        if (!_thread.Join(TimeSpan.FromSeconds(5)))
+            throw new TimeoutException("The client UI regression thread did not finish.");
+        _queue.Dispose();
     }
+}
 
-    private sealed class ProductionContextSink : ClientActionServiceSet.IClientActionContextSink
+private sealed class HeldUiSynchronizationContext : SynchronizationContext
+{
+    private readonly Queue<(SendOrPostCallback Callback, object? State)> _queue = new();
+
+    public int PendingCount => _queue.Count;
+
+    public override void Post(SendOrPostCallback callback, object? state) =>
+        _queue.Enqueue((callback, state));
+
+    public void Drain()
     {
-        public ConcurrentQueue<ClientObservation> Observations { get; } = new();
-
-        public Action? BeforeObserve { get; init; }
-
-        public void Observe(ActionContext<KernelActionEnvelope> context)
+        var previous = Current;
+        SetSynchronizationContext(this);
+        try
         {
-            BeforeObserve?.Invoke();
-            Observations.Enqueue(new ClientObservation(
-                context.ActionKey.Value,
-                context.TraceId,
-                context.IdempotencyKey,
-                context.Attempt,
-                context.Caller.SubjectId,
-                context.Features.Items.Select(static item => item.ContractName).ToArray()));
+            while (_queue.TryDequeue(out var work))
+                work.Callback(work.State);
+        }
+        finally
+        {
+            SetSynchronizationContext(previous);
         }
     }
+}
 
-    private sealed class TestRepeatEvidenceAuthority : IKernelActionRepeatEvidenceAuthority
+private sealed class RejectedUiSynchronizationContext : SynchronizationContext
+{
+    public override void Post(SendOrPostCallback callback, object? state) =>
+        throw new InvalidOperationException("The UI queue has stopped.");
+}
+
+private sealed class ProductionContextSink : ClientActionServiceSet.IClientActionContextSink
+{
+    public ConcurrentQueue<ClientObservation> Observations { get; } = new();
+
+    public Action? BeforeObserve { get; init; }
+
+    public void Observe(ActionContext<KernelActionEnvelope> context)
     {
-        public ValueTask<KernelActionRepeatEvidence?> AuthorizeAsync(
-            KernelActionRepeatEvidenceRequest request,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var issuedAt = DateTimeOffset.UtcNow;
-            return ValueTask.FromResult<KernelActionRepeatEvidence?>(new(
-                "K05_TEST_EVIDENCE",
-                request.RequiredKind,
-                request.ActionKey,
-                request.ActionVersion,
-                request.IdempotencyScope,
-                request.IdempotencyKey,
-                request.PriorInvocationId,
-                request.PriorAttempt,
-                request.NextInvocationId,
-                request.NextAttempt,
-                issuedAt,
-                issuedAt.AddMinutes(1)));
-        }
+        BeforeObserve?.Invoke();
+        Observations.Enqueue(new ClientObservation(
+            context.ActionKey.Value,
+            context.TraceId,
+            context.IdempotencyKey,
+            context.Attempt,
+            context.Caller.SubjectId,
+            context.Features.Items.Select(static item => item.ContractName).ToArray()));
     }
+}
 
-    private sealed class CapturingHandler : HttpMessageHandler
+private sealed class TestRepeatEvidenceAuthority : IKernelActionRepeatEvidenceAuthority
+{
+    public ValueTask<KernelActionRepeatEvidence?> AuthorizeAsync(
+        KernelActionRepeatEvidenceRequest request,
+        CancellationToken cancellationToken)
     {
-        public HttpRequestMessage? Request { get; private set; }
-
-        public ConcurrentQueue<(string Method, string Uri, string? ApiKey)> Requests { get; } = new();
-
-        public Func<HttpRequestMessage, HttpResponseMessage>? ResponseFactory { get; init; }
-
-        public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>?
-            AsyncResponseFactory
-        { get; init; }
-
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            Request = request;
-            var apiKey = request.Headers.TryGetValues("X-Api-Key", out var values)
-                ? values.SingleOrDefault()
-                : null;
-            Requests.Enqueue((request.Method.Method, request.RequestUri!.AbsoluteUri, apiKey));
-            if (AsyncResponseFactory is not null)
-                return AsyncResponseFactory(request, cancellationToken);
-
-            return Task.FromResult(
-                ResponseFactory?.Invoke(request) ??
-                new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent("ok"),
-                });
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        var issuedAt = DateTimeOffset.UtcNow;
+        return ValueTask.FromResult<KernelActionRepeatEvidence?>(new(
+            "K05_TEST_EVIDENCE",
+            request.RequiredKind,
+            request.ActionKey,
+            request.ActionVersion,
+            request.IdempotencyScope,
+            request.IdempotencyKey,
+            request.PriorInvocationId,
+            request.PriorAttempt,
+            request.NextInvocationId,
+            request.NextAttempt,
+            issuedAt,
+            issuedAt.AddMinutes(1)));
     }
+}
 
-    private sealed class BlockingReadStream : Stream
+private sealed class CapturingHandler : HttpMessageHandler
+{
+    public HttpRequestMessage? Request { get; private set; }
+
+    public ConcurrentQueue<(string Method, string Uri, string? ApiKey)> Requests { get; } = new();
+
+    public Func<HttpRequestMessage, HttpResponseMessage>? ResponseFactory { get; init; }
+
+    public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>?
+        AsyncResponseFactory
+    { get; init; }
+
+    [SuppressMessage("Reliability", "CA2000", Justification =
+        "Ownership of the returned response transfers to the HttpClient request caller, whose response scope disposes it.")]
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
     {
-        public override bool CanRead => true;
-        public override bool CanSeek => false;
-        public override bool CanWrite => false;
-        public override long Length => 0;
-        public override long Position { get => 0; set => throw new NotSupportedException(); }
-        public override void Flush() => throw new NotSupportedException();
-        public override int Read(byte[] buffer, int offset, int count) =>
-            throw new NotSupportedException();
-        public override long Seek(long offset, SeekOrigin origin) =>
-            throw new NotSupportedException();
-        public override void SetLength(long value) =>
-            throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) =>
-            throw new NotSupportedException();
-        public override async ValueTask<int> ReadAsync(
-            Memory<byte> buffer,
-            CancellationToken cancellationToken = default)
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
-            return 0;
-        }
-    }
+        Request = request;
+        var apiKey = request.Headers.TryGetValues("X-Api-Key", out var values)
+            ? values.SingleOrDefault()
+            : null;
+        Requests.Enqueue((request.Method.Method, request.RequestUri!.AbsoluteUri, apiKey));
+        if (AsyncResponseFactory is not null)
+            return AsyncResponseFactory(request, cancellationToken);
 
-    private sealed class ClientInterceptor(ClientProbe probe)
-        : IActionInterceptor<KernelActionEnvelope, object>
-    {
-        public async ValueTask<IActionOutcome<object>> InvokeAsync(
-            ActionContext<KernelActionEnvelope> context,
-            IActionControl<KernelActionEnvelope, object> control,
-            CancellationToken cancellationToken)
-        {
-            probe.Record(context);
-
-            if (probe.TryClaimPause(context.ActionKey.Value))
+        return Task.FromResult(
+            ResponseFactory?.Invoke(request) ??
+            new HttpResponseMessage(HttpStatusCode.OK)
             {
-                probe.PauseReached.TrySetResult(true);
-                await probe.ReleasePause.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-            }
+                Content = new StringContent("ok"),
+            });
+    }
+}
 
-            if (string.Equals(probe.CancelAction, context.ActionKey.Value, StringComparison.Ordinal))
-                return control.Cancel("K05_TEST_CANCELLED", "The client action was cancelled.");
+private sealed class BlockingReadStream : Stream
+{
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => 0;
+    public override long Position { get => 0; set => throw new NotSupportedException(); }
+    public override void Flush() => throw new NotSupportedException();
+    public override int Read(byte[] buffer, int offset, int count) =>
+        throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin) =>
+        throw new NotSupportedException();
+    public override void SetLength(long value) =>
+        throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) =>
+        throw new NotSupportedException();
+    public override async ValueTask<int> ReadAsync(
+        Memory<byte> buffer,
+        CancellationToken cancellationToken = default)
+    {
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+        return 0;
+    }
+}
 
-            if (string.Equals(probe.FailureAction, context.ActionKey.Value, StringComparison.Ordinal))
-                throw new InvalidOperationException("K05 test failure.");
+private sealed class ClientInterceptor(ClientProbe probe)
+    : IActionInterceptor<KernelActionEnvelope, object>
+{
+    public async ValueTask<IActionOutcome<object>> InvokeAsync(
+        ActionContext<KernelActionEnvelope> context,
+        IActionControl<KernelActionEnvelope, object> control,
+        CancellationToken cancellationToken)
+    {
+        probe.Record(context);
 
-            if (string.Equals(probe.RepeatAction, context.ActionKey.Value, StringComparison.Ordinal) && context.Attempt == 1)
-                return await control.RepeatAsync(
-                    new ActionRepeatRequest<KernelActionEnvelope>(
-                        context.Action,
-                        "K05 repeat boundary test",
-                        null),
-                    cancellationToken).ConfigureAwait(false);
-
-            if (string.Equals(probe.ReplaceResultAction, context.ActionKey.Value, StringComparison.Ordinal))
-                return control.ReplaceResult(probe.ReplacementResult!, "K05 result boundary test");
-
-            if (string.Equals(probe.ReplaceInputAction, context.ActionKey.Value, StringComparison.Ordinal) && probe.Replacement is { } replacement)
-                return await control.ProceedWithInputAsync(
-                    new ActionReplacement<KernelActionEnvelope>(
-                        context.Action with { Payload = replacement },
-                        "K05 input boundary test"),
-                    cancellationToken).ConfigureAwait(false);
-
-            return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
+        if (probe.TryClaimPause(context.ActionKey.Value))
+        {
+            probe.PauseReached.TrySetResult(true);
+            await probe.ReleasePause.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        if (string.Equals(probe.CancelAction, context.ActionKey.Value, StringComparison.Ordinal))
+            return control.Cancel("K05_TEST_CANCELLED", "The client action was cancelled.");
+
+        if (string.Equals(probe.FailureAction, context.ActionKey.Value, StringComparison.Ordinal))
+            throw new InvalidOperationException("K05 test failure.");
+
+        if (string.Equals(probe.RepeatAction, context.ActionKey.Value, StringComparison.Ordinal) && context.Attempt == 1)
+            return await control.RepeatAsync(
+                new ActionRepeatRequest<KernelActionEnvelope>(
+                    context.Action,
+                    "K05 repeat boundary test",
+                    null),
+                cancellationToken).ConfigureAwait(false);
+
+        if (string.Equals(probe.ReplaceResultAction, context.ActionKey.Value, StringComparison.Ordinal))
+            return control.ReplaceResult(probe.ReplacementResult!, "K05 result boundary test");
+
+        if (string.Equals(probe.ReplaceInputAction, context.ActionKey.Value, StringComparison.Ordinal) && probe.Replacement is { } replacement)
+            return await control.ProceedWithInputAsync(
+                new ActionReplacement<KernelActionEnvelope>(
+                    context.Action with { Payload = replacement },
+                    "K05 input boundary test"),
+                cancellationToken).ConfigureAwait(false);
+
+        return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
+    }
     }
 
     private static string CreateTempDirectory()
@@ -1701,8 +1864,13 @@ internal sealed class ClientActionBoundaryTests
         {
             Directory.Delete(path, recursive: true);
         }
-        catch
+        catch (IOException exception)
         {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
         }
     }
 
@@ -1734,19 +1902,11 @@ internal sealed class ClientActionBoundaryTests
         };
         File.WriteAllText(
             Path.Combine(discoveryDirectory, $"backend-{instanceId}.json"),
-            JsonSerializer.Serialize(entry, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                WriteIndented = true,
-            }));
+            JsonSerializer.Serialize(entry, TestSerializationOptions.CamelCaseIndented));
     }
 
     private static SharpClawInstanceManifest ReadManifest(string manifestPath) =>
         JsonSerializer.Deserialize<SharpClawInstanceManifest>(
             File.ReadAllText(manifestPath),
-            new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                PropertyNameCaseInsensitive = true,
-            })!;
+            TestSerializationOptions.CamelCaseRead)!;
 }

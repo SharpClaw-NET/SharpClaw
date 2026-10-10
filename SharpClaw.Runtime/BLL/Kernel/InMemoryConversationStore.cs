@@ -10,7 +10,7 @@ namespace SharpClaw.Runtime.BLL.Kernel;
 /// <summary>Stores direct-chat exchanges in a bounded process-local history.</summary>
 public sealed class InMemoryConversationStore : IConversationStore
 {
-    private readonly object _sync = new();
+    private readonly Lock _sync = new();
     private readonly Dictionary<Guid, List<ChatCompletionMessage>> _history = [];
 
     public ValueTask<IReadOnlyList<ChatCompletionMessage>> LoadHistoryAsync(
@@ -34,6 +34,7 @@ public sealed class InMemoryConversationStore : IConversationStore
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(exchange);
         lock (_sync)
         {
             if (!_history.TryGetValue(exchange.Turn.Conversation.ConversationId, out var messages))

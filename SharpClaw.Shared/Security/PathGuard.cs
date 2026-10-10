@@ -19,7 +19,7 @@ public static class PathGuard
         ArgumentException.ThrowIfNullOrWhiteSpace(combined);
         ArgumentException.ThrowIfNullOrWhiteSpace(parentDir);
 
-        if (combined.Contains('\0') || parentDir.Contains('\0'))
+        if (combined.Contains('\0', StringComparison.Ordinal) || parentDir.Contains('\0', StringComparison.Ordinal))
             throw new InvalidOperationException("Path contains null bytes.");
 
         var canonical = Path.GetFullPath(combined);
@@ -52,10 +52,10 @@ public static class PathGuard
         if (name.Length == 0)
             throw new ArgumentException("File name cannot be empty.", paramName);
 
-        if (name.Contains('\0'))
+        if (name.Contains('\0', StringComparison.Ordinal))
             throw new ArgumentException("File name contains null bytes.", paramName);
 
-        if (name.Contains("..") || name.Contains('/') || name.Contains('\\'))
+        if (name.Contains("..", StringComparison.Ordinal) || name.Contains('/', StringComparison.Ordinal) || name.Contains('\\', StringComparison.Ordinal))
             throw new ArgumentException(
                 $"File name '{name}' must not contain path separators or traversal sequences.",
                 paramName);
@@ -75,7 +75,7 @@ public static class PathGuard
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path, paramName);
 
-        if (path.Contains('\0'))
+        if (path.Contains('\0', StringComparison.Ordinal))
             throw new ArgumentException("Path contains null bytes.", paramName);
 
         return Path.GetFullPath(path);
@@ -104,7 +104,7 @@ public static class PathGuard
     public static string EnsureExtension(string path, params ReadOnlySpan<string> allowed)
     {
         var ext = Path.GetExtension(path);
-        foreach (var a in allowed)
+        foreach (ref readonly var a in allowed)
         {
             if (ext.Equals(a, StringComparison.OrdinalIgnoreCase))
                 return path;

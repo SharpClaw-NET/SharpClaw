@@ -29,8 +29,8 @@ internal sealed class ExternalPersistencePackageTests
     {
         try
         {
-            foreach (var directory in _temporaryDirectories)
-                await DeleteModuleDirectoryAsync(directory).ConfigureAwait(false);
+            for (var index = 0; index < _temporaryDirectories.Count; index++)
+                await DeleteModuleDirectoryAsync(_temporaryDirectories[index]).ConfigureAwait(false);
         }
         finally
         {
@@ -179,6 +179,8 @@ internal sealed class ExternalPersistencePackageTests
         {
             var relative = entry.FullName[prefix.Length..].Replace('/', Path.DirectorySeparatorChar);
             var destination = Path.GetFullPath(Path.Combine(destinationRoot, relative));
+            if (!destination.StartsWith(containedRoot, StringComparison.Ordinal))
+                throw new InvalidDataException("The fixture archive entry escapes the extraction root.");
             destination.Should().StartWith(containedRoot);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             entry.ExtractToFile(destination, overwrite: false);
@@ -222,14 +224,14 @@ internal sealed class ExternalPersistencePackageTests
             }
             catch (UnauthorizedAccessException exception) when (OperatingSystem.IsWindows())
             {
-                TestContext.Progress.WriteLine(
-                    $"Deferred cleanup of '{directory}' until the Windows test host exits: {exception.Message}");
+                await TestContext.Progress.WriteLineAsync(
+                    $"Deferred cleanup of '{directory}' until the Windows test host exits: {exception.Message}").ConfigureAwait(false);
                 return;
             }
             catch (IOException exception) when (OperatingSystem.IsWindows())
             {
-                TestContext.Progress.WriteLine(
-                    $"Deferred cleanup of '{directory}' until the Windows test host exits: {exception.Message}");
+                await TestContext.Progress.WriteLineAsync(
+                    $"Deferred cleanup of '{directory}' until the Windows test host exits: {exception.Message}").ConfigureAwait(false);
                 return;
             }
         }

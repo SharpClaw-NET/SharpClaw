@@ -6,18 +6,22 @@ using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Presentation;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1010",
+    Justification = "This Uno view inherits nongeneric enumeration from the framework for XAML children; it is not a public collection API and adding generic enumeration would change framework semantics.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
+    Justification = "Uno owns reusable page instances. The only owned disposable fields are per-visit/tab cancellation sources; OnUnloaded retires and disposes each through its awaited cancellation completion.")]
 public sealed partial class SettingsPage : Page
 {
     private static FontFamily Mono => TerminalUI.Mono;
     private static SolidColorBrush Trans => TerminalUI.Transparent;
 
-    private SharpClawApiClient Api =>
+    private static SharpClawApiClient Api =>
         App.Services!.GetRequiredService<SharpClawApiClient>();
 
-    private ClientActionDispatcher Actions =>
+    private static ClientActionDispatcher Actions =>
         App.Services!.GetRequiredService<ClientActionDispatcher>();
 
-    private GatewayProcessManager? Gateway =>
+    private static GatewayProcessManager? Gateway =>
         App.Services?.GetService<GatewayProcessManager>();
 
     private string _activeTab = "Runtime";
@@ -26,18 +30,35 @@ public sealed partial class SettingsPage : Page
     {
         InitializeComponent();
         Loaded += OnLoaded;
-        Unloaded += (_, _) => { _settingsLifetime?.Cancel(); _tabLifetime?.Cancel(); };
+        Unloaded += OnUnloaded;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        var previous = _settingsLifetime;
+        var lifetime = new CancellationTokenSource();
+        _settingsLifetime = lifetime;
+        if (previous is not null) ClientUiEvent.Observe(() => CancelAndDisposeAsync(previous));
         Cursor.SetCommand("sharpclaw settings ");
         BuildTabs();
         SelectTab("Runtime");
-        _settingsLifetime?.Cancel();
-        _settingsLifetime?.Dispose();
-        _settingsLifetime = new CancellationTokenSource();
-        _ = LoadModuleTabsAsync(_settingsLifetime.Token);
+        ClientUiEvent.Observe(() => LoadModuleTabsAsync(lifetime.Token));
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        var settings = _settingsLifetime;
+        var tab = _tabLifetime;
+        _settingsLifetime = null;
+        _tabLifetime = null;
+        if (settings is not null) ClientUiEvent.Observe(() => CancelAndDisposeAsync(settings));
+        if (tab is not null) ClientUiEvent.Observe(() => CancelAndDisposeAsync(tab));
+    }
+
+    private static async Task CancelAndDisposeAsync(CancellationTokenSource source)
+    {
+        try { await source.CancelAsync().ConfigureAwait(true); }
+        finally { source.Dispose(); }
     }
 
     private void BuildTabs()
@@ -99,12 +120,14 @@ public sealed partial class SettingsPage : Page
     private void SelectTab(string tab)
     {
         _activeTab = tab;
-        _tabLifetime?.Cancel();
-        _tabLifetime?.Dispose();
-        _tabLifetime = new CancellationTokenSource();
+        var previous = _tabLifetime;
+        _tabLifetime = _settingsLifetime is { } settings
+            ? CancellationTokenSource.CreateLinkedTokenSource(settings.Token) : new CancellationTokenSource();
+        var token = _tabLifetime.Token;
+        if (previous is not null) ClientUiEvent.Observe(() => CancelAndDisposeAsync(previous));
         HighlightTabs();
         ContentPanel.Children.Clear();
-        _ = LoadTabAsync(tab, _tabLifetime.Token);
+        ClientUiEvent.Observe(() => LoadTabAsync(tab, token));
     }
 
     private void HighlightTabs()
@@ -128,89 +151,91 @@ public sealed partial class SettingsPage : Page
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
     private async Task LoadRuntimeAsync(CancellationToken token)
+    {
+        var controls = BuildRuntimeControls();
+        controls.Apply.Click += (_, _) => ClientUiEvent.Observe(() => ApplyRuntimeSelectionAsync(
+            controls.Endpoint, controls.Apply, controls.Status, token));
+        controls.Refresh.Click += (_, _) => ClientUiEvent.Observe(() => RefreshRuntimeStatusAsync(controls.Status, token));
+        await RefreshRuntimeStatusAsync(controls.Status, token).ConfigureAwait(true);
+        token.ThrowIfCancellationRequested();
+        try { await LoadProviderSetupAsync(token).ConfigureAwait(true); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            token.ThrowIfCancellationRequested();
+            Lbl("Provider setup information is unavailable; retry after checking Runtime status.", 0xFF8800);
+        }
+    }
+
+    private (TextBox Endpoint, Button Apply, Button Refresh, TextBlock Status) BuildRuntimeControls()
     {
         H("Runtime");
         Lbl("Endpoint", 0x808080);
-
         var endpoint = MakeInput("http://127.0.0.1:48923");
         endpoint.Text = Api.BaseUrl.TrimEnd('/');
         endpoint.MinWidth = 320;
         ContentPanel.Children.Add(endpoint);
-
-        var controls = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-        };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var apply = TerminalButton("Apply");
         var refresh = TerminalButton("Refresh");
-        controls.Children.Add(apply);
-        controls.Children.Add(refresh);
-        ContentPanel.Children.Add(controls);
-
+        buttons.Children.Add(apply);
+        buttons.Children.Add(refresh);
+        ContentPanel.Children.Add(buttons);
         var status = StatusBlock();
         ContentPanel.Children.Add(status);
+        return (endpoint, apply, refresh, status);
+    }
 
-        async Task RefreshAsync()
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    private static async Task RefreshRuntimeStatusAsync(TextBlock status, CancellationToken token)
+    {
+        try
         {
-            try
-            {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-                timeout.CancelAfter(TimeSpan.FromSeconds(5));
-                using var response = await Api.GetAsync("/readyz", timeout.Token).ConfigureAwait(true);
-                token.ThrowIfCancellationRequested();
-                status.Text = response.IsSuccessStatusCode
-                    ? "ready"
-                    : $"unavailable: HTTP {(int)response.StatusCode}";
-                status.Foreground = B(response.IsSuccessStatusCode ? 0x00FF00 : 0xFF8800);
-            }
-            catch
-            {
-                if (token.IsCancellationRequested) return;
-                status.Text = "unavailable";
-                status.Foreground = B(0xFF4444);
-            }
-        }
-
-        apply.Click += async (_, _) =>
-        {
-            apply.IsEnabled = false;
-            status.Text = "connecting";
-            status.Foreground = B(0xFFCC00);
-            try
-            {
-                var target = RequireHttpEndpoint(endpoint.Text);
-                await ApplyRuntimeTargetAsync(
-                    Api,
-                    Actions,
-                    App.Services?.GetService<BackendProcessManager>(),
-                    Gateway,
-                    target,
-                    TimeSpan.FromSeconds(5), token).ConfigureAwait(true);
-                endpoint.Text = Api.BaseUrl.TrimEnd('/');
-                await RefreshAsync().ConfigureAwait(true);
-            }
-            catch
-            {
-                status.Text = "connection failed";
-                status.Foreground = B(0xFF4444);
-            }
-            finally
-            {
-                apply.IsEnabled = true;
-            }
-        };
-        refresh.Click += async (_, _) => await RefreshAsync().ConfigureAwait(true);
-
-        await RefreshAsync().ConfigureAwait(true);
-        token.ThrowIfCancellationRequested();
-        try { await LoadProviderSetupAsync(token).ConfigureAwait(true); }
-        catch
-        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            using var response = await Api.GetAsync("/readyz", timeout.Token).ConfigureAwait(true);
             token.ThrowIfCancellationRequested();
-            Lbl("Provider setup information is unavailable; retry after checking Runtime status.", 0xFF8800);
+            status.Text = response.IsSuccessStatusCode ? "ready" : $"unavailable: HTTP {(int)response.StatusCode}";
+            status.Foreground = B(response.IsSuccessStatusCode ? 0x00FF00 : 0xFF8800);
         }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            if (token.IsCancellationRequested) return;
+            status.Text = "unavailable";
+            status.Foreground = B(0xFF4444);
+        }
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    private static async Task ApplyRuntimeSelectionAsync(TextBox endpoint, Button apply, TextBlock status, CancellationToken token)
+    {
+        if (token.IsCancellationRequested) return;
+        apply.IsEnabled = false;
+        status.Text = "connecting";
+        status.Foreground = B(0xFFCC00);
+        try
+        {
+            await ApplyRuntimeTargetAsync(Api, Actions, App.Services?.GetService<BackendProcessManager>(),
+                Gateway, RequireHttpEndpoint(endpoint.Text), TimeSpan.FromSeconds(5), token).ConfigureAwait(true);
+            token.ThrowIfCancellationRequested();
+            endpoint.Text = Api.BaseUrl.TrimEnd('/');
+            await RefreshRuntimeStatusAsync(status, token).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            if (token.IsCancellationRequested) return;
+            status.Text = "connection failed";
+            status.Foreground = B(0xFF4444);
+        }
+        finally { apply.IsEnabled = !token.IsCancellationRequested; }
     }
 
     private async Task LoadProviderSetupAsync(CancellationToken token)
@@ -218,19 +243,11 @@ public sealed partial class SettingsPage : Page
         Sub("Provider setup");
         using var response = await Api.GetAsync("/setup/provider", token).ConfigureAwait(true);
         token.ThrowIfCancellationRequested();
-        if (!response.IsSuccessStatusCode)
-        {
-            Lbl("Provider setup information is unavailable.", 0xFF8800);
-            return;
-        }
+        if (!response.IsSuccessStatusCode) { Lbl("Provider setup information is unavailable.", 0xFF8800); return; }
         var setup = await response.Content.ReadFromJsonAsync<SharpClawProviderSetup>(token).ConfigureAwait(true);
         token.ThrowIfCancellationRequested();
         if (setup is null) return;
-        if (setup.Providers.Count == 0)
-        {
-            Lbl("No provider module is available. Return to Boot to install one.", 0x808080);
-            return;
-        }
+        if (setup.Providers.Count == 0) { Lbl("No provider module is available. Return to Boot to install one.", 0x808080); return; }
         Lbl(setup.SetupRequired ? "Choose a provider and model to enable chat." : "Provider configured.", 0xCCCCCC);
         var backend = App.Services!.GetRequiredService<BackendProcessManager>();
         if (!backend.OwnsCurrentTarget || backend.SkipLaunch)
@@ -238,59 +255,33 @@ public sealed partial class SettingsPage : Page
             Lbl("Configure this external Runtime on its host; local settings will not be changed.", 0x808080);
             return;
         }
-        var provider = new ComboBox
+        var catalog = await ReadProviderModelsAsync(setup, token).ConfigureAwait(true);
+        token.ThrowIfCancellationRequested();
+        AddProviderSetupControls(setup, backend, catalog, token);
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    private static async Task<SharpClawProviderModels?> ReadProviderModelsAsync(SharpClawProviderSetup setup, CancellationToken token)
+    {
+        if (setup.SetupRequired) return null;
+        using var probe = CancellationTokenSource.CreateLinkedTokenSource(token);
+        probe.CancelAfter(TimeSpan.FromSeconds(5));
+        try { return await StatelessChatReadiness.ReadAsync<SharpClawProviderModels>(Api, "/setup/models", probe.Token).ConfigureAwait(true); }
+        catch (Exception exception)
         {
-            ItemsSource = setup.Providers,
-            DisplayMemberPath = nameof(SharpClawProviderSetupOption.DisplayName),
-            SelectedItem = setup.Providers.FirstOrDefault(item => string.Equals(item.Key, setup.ProviderKey, StringComparison.Ordinal)),
-            PlaceholderText = "Select an enabled provider",
-            MinWidth = 320,
-        };
-        // Expose the actual selection even when the platform's item peers
-        // have no accessible name. These are view bindings, not setters for
-        // provider configuration or an alternate selection path.
-        provider.SetBinding(Microsoft.UI.Xaml.Automation.AutomationProperties.NameProperty,
-            new Microsoft.UI.Xaml.Data.Binding
-            {
-                Source = provider,
-                Path = new PropertyPath($"{nameof(ComboBox.SelectedItem)}.{nameof(SharpClawProviderSetupOption.DisplayName)}"),
-                FallbackValue = "AI provider",
-                TargetNullValue = "AI provider",
-            });
-        provider.SetBinding(Microsoft.UI.Xaml.Automation.AutomationProperties.ItemStatusProperty,
-            new Microsoft.UI.Xaml.Data.Binding
-            {
-                Source = provider,
-                Path = new PropertyPath($"{nameof(ComboBox.SelectedItem)}.{nameof(SharpClawProviderSetupOption.Key)}"),
-                FallbackValue = string.Empty,
-                TargetNullValue = string.Empty,
-            });
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            token.ThrowIfCancellationRequested();
+            return null;
+        }
+    }
+
+    private void AddProviderSetupControls(SharpClawProviderSetup setup, BackendProcessManager backend, SharpClawProviderModels? catalog, CancellationToken token)
+    {
+        var provider = CreateProviderSelector(setup);
         var model = MakeInput("Model identifier");
         model.Text = setup.Model ?? string.Empty;
-        SharpClawProviderModels? catalog = null;
-        if (!setup.SetupRequired)
-        {
-            using var probe = CancellationTokenSource.CreateLinkedTokenSource(token);
-            probe.CancelAfter(TimeSpan.FromSeconds(5));
-            try { catalog = await StatelessChatReadiness.ReadAsync<SharpClawProviderModels>(Api, "/setup/models", probe.Token).ConfigureAwait(true); }
-            catch { token.ThrowIfCancellationRequested(); }
-        }
-        token.ThrowIfCancellationRequested();
-        var models = new ComboBox
-        {
-            ItemsSource = catalog?.Models,
-            PlaceholderText = "Available models from the selected provider",
-            MinWidth = 320,
-            SelectedItem = catalog?.Models.FirstOrDefault(value => string.Equals(value, setup.Model, StringComparison.Ordinal)),
-            Visibility = catalog is null ? Visibility.Collapsed : Visibility.Visible,
-        };
-        models.SelectionChanged += (_, _) => { if (models.SelectedItem is string selectedModel) model.Text = selectedModel; };
-        provider.SelectionChanged += (_, _) =>
-        {
-            models.Visibility = catalog is not null && provider.SelectedItem is SharpClawProviderSetupOption option &&
-                string.Equals(option.Key, catalog.ProviderKey, StringComparison.OrdinalIgnoreCase)
-                ? Visibility.Visible : Visibility.Collapsed;
-        };
+        var models = CreateModelSelector(setup, catalog, provider, model);
         var endpoint = MakeInput("Optional provider endpoint (HTTP/HTTPS)");
         var credential = new PasswordBox { PlaceholderText = "API key or bearer token (if required)", MinWidth = 320 };
         var apply = TerminalButton("Save provider and restart bundled Runtime");
@@ -307,31 +298,83 @@ public sealed partial class SettingsPage : Page
         ContentPanel.Children.Add(credential);
         ContentPanel.Children.Add(apply);
         ContentPanel.Children.Add(status);
-        apply.Click += async (_, _) =>
+        apply.Click += (_, _) => ClientUiEvent.Observe(() => SaveProviderSetupAsync(
+            provider, model, endpoint, credential, apply, status, backend, token));
+    }
+
+    private static ComboBox CreateProviderSelector(SharpClawProviderSetup setup)
+    {
+        var provider = new ComboBox
         {
-            if (provider.SelectedItem is not SharpClawProviderSetupOption selected ||
-                string.IsNullOrWhiteSpace(model.Text))
-            {
-                status.Text = "Select a provider and enter its model identifier.";
-                return;
-            }
-            apply.IsEnabled = false;
-            try
-            {
-                await BundledProviderSetup.ApplyAsync(
-                    App.Services!.GetRequiredService<FrontendInstanceService>(), backend,
-                    Gateway, Actions, selected, model.Text, endpoint.Text, credential.Password, token).ConfigureAwait(true);
-                credential.Password = string.Empty;
-                await App.Services!.GetRequiredService<ClientNavigationService>()
-                    .NavigateRouteAsync(this, "Boot", Qualifiers.ClearBackStack).ConfigureAwait(true);
-            }
-            catch
-            {
-                status.Text = "Setup failed. Check required credentials/endpoint and try again; no secrets are shown here.";
-                status.Foreground = B(0xFF4444);
-            }
-            finally { apply.IsEnabled = true; }
+            ItemsSource = setup.Providers,
+            DisplayMemberPath = nameof(SharpClawProviderSetupOption.DisplayName),
+            SelectedItem = setup.Providers.FirstOrDefault(item => string.Equals(item.Key, setup.ProviderKey, StringComparison.Ordinal)),
+            PlaceholderText = "Select an enabled provider",
+            MinWidth = 320,
         };
+        provider.SetBinding(Microsoft.UI.Xaml.Automation.AutomationProperties.NameProperty,
+            new Microsoft.UI.Xaml.Data.Binding
+            {
+                Source = provider,
+                Path = new PropertyPath($"{nameof(ComboBox.SelectedItem)}.{nameof(SharpClawProviderSetupOption.DisplayName)}"),
+                FallbackValue = "AI provider",
+                TargetNullValue = "AI provider",
+            });
+        provider.SetBinding(Microsoft.UI.Xaml.Automation.AutomationProperties.ItemStatusProperty,
+            new Microsoft.UI.Xaml.Data.Binding
+            {
+                Source = provider,
+                Path = new PropertyPath($"{nameof(ComboBox.SelectedItem)}.{nameof(SharpClawProviderSetupOption.Key)}"),
+                FallbackValue = string.Empty,
+                TargetNullValue = string.Empty,
+            });
+        return provider;
+    }
+
+    private static ComboBox CreateModelSelector(SharpClawProviderSetup setup, SharpClawProviderModels? catalog, ComboBox provider, TextBox model)
+    {
+        var models = new ComboBox
+        {
+            ItemsSource = catalog?.Models,
+            PlaceholderText = "Available models from the selected provider",
+            MinWidth = 320,
+            SelectedItem = catalog?.Models.FirstOrDefault(value => string.Equals(value, setup.Model, StringComparison.Ordinal)),
+            Visibility = catalog is null ? Visibility.Collapsed : Visibility.Visible,
+        };
+        models.SelectionChanged += (_, _) => { if (models.SelectedItem is string selectedModel) model.Text = selectedModel; };
+        provider.SelectionChanged += (_, _) =>
+        {
+            models.Visibility = catalog is not null && provider.SelectedItem is SharpClawProviderSetupOption option &&
+                string.Equals(option.Key, catalog.ProviderKey, StringComparison.OrdinalIgnoreCase) ? Visibility.Visible : Visibility.Collapsed;
+        };
+        return models;
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This UI operation translates failed actions, payload reads or rendering into the existing sanitized failure status. The exception type is journalled; cancellation and retired-page guards prevent late success publication.")]
+    private async Task SaveProviderSetupAsync(ComboBox provider, TextBox model, TextBox endpoint, PasswordBox credential,
+        Button apply, TextBlock status, BackendProcessManager backend, CancellationToken token)
+    {
+        if (token.IsCancellationRequested) return;
+        if (provider.SelectedItem is not SharpClawProviderSetupOption selected || string.IsNullOrWhiteSpace(model.Text))
+        { status.Text = "Select a provider and enter its model identifier."; return; }
+        apply.IsEnabled = false;
+        try
+        {
+            await BundledProviderSetup.ApplyAsync(App.Services!.GetRequiredService<FrontendInstanceService>(), backend,
+                Gateway, Actions, selected, model.Text, endpoint.Text, credential.Password, token).ConfigureAwait(true);
+            credential.Password = string.Empty;
+            await App.Services!.GetRequiredService<ClientNavigationService>()
+                .NavigateRouteAsync(this, "Boot", Qualifiers.ClearBackStack, token).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            if (token.IsCancellationRequested) return;
+            status.Text = "Setup failed. Check required credentials/endpoint and try again; no secrets are shown here.";
+            status.Foreground = B(0xFF4444);
+        }
+        finally { apply.IsEnabled = !token.IsCancellationRequested; }
     }
 
     internal static async Task ApplyRuntimeTargetAsync(
@@ -430,12 +473,10 @@ public sealed partial class SettingsPage : Page
 
     private static SolidColorBrush B(int rgb) => TerminalUI.Brush(rgb);
 
-    private void OnBackClick(object sender, RoutedEventArgs e)
+    private void OnBackClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
-        if (App.Services is not { } services)
-            return;
-
-        _ = services.GetRequiredService<ClientNavigationService>()
-            .NavigateRouteAsync(this, "Boot");
-    }
+        if (App.Services is not { } services) return;
+        await services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Boot", cancellationToken: CancellationToken.None).ConfigureAwait(true);
+    });
 }

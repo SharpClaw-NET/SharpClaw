@@ -18,6 +18,7 @@ public interface IRuntimeEventOutboxStore
         string recordKey,
         CancellationToken cancellationToken = default);
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1716", Justification = "Preserve the published error parameter name for named-argument and implementation compatibility.")]
     ValueTask FailAsync(
         string recordKey,
         string error,

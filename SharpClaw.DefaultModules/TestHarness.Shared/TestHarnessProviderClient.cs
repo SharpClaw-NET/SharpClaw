@@ -82,17 +82,8 @@ internal sealed class TestHarnessProviderClient(
         CompletionParameters? completionParameters = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var sequence = state.CaptureProviderRequest(
-            providerKey,
-            "stream-tools",
-            apiKey,
-            model,
-            systemPrompt,
-            messages,
-            simpleMessages: null,
-            tools,
-            providerParameters,
-            completionParameters);
+        var sequence = CaptureStreamingRequest(model, systemPrompt, messages, tools,
+            providerParameters, completionParameters);
 
         var scenario = state.GetScenario(providerKey);
         var (_, turn, failBeforeSuccess) = state.NextTurn(providerKey);
@@ -101,21 +92,8 @@ internal sealed class TestHarnessProviderClient(
         var failed = false;
         try
         {
-            if (failBeforeSuccess)
-            {
-                failed = true;
-                throw new TestHarnessProviderException(scenario.FailureMessage);
-            }
-            if (turn.ThrowBeforeResponse)
-            {
-                failed = true;
-                throw new TestHarnessProviderException("test harness configured stream failure");
-            }
-            if (turn.ThrowMalformedPayload)
-            {
-                failed = true;
-                throw new InvalidDataException("test harness malformed provider payload");
-            }
+            failed = failBeforeSuccess || turn.ThrowBeforeResponse || turn.ThrowMalformedPayload;
+            ThrowConfiguredStreamFailure(scenario, turn, failBeforeSuccess);
 
             var chunks = turn.StreamingChunks ?? SplitForStreaming(BuildContent(turn), 3);
 
@@ -217,6 +195,39 @@ internal sealed class TestHarnessProviderClient(
         ProviderMetadataJson = turn.ProviderMetadataJson
     };
 
+
+    private static void ThrowConfiguredStreamFailure(
+        TestHarnessProviderScenario scenario, TestHarnessProviderTurn turn, bool failBeforeSuccess)
+    {
+        if (failBeforeSuccess)
+            throw new TestHarnessProviderException(scenario.FailureMessage);
+        if (turn.ThrowBeforeResponse)
+            throw new TestHarnessProviderException("test harness configured stream failure");
+        if (turn.ThrowMalformedPayload)
+            throw new InvalidDataException("test harness malformed provider payload");
+    }
+
+    private int CaptureStreamingRequest(
+        string model,
+        string? systemPrompt,
+        IReadOnlyList<ToolAwareMessage> messages,
+        IReadOnlyList<ChatToolDefinition> tools,
+        Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters)
+    {
+        return state.CaptureProviderRequest(
+            providerKey,
+            "stream-tools",
+            apiKey,
+            model,
+            systemPrompt,
+            messages,
+            simpleMessages: null,
+            tools,
+            providerParameters,
+            completionParameters);
+    }
+
     private static string BuildContent(TestHarnessProviderTurn turn)
     {
         var content = turn.Content
@@ -226,7 +237,7 @@ internal sealed class TestHarnessProviderClient(
             : content;
     }
 
-    private static IReadOnlyList<string> SplitForStreaming(string text, int parts)
+    private static List<string> SplitForStreaming(string text, int parts)
     {
         if (string.IsNullOrEmpty(text))
             return [];

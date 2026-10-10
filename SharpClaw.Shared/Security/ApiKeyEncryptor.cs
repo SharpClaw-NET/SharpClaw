@@ -75,11 +75,11 @@ public static class ApiKeyEncryptor
     {
         if (envelope.Length < MinEnvelopeSize)
             throw new ArgumentException(
-                $"Encrypted envelope too short ({envelope.Length} bytes, minimum {MinEnvelopeSize}).");
+                $"Encrypted envelope too short ({envelope.Length} bytes, minimum {MinEnvelopeSize}).", paramName: null);
 
         if (envelope[0] != 0x01)
             throw new ArgumentException(
-                $"Unsupported envelope version 0x{envelope[0]:X2}.");
+                $"Unsupported envelope version 0x{envelope[0]:X2}.", paramName: null);
 
         var nonce = envelope.Slice(1, NonceSize);
         var tag = envelope[^TagSize..];
@@ -104,7 +104,7 @@ public static class ApiKeyEncryptor
         {
             return Decrypt(storedValue, key);
         }
-        catch
+        catch (Exception exception) when (exception is CryptographicException or ArgumentException or PlatformNotSupportedException)
         {
             return storedValue;
         }
@@ -124,7 +124,7 @@ public static class ApiKeyEncryptor
             var bytes = Convert.FromBase64String(value);
             return bytes.Length >= NonceSize + TagSize;
         }
-        catch
+        catch (Exception exception) when (exception is FormatException or ArgumentNullException)
         {
             return false;
         }

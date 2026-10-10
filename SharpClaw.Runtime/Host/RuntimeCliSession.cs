@@ -22,22 +22,23 @@ internal static class RuntimeCliSession
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
-        var context = runtimeKernel.CreateCliExecutionContext(RequestPrincipal.Anonymous);
-        RuntimeCliCommand command;
+        var context = RuntimeKernelAdapter.CreateCliExecutionContext(RequestPrincipal.Anonymous);
+        return await RunWithFailureHandlingAsync(
+            () => RunCommandAsync(rawArguments, runtimeKernel, kernel, applications,
+                context, output, error, cancellationToken),
+            runtimeKernel, context, error, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<int> RunWithFailureHandlingAsync(
+        Func<ValueTask<int>> operation,
+        RuntimeKernelAdapter runtimeKernel,
+        KernelActionExecutionContext context,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            command = await runtimeKernel.RunCliActionAsync(
-                context,
-                RuntimeCliActionCatalog.Parse,
-                new RuntimeCliActionInvocation("parse", null, rawArguments.Count),
-                _ => ValueTask.FromResult(RuntimeCliCommandLine.Parse(rawArguments)),
-                cancellationToken).ConfigureAwait(false);
-            command = await runtimeKernel.RunCliActionAsync(
-                context,
-                RuntimeCliActionCatalog.CommandSelect,
-                new RuntimeCliActionInvocation("command-select", command.Name, command.Arguments.Count),
-                _ => ValueTask.FromResult(command),
-                cancellationToken).ConfigureAwait(false);
+            return await operation().ConfigureAwait(false);
         }
         catch (KernelActionCancelledException)
         {
@@ -49,97 +50,86 @@ internal static class RuntimeCliSession
             await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
             return 130;
         }
+#pragma warning disable CA1031 // The CLI process boundary translates failures from arbitrary registration code into its contracted exit code and failure action.
         catch (Exception exception)
         {
-            return await RunFailureAsync(
-                runtimeKernel,
-                context,
-                error,
-                exception).ConfigureAwait(false);
+            return await RunFailureAsync(runtimeKernel, context, error, exception).ConfigureAwait(false);
         }
+#pragma warning restore CA1031
+    }
 
-        RuntimeCliResult result;
-        try
-        {
-            result = await runtimeKernel.RunCliActionAsync(
-                context,
-                RuntimeCliActionCatalog.Execute,
-                new RuntimeCliActionInvocation("execute", command.Name, command.Arguments.Count),
-                cancellation => ExecuteAsync(
-                    command,
-                    runtimeKernel,
-                    kernel,
-                    applications,
-                    context,
-                    cancellation),
-                cancellationToken).ConfigureAwait(false);
+    private static async ValueTask<int> RunCommandAsync(
+        IReadOnlyList<string> rawArguments,
+        RuntimeKernelAdapter runtimeKernel,
+        DirectChatKernel kernel,
+        PackagedApplicationRegistry applications,
+        KernelActionExecutionContext context,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        var command = await ParseAndSelectAsync(
+            rawArguments, runtimeKernel, context, cancellationToken).ConfigureAwait(false);
+        var result = await ExecuteCommandAsync(
+            command, runtimeKernel, kernel, applications, context, cancellationToken).ConfigureAwait(false);
+        await runtimeKernel.RunCliActionAsync(
+            context,
+            RuntimeCliActionCatalog.OutputWrite,
+            new RuntimeCliActionInvocation("output-write", command.Name, command.Arguments.Count),
+            _ => WriteOutputAsync(result, output, error),
+            cancellationToken).ConfigureAwait(false);
+        return await runtimeKernel.RunCliActionAsync(
+            context,
+            RuntimeCliActionCatalog.Complete,
+            new RuntimeCliActionInvocation("complete", command.Name, command.Arguments.Count),
+            _ => ValueTask.FromResult(result.ExitCode),
+            cancellationToken).ConfigureAwait(false);
+    }
 
-            if (!result.Succeeded)
-            {
-                await runtimeKernel.RunCliActionAsync(
-                    context,
-                    RuntimeCliActionCatalog.Fail,
-                    new RuntimeCliActionInvocation("fail", command.Name, command.Arguments.Count),
-                    _ =>
-                    {
-                        return ValueTask.FromResult(true);
-                    },
-                    CancellationToken.None).ConfigureAwait(false);
-            }
-        }
-        catch (KernelActionCancelledException)
-        {
-            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
-            return 130;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
-            return 130;
-        }
-        catch (Exception exception)
-        {
-            return await RunFailureAsync(
-                runtimeKernel,
-                context,
-                error,
-                exception).ConfigureAwait(false);
-        }
+    private static async ValueTask<RuntimeCliCommand> ParseAndSelectAsync(
+        IReadOnlyList<string> rawArguments,
+        RuntimeKernelAdapter runtimeKernel,
+        KernelActionExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        var command = await runtimeKernel.RunCliActionAsync(
+            context,
+            RuntimeCliActionCatalog.Parse,
+            new RuntimeCliActionInvocation("parse", null, rawArguments.Count),
+            _ => ValueTask.FromResult(RuntimeCliCommandLine.Parse(rawArguments)),
+            cancellationToken).ConfigureAwait(false);
+        return await runtimeKernel.RunCliActionAsync(
+            context,
+            RuntimeCliActionCatalog.CommandSelect,
+            new RuntimeCliActionInvocation("command-select", command.Name, command.Arguments.Count),
+            _ => ValueTask.FromResult(command),
+            cancellationToken).ConfigureAwait(false);
+    }
 
-        try
+    private static async ValueTask<RuntimeCliResult> ExecuteCommandAsync(
+        RuntimeCliCommand command,
+        RuntimeKernelAdapter runtimeKernel,
+        DirectChatKernel kernel,
+        PackagedApplicationRegistry applications,
+        KernelActionExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        var result = await runtimeKernel.RunCliActionAsync(
+            context,
+            RuntimeCliActionCatalog.Execute,
+            new RuntimeCliActionInvocation("execute", command.Name, command.Arguments.Count),
+            cancellation => ExecuteAsync(command, runtimeKernel, kernel, applications, context, cancellation),
+            cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
         {
             await runtimeKernel.RunCliActionAsync(
                 context,
-                RuntimeCliActionCatalog.OutputWrite,
-                new RuntimeCliActionInvocation("output-write", command.Name, command.Arguments.Count),
-                _ => WriteOutputAsync(result, output, error),
-                cancellationToken).ConfigureAwait(false);
-
-            return await runtimeKernel.RunCliActionAsync(
-                context,
-                RuntimeCliActionCatalog.Complete,
-                new RuntimeCliActionInvocation("complete", command.Name, command.Arguments.Count),
-                _ => ValueTask.FromResult(result.ExitCode),
-                cancellationToken).ConfigureAwait(false);
+                RuntimeCliActionCatalog.Fail,
+                new RuntimeCliActionInvocation("fail", command.Name, command.Arguments.Count),
+                _ => ValueTask.FromResult(true),
+                CancellationToken.None).ConfigureAwait(false);
         }
-        catch (KernelActionCancelledException)
-        {
-            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
-            return 130;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await RunCancellationAsync(runtimeKernel, context, error).ConfigureAwait(false);
-            return 130;
-        }
-        catch (Exception exception)
-        {
-            return await RunFailureAsync(
-                runtimeKernel,
-                context,
-                error,
-                exception).ConfigureAwait(false);
-        }
+        return result;
     }
 
     private static async ValueTask<RuntimeCliResult> ExecuteAsync(
@@ -151,7 +141,9 @@ internal static class RuntimeCliSession
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (command.Name is "help" or "--help" or "-h")
+        if (string.Equals(command.Name, "help", StringComparison.Ordinal)
+            || string.Equals(command.Name, "--help", StringComparison.Ordinal)
+            || string.Equals(command.Name, "-h", StringComparison.Ordinal))
         {
             return RuntimeCliResult.Success(
                 "SharpClaw Runtime CLI\n  --cli help\n  --cli chat <message>\n");
@@ -233,11 +225,7 @@ internal static class RuntimeCliSession
             context,
             RuntimeCliActionCatalog.OutputWrite,
             new RuntimeCliActionInvocation("output-write", null, 0),
-            _ =>
-            {
-                error.WriteLine("The Runtime CLI command failed.");
-                return ValueTask.FromResult(true);
-            },
+            _ => WriteMessageAsync(error, "The Runtime CLI command failed."),
             CancellationToken.None).ConfigureAwait(false);
         return 1;
     }
@@ -257,12 +245,14 @@ internal static class RuntimeCliSession
             context,
             RuntimeCliActionCatalog.OutputWrite,
             new RuntimeCliActionInvocation("output-write", null, 0),
-            _ =>
-            {
-                error.WriteLine("The Runtime CLI command was cancelled.");
-                return ValueTask.FromResult(true);
-            },
+            _ => WriteMessageAsync(error, "The Runtime CLI command was cancelled."),
             CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<bool> WriteMessageAsync(TextWriter writer, string message)
+    {
+        await writer.WriteLineAsync(message).ConfigureAwait(false);
+        return true;
     }
 
     private sealed record RuntimeCliResult(

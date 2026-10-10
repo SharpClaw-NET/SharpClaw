@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
@@ -55,112 +57,140 @@ internal sealed class ScopedStorageGateway(
         await using var transactionAsyncDisposal = new OptionalTransactionDisposal(transaction).ConfigureAwait(false);
         try
         {
-            var pending = new List<PendingMutation>(request.Mutations.Count);
-            foreach (var mutation in request.Mutations)
-            {
-                var key = RequireIdentifier(mutation.Key, nameof(mutation.Key), 256);
-                if (mutation.Operation is not (ScopedStorageOperations.Upsert or ScopedStorageOperations.Delete))
-                    throw new NotSupportedException($"Atomic registration storage operation '{mutation.Operation}' is not supported.");
-
-                var record = await Records(contract)
-                    .SingleOrDefaultAsync(candidate => candidate.RecordKey == key, ct).ConfigureAwait(false);
-                var actualRevision = record is null ? 0 : Revision(record);
-                if (mutation.ExpectedRevision is { } expected && expected != actualRevision)
-                    throw RevisionConflict(key, expected, actualRevision);
-                ValidateAuthority(SourceId, storageName, key, mutation.Authority, actualRevision);
-
-                IReadOnlyList<ScopedStorageIndexEntryDB> indexes = [];
-                string? valueJson = null;
-                if (string.Equals(mutation.Operation, ScopedStorageOperations.Upsert, StringComparison.Ordinal))
-                {
-                    if (mutation.Value is not { } value || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-                        throw new ArgumentException("Atomic registration storage upsert requires a value.", nameof(request));
-                    ValidateDocumentSize(contract, value);
-                    indexes = mutation.Indexes is null
-                        ? []
-                        : ReadIndexes(
-                            contract,
-                            key,
-                            mutation.Indexes is JsonElement element
-                                ? element
-                                : JsonSerializer.SerializeToElement(mutation.Indexes, JsonOptions));
-                    valueJson = value.GetRawText();
-                }
-
-                pending.Add(new PendingMutation(
-                    mutation,
-                    key,
-                    record,
-                    actualRevision,
-                    valueJson,
-                    indexes));
-            }
-
-            var writtenRecords = new Dictionary<string, ScopedStorageRecordDB>(StringComparer.Ordinal);
-            foreach (var item in pending)
-            {
-                if (string.Equals(item.Mutation.Operation, ScopedStorageOperations.Delete, StringComparison.Ordinal))
-                {
-                    if (item.Record is not null)
-                        db.ScopedStorageRecords.Remove(item.Record);
-                    await DeleteIndexesAsync(contract, item.Key, ct).ConfigureAwait(false);
-                    continue;
-                }
-
-                var record = item.Record ?? new ScopedStorageRecordDB
-                {
-                    Id = Guid.NewGuid(),
-                    SourceId = contract.SourceId,
-                    StorageName = contract.StorageName,
-                    RecordKey = item.Key,
-                    ValueJson = item.ValueJson!,
-                };
-                if (item.Record is null)
-                    db.ScopedStorageRecords.Add(record);
-                else
-                    record.ValueJson = item.ValueJson!;
-                writtenRecords[item.Key] = record;
-
-                await DeleteIndexesAsync(contract, item.Key, ct).ConfigureAwait(false);
-                db.ScopedStorageIndexEntries.AddRange(item.Indexes);
-            }
-
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
-            var revisions = pending
-                .Select(item => new ScopedStorageRevision(
-                    item.Key,
-                        string.Equals(item.Mutation.Operation, ScopedStorageOperations.Delete, StringComparison.Ordinal) ? item.ActualRevision + 1
-                        : Revision(writtenRecords[item.Key])))
-                .ToArray();
-
-            if (transaction is not null)
-                await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
-
-            var result = new ScopedStorageMutationAndOutboxResult(
-                request.Commit,
-                revisions,
-                [],
-                revisions.Max(revision => revision.Revision));
-            CommitResults.TryAdd(commitKey, result);
-            foreach (var item in pending)
-                AdvanceClaim(SourceId, storageName, item.Key, item.Mutation.Authority, revisions.First(value => string.Equals(value.Key, item.Key, StringComparison.Ordinal)).Revision);
-            return result;
+            return await CommitMutationsAsync(SourceId, storageName, contract,
+                request, commitKey, transactionRunner, transaction, ct).ConfigureAwait(false);
         }
         catch
         {
-            if (transaction is not null)
-            {
-                try
-                {
-                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None).ConfigureAwait(false);
-                }
-                catch
-                {
-                }
-            }
-
+            await TryRollbackAsync(transactionRunner, transaction).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private async Task<ScopedStorageMutationAndOutboxResult> CommitMutationsAsync(
+        string SourceId,
+        string storageName,
+        ScopedStorageContractDescriptor contract,
+        ScopedStorageMutationAndOutboxRequest request,
+        string commitKey,
+        RuntimeTransactionActionRunner transactionRunner,
+        IDbContextTransaction? transaction,
+        CancellationToken ct)
+    {
+        var pending = await LoadPendingMutationsAsync(
+            SourceId, storageName, contract, request, ct).ConfigureAwait(false);
+        var writtenRecords = await ApplyPendingMutationsAsync(contract, pending, ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        var revisions = pending
+            .Select(item => new ScopedStorageRevision(
+                item.Key,
+                    string.Equals(item.Mutation.Operation, ScopedStorageOperations.Delete, StringComparison.Ordinal) ? item.ActualRevision + 1
+                    : Revision(writtenRecords[item.Key])))
+            .ToArray();
+
+        if (transaction is not null)
+            await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
+
+        var result = new ScopedStorageMutationAndOutboxResult(
+            request.Commit,
+            revisions,
+            [],
+            revisions.Max(revision => revision.Revision));
+        CommitResults.TryAdd(commitKey, result);
+        for (var index = 0; index < pending.Count; index++)
+        {
+            var item = pending[index];
+            AdvanceClaim(SourceId, storageName, item.Key, item.Mutation.Authority,
+                revisions.First(value => string.Equals(value.Key, item.Key, StringComparison.Ordinal)).Revision);
+        }
+        return result;
+    }
+
+    private async Task<List<PendingMutation>> LoadPendingMutationsAsync(
+        string SourceId,
+        string storageName,
+        ScopedStorageContractDescriptor contract,
+        ScopedStorageMutationAndOutboxRequest request,
+        CancellationToken ct)
+    {
+        var pending = new List<PendingMutation>(request.Mutations.Count);
+        foreach (var mutation in request.Mutations)
+        {
+            var key = RequireIdentifier(mutation.Key, nameof(mutation.Key), 256);
+            if (mutation.Operation is not (ScopedStorageOperations.Upsert or ScopedStorageOperations.Delete))
+                throw new NotSupportedException($"Atomic registration storage operation '{mutation.Operation}' is not supported.");
+
+            var record = await Records(contract)
+                .SingleOrDefaultAsync(candidate => candidate.RecordKey == key, ct).ConfigureAwait(false);
+            var actualRevision = record is null ? 0 : Revision(record);
+            if (mutation.ExpectedRevision is { } expected && expected != actualRevision)
+                throw RevisionConflict(key, expected, actualRevision);
+            ValidateAuthority(SourceId, storageName, key, mutation.Authority, actualRevision);
+
+            List<ScopedStorageIndexEntryDB> indexes = [];
+            string? valueJson = null;
+            if (string.Equals(mutation.Operation, ScopedStorageOperations.Upsert, StringComparison.Ordinal))
+            {
+                if (mutation.Value is not { } value || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                    throw new ArgumentException("Atomic registration storage upsert requires a value.", nameof(request));
+                ValidateDocumentSize(contract, value);
+                indexes = mutation.Indexes is null
+                    ? []
+                    : ReadIndexes(
+                        contract,
+                        key,
+                        mutation.Indexes is JsonElement element
+                            ? element
+                            : JsonSerializer.SerializeToElement(mutation.Indexes, JsonOptions));
+                valueJson = value.GetRawText();
+            }
+
+            pending.Add(new PendingMutation(
+                mutation,
+                key,
+                record,
+                actualRevision,
+                valueJson,
+                indexes));
+        }
+        return pending;
+    }
+
+    private async Task<Dictionary<string, ScopedStorageRecordDB>> ApplyPendingMutationsAsync(
+        ScopedStorageContractDescriptor contract,
+        List<PendingMutation> pending,
+        CancellationToken ct)
+    {
+        var writtenRecords = new Dictionary<string, ScopedStorageRecordDB>(StringComparer.Ordinal);
+        for (var index = 0; index < pending.Count; index++)
+        {
+            var item = pending[index];
+            if (string.Equals(item.Mutation.Operation, ScopedStorageOperations.Delete, StringComparison.Ordinal))
+            {
+                if (item.Record is not null)
+                    db.ScopedStorageRecords.Remove(item.Record);
+                await DeleteIndexesAsync(contract, item.Key, ct).ConfigureAwait(false);
+                continue;
+            }
+
+            var record = item.Record ?? new ScopedStorageRecordDB
+            {
+                Id = Guid.NewGuid(),
+                SourceId = contract.SourceId,
+                StorageName = contract.StorageName,
+                RecordKey = item.Key,
+                ValueJson = item.ValueJson!,
+            };
+            if (item.Record is null)
+                await db.ScopedStorageRecords.AddAsync(record, ct).ConfigureAwait(false);
+            else
+                record.ValueJson = item.ValueJson!;
+            writtenRecords[item.Key] = record;
+
+            await DeleteIndexesAsync(contract, item.Key, ct).ConfigureAwait(false);
+            await db.ScopedStorageIndexEntries.AddRangeAsync(item.Indexes, ct).ConfigureAwait(false);
+        }
+        return writtenRecords;
     }
 
     public async Task<ScopedStorageClaimResult<T>> ClaimAsync<T>(
@@ -191,95 +221,136 @@ internal sealed class ScopedStorageGateway(
         await using var transactionAsyncDisposal = new OptionalTransactionDisposal(transaction).ConfigureAwait(false);
         try
         {
-            var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct).ConfigureAwait(false);
-            if (records.Count == 0)
-            {
-                if (transaction is not null)
-                    await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
-                return new ScopedStorageClaimResult<T>(
-                    [],
-                    NewClaimAuthority(SourceId, storageName, null, 0, request.Authority));
-            }
-
-            var now = DateTimeOffset.UtcNow;
-            var generation = 1L;
-            foreach (var record in records)
-            {
-                var claimKey = ClaimKey(SourceId, storageName, record.RecordKey);
-                if (Claims.TryGetValue(claimKey, out var existing))
-                {
-                    if (request.Authority is null || !existing.Matches(request.Authority) || !existing.IsValidAt(now))
-                        throw ScopedStorageFailure(ScopedStorageErrors.StaleClaim, "The storage record already has a live claim.", record.RecordKey);
-                    generation = Math.Max(generation, existing.Generation + 1);
-                }
-
-                var actualRevision = Revision(record);
-                if (request.ExpectedRevision is { } expected && expected != actualRevision)
-                    throw RevisionConflict(record.RecordKey, expected, actualRevision);
-                Claims.TryGetValue(claimKey, out var authorityClaim);
-                if (request.Authority is not null &&
-                    (authorityClaim is null || !authorityClaim.Matches(request.Authority)))
-                    throw ScopedStorageFailure(ScopedStorageErrors.ClaimAuthorityMismatch, "The requested claim authority is not active.", record.RecordKey);
-            }
-
-            ValidateClaimPatchIndexedFields(contract, claim.Patch, claim.IndexUpdates);
-            foreach (var record in records)
-                record.ValueJson = ApplyPatch(record.ValueJson, claim.Patch);
-            await ReplaceClaimIndexesAsync(
-                contract,
-                records.Select(record => record.RecordKey).ToArray(),
-                claim.IndexUpdates,
-                ct).ConfigureAwait(false);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-            var authority = NewClaimAuthority(
-                SourceId,
-                storageName,
-                records,
-                generation,
-                request.Authority);
-            var resultRecordsList = new List<ScopedStorageClaimRecord<T>>(records.Count);
-            foreach (var record in records)
-            {
-                var value = JsonSerializer.Deserialize<T>(record.ValueJson, JsonOptions)
-                    ?? throw new InvalidOperationException("A claimed registration storage value could not be decoded.");
-                var indexes = await Indexes(contract)
-                    .Where(index => index.RecordKey == record.RecordKey)
-                    .ToListAsync(ct).ConfigureAwait(false);
-                resultRecordsList.Add(new ScopedStorageClaimRecord<T>(
-                    record.RecordKey,
-                    value,
-                    Revision(record),
-                    authority,
-                    IndexesResponse(indexes)));
-            }
-            var resultRecords = resultRecordsList.ToArray();
-            authority = authority with
-            {
-                Revision = resultRecords.Max(record => record.Revision),
-            };
-            foreach (var record in resultRecords)
-                Claims[ClaimKey(SourceId, storageName, record.Key)] = authority;
-
-            if (transaction is not null)
-                await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
-            return new ScopedStorageClaimResult<T>(resultRecords, authority);
+            return await ClaimRecordsAsync<T>(SourceId, storageName, contract,
+                request, claim, transactionRunner, transaction, ct).ConfigureAwait(false);
         }
         catch
         {
-            if (transaction is not null)
-            {
-                try
-                {
-                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None).ConfigureAwait(false);
-                }
-                catch
-                {
-                }
-            }
-
+            await TryRollbackAsync(transactionRunner, transaction).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private async Task<ScopedStorageClaimResult<T>> ClaimRecordsAsync<T>(
+        string SourceId,
+        string storageName,
+        ScopedStorageContractDescriptor contract,
+        ScopedStorageClaimRequest request,
+        StorageClaim claim,
+        RuntimeTransactionActionRunner transactionRunner,
+        IDbContextTransaction? transaction,
+        CancellationToken ct)
+    {
+        var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct).ConfigureAwait(false);
+        if (records.Count == 0)
+        {
+            if (transaction is not null)
+                await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
+            return new ScopedStorageClaimResult<T>(
+                [],
+                NewClaimAuthority(SourceId, storageName, null, 0, request.Authority));
+        }
+
+        var generation = ValidateClaimRecords(SourceId, storageName, request, records);
+
+        ValidateClaimPatchIndexedFields(contract, claim.Patch, claim.IndexUpdates);
+        foreach (var record in records)
+            record.ValueJson = ApplyPatch(record.ValueJson, claim.Patch);
+        await ReplaceClaimIndexesAsync(
+            contract,
+            records.Select(record => record.RecordKey).ToArray(),
+            claim.IndexUpdates,
+            ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        var authority = NewClaimAuthority(
+            SourceId,
+            storageName,
+            records,
+            generation,
+            request.Authority);
+        var resultRecords = await ReadClaimRecordsAsync<T>(contract, records, authority, ct).ConfigureAwait(false);
+        authority = authority with
+        {
+            Revision = resultRecords.Max(record => record.Revision),
+        };
+        foreach (var record in resultRecords)
+            Claims[ClaimKey(SourceId, storageName, record.Key)] = authority;
+
+        if (transaction is not null)
+            await transactionRunner.CommitAsync(transaction, ct).ConfigureAwait(false);
+        return new ScopedStorageClaimResult<T>(resultRecords, authority);
+    }
+
+    private static long ValidateClaimRecords(
+        string SourceId,
+        string storageName,
+        ScopedStorageClaimRequest request,
+        IReadOnlyList<ScopedStorageRecordDB> records)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var generation = 1L;
+        foreach (var record in records)
+        {
+            var claimKey = ClaimKey(SourceId, storageName, record.RecordKey);
+            if (Claims.TryGetValue(claimKey, out var existing))
+            {
+                if (request.Authority is null || !existing.Matches(request.Authority) || !existing.IsValidAt(now))
+                    throw ScopedStorageFailure(ScopedStorageErrors.StaleClaim, "The storage record already has a live claim.", record.RecordKey);
+                generation = Math.Max(generation, existing.Generation + 1);
+            }
+
+            var actualRevision = Revision(record);
+            if (request.ExpectedRevision is { } expected && expected != actualRevision)
+                throw RevisionConflict(record.RecordKey, expected, actualRevision);
+            Claims.TryGetValue(claimKey, out var authorityClaim);
+            if (request.Authority is not null &&
+                (authorityClaim is null || !authorityClaim.Matches(request.Authority)))
+                throw ScopedStorageFailure(ScopedStorageErrors.ClaimAuthorityMismatch, "The requested claim authority is not active.", record.RecordKey);
+        }
+
+        return generation;
+    }
+
+    private async Task<ScopedStorageClaimRecord<T>[]> ReadClaimRecordsAsync<T>(
+        ScopedStorageContractDescriptor contract,
+        IReadOnlyList<ScopedStorageRecordDB> records,
+        ScopedStorageClaimAuthority authority,
+        CancellationToken ct)
+    {
+        var resultRecordsList = new List<ScopedStorageClaimRecord<T>>(records.Count);
+        foreach (var record in records)
+        {
+            var value = JsonSerializer.Deserialize<T>(record.ValueJson, JsonOptions)
+                ?? throw new InvalidOperationException("A claimed registration storage value could not be decoded.");
+            var indexes = await Indexes(contract)
+                .Where(index => index.RecordKey == record.RecordKey)
+                .ToListAsync(ct).ConfigureAwait(false);
+            resultRecordsList.Add(new ScopedStorageClaimRecord<T>(
+                record.RecordKey,
+                value,
+                Revision(record),
+                authority,
+                IndexesResponse(indexes)));
+        }
+        return resultRecordsList.ToArray();
+    }
+
+    private static async Task TryRollbackAsync(
+        RuntimeTransactionActionRunner transactionRunner,
+        IDbContextTransaction? transaction)
+    {
+        if (transaction is null)
+            return;
+        try
+        {
+            await transactionRunner.RollbackAsync(transaction, CancellationToken.None).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Rollback runs during propagation of an existing commit/claim failure; cleanup must preserve that primary exception.
+        catch
+        {
+        }
+#pragma warning restore CA1031
     }
 
     public async Task<ScopedStorageClaimRenewalResult> RenewClaimAsync(
@@ -440,8 +511,8 @@ internal sealed class ScopedStorageGateway(
         CancellationToken ct)
     {
         var writes = ReadWrites(contract, parameters);
-        foreach (var write in writes)
-            await UpsertRecordAsync(contract, write, ct).ConfigureAwait(false);
+        for (var index = 0; index < writes.Count; index++)
+            await UpsertRecordAsync(contract, writes[index], ct).ConfigureAwait(false);
 
         if (writes.Count > 0)
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -466,7 +537,7 @@ internal sealed class ScopedStorageGateway(
                 RecordKey = write.Key,
                 ValueJson = write.ValueJson,
             };
-            db.ScopedStorageRecords.Add(record);
+            await db.ScopedStorageRecords.AddAsync(record, ct).ConfigureAwait(false);
         }
         else
         {
@@ -474,7 +545,7 @@ internal sealed class ScopedStorageGateway(
         }
 
         await DeleteIndexesAsync(contract, write.Key, ct).ConfigureAwait(false);
-        db.ScopedStorageIndexEntries.AddRange(write.Indexes);
+        await db.ScopedStorageIndexEntries.AddRangeAsync(write.Indexes, ct).ConfigureAwait(false);
     }
 
     private async Task<JsonElement> DeleteAsync(
@@ -612,7 +683,9 @@ internal sealed class ScopedStorageGateway(
         CancellationToken ct)
     {
         if (query.Filters.Count == 0 && query.OrderBy is null)
+#pragma warning disable MA0015 // Preserve this established compound-query validation exception's message and absent ParamName.
             throw new ArgumentException("Registration storage query requires at least one filter or order index.");
+#pragma warning restore MA0015
 
         var keys = await FindMatchingRecordKeysAsync(contract, query.Filters, ct).ConfigureAwait(false);
         if (query.Filters.Count > 0 && keys.Count == 0)
@@ -626,7 +699,7 @@ internal sealed class ScopedStorageGateway(
         }
 
         var unorderedKeys = keys
-            .OrderBy(key => key, StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
             .Take(limit)
             .ToArray();
         return await LoadRecordsByKeysAsync(contract, unorderedKeys, tracking, ct).ConfigureAwait(false);
@@ -700,7 +773,7 @@ internal sealed class ScopedStorageGateway(
 
         var orderedKeys = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var index in orderedIndexes)
+        foreach (ref readonly var index in CollectionsMarshal.AsSpan(orderedIndexes))
         {
             if (seen.Add(index.RecordKey))
                 orderedKeys.Add(index.RecordKey);
@@ -756,7 +829,8 @@ internal sealed class ScopedStorageGateway(
             foreach (var (indexName, values) in indexUpdates)
             {
                 foreach (var value in values)
-                    db.ScopedStorageIndexEntries.Add(CreateIndexEntry(contract, key, indexName, value));
+                    await db.ScopedStorageIndexEntries.AddAsync(
+                        CreateIndexEntry(contract, key, indexName, value), ct).ConfigureAwait(false);
             }
         }
     }
@@ -781,7 +855,9 @@ internal sealed class ScopedStorageGateway(
             ScopedStorageIndexValueKind.String => comparisonOperator switch
             {
                 ScopedStorageComparisonOperators.EqualTo => query.Where(index => index.StringValue == value.StringValue),
+#pragma warning disable MA0015 // Preserve this established index-comparison validation exception's message and absent ParamName.
                 _ => throw new ArgumentException("String index values only support equality comparisons."),
+#pragma warning restore MA0015
             },
             ScopedStorageIndexValueKind.Number => comparisonOperator switch
             {
@@ -800,7 +876,9 @@ internal sealed class ScopedStorageGateway(
             ScopedStorageIndexValueKind.Bool => comparisonOperator switch
             {
                 ScopedStorageComparisonOperators.EqualTo => query.Where(index => index.BoolValue == value.BoolValue),
+#pragma warning disable MA0015 // Preserve this established index-comparison validation exception's message and absent ParamName.
                 _ => throw new ArgumentException("Boolean index values only support equality comparisons."),
+#pragma warning restore MA0015
             },
             _ => query,
         };
@@ -850,7 +928,7 @@ internal sealed class ScopedStorageGateway(
         return indexes.Count > 0;
     }
 
-    private StorageWrite ReadWrite(
+    private static StorageWrite ReadWrite(
         ScopedStorageContractDescriptor contract,
         JsonElement parameters)
     {
@@ -870,7 +948,7 @@ internal sealed class ScopedStorageGateway(
         return new StorageWrite(key, value.GetRawText(), indexes);
     }
 
-    private List<StorageWrite> ReadWrites(
+    private static List<StorageWrite> ReadWrites(
         ScopedStorageContractDescriptor contract,
         JsonElement parameters)
     {
@@ -925,7 +1003,7 @@ internal sealed class ScopedStorageGateway(
         return result;
     }
 
-    private StorageQuery ReadQuery(
+    private static StorageQuery ReadQuery(
         ScopedStorageContractDescriptor contract,
         JsonElement parameters)
     {
@@ -935,7 +1013,7 @@ internal sealed class ScopedStorageGateway(
         return new StorageQuery(filters, order, limit);
     }
 
-    private StorageClaim ReadClaim(
+    private static StorageClaim ReadClaim(
         ScopedStorageContractDescriptor contract,
         JsonElement parameters)
     {
@@ -954,7 +1032,7 @@ internal sealed class ScopedStorageGateway(
         return new StorageClaim(query, patch.Clone(), indexes);
     }
 
-    private static IReadOnlyList<StorageFilter> ReadFilters(
+    private static List<StorageFilter> ReadFilters(
         ScopedStorageContractDescriptor contract,
         JsonElement parameters)
     {
@@ -1009,7 +1087,7 @@ internal sealed class ScopedStorageGateway(
         return new StorageOrder(indexName, direction);
     }
 
-    private static IReadOnlyList<ScopedStorageIndexEntryDB> ReadIndexes(
+    private static List<ScopedStorageIndexEntryDB> ReadIndexes(
         ScopedStorageContractDescriptor contract,
         string key,
         JsonElement indexes)
@@ -1041,7 +1119,7 @@ internal sealed class ScopedStorageGateway(
         return result;
     }
 
-    private static IEnumerable<JsonElement> ExpandIndexValues(JsonElement value)
+    private static JsonElement[] ExpandIndexValues(JsonElement value)
     {
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
             return [];
@@ -1066,7 +1144,7 @@ internal sealed class ScopedStorageGateway(
                                                  && value.TryGetDouble(out var number) =>
                 new IndexValue(expectedKind, null, number, null, null),
             ScopedStorageIndexValueKind.DateTime when value.ValueKind == JsonValueKind.String
-                                                      && DateTimeOffset.TryParse(value.GetString(), out var dateTime) =>
+                                                      && DateTimeOffset.TryParse(value.GetString(), CultureInfo.CurrentCulture, DateTimeStyles.None, out var dateTime) =>
                 new IndexValue(expectedKind, null, null, dateTime, null),
             ScopedStorageIndexValueKind.Bool when value.ValueKind is JsonValueKind.True or JsonValueKind.False =>
                 new IndexValue(expectedKind, null, null, null, value.GetBoolean()),
@@ -1126,8 +1204,10 @@ internal sealed class ScopedStorageGateway(
 
     private static string ApplyPatch(string valueJson, JsonElement patch)
     {
+#pragma warning disable MA0015 // Preserve this established stored-document validation exception's message and absent ParamName.
         var node = JsonNode.Parse(valueJson) as JsonObject
             ?? throw new ArgumentException("Registration storage claim can only patch JSON object records.");
+#pragma warning restore MA0015
 
         foreach (var property in patch.EnumerateObject())
             node[property.Name] = JsonNode.Parse(property.Value.GetRawText());
@@ -1184,9 +1264,8 @@ internal sealed class ScopedStorageGateway(
         ScopedStorageIndexDescriptor descriptor,
         string comparisonOperator)
     {
-        var isRange = comparisonOperator is
-            ScopedStorageComparisonOperators.LessThanOrEqual or
-            ScopedStorageComparisonOperators.GreaterThanOrEqual;
+        var isRange = string.Equals(comparisonOperator, ScopedStorageComparisonOperators.LessThanOrEqual, StringComparison.Ordinal)
+            || string.Equals(comparisonOperator, ScopedStorageComparisonOperators.GreaterThanOrEqual, StringComparison.Ordinal);
 
         if (string.Equals(comparisonOperator, ScopedStorageComparisonOperators.EqualTo, StringComparison.Ordinal) && !descriptor.AllowsEquality)
             throw new NotSupportedException(
@@ -1204,9 +1283,11 @@ internal sealed class ScopedStorageGateway(
         var byteCount = Encoding.UTF8.GetByteCount(value.GetRawText());
         if (byteCount > contract.MaxDocumentBytes)
         {
+#pragma warning disable MA0015 // Preserve this established document-size validation exception's message and absent ParamName.
             throw new ArgumentException(
                 $"Registration storage document for '{contract.SourceId}/{contract.StorageName}' " +
                 $"is {byteCount} bytes and exceeds the declared {contract.MaxDocumentBytes} byte limit.");
+#pragma warning restore MA0015
         }
     }
 
@@ -1409,6 +1490,7 @@ internal sealed class ScopedStorageGateway(
     }
 
     private static string NormalizeOperation(string operation) =>
+#pragma warning disable CA1308 // Match the existing lowercase storage wire vocabulary without changing canonical identifiers or accepted casing.
         operation.ToLowerInvariant() switch
         {
             "get" => ScopedStorageOperations.Get,
@@ -1421,8 +1503,10 @@ internal sealed class ScopedStorageGateway(
             "claim" => ScopedStorageOperations.Claim,
             _ => operation,
         };
+#pragma warning restore CA1308
 
     private static string NormalizeComparisonOperator(string comparisonOperator) =>
+#pragma warning disable CA1308 // Match the existing lowercase storage wire vocabulary without changing canonical identifiers or accepted casing.
         comparisonOperator.ToLowerInvariant() switch
         {
             "equals" => ScopedStorageComparisonOperators.EqualTo,
@@ -1432,8 +1516,10 @@ internal sealed class ScopedStorageGateway(
                 $"Registration storage comparison operator '{comparisonOperator}' is not supported.",
                 nameof(comparisonOperator)),
         };
+#pragma warning restore CA1308
 
     private static string NormalizeSortDirection(string direction) =>
+#pragma warning disable CA1308 // Match the existing lowercase storage wire vocabulary without changing canonical identifiers or accepted casing.
         direction.ToLowerInvariant() switch
         {
             "asc" => ScopedStorageSortDirections.Ascending,
@@ -1442,6 +1528,7 @@ internal sealed class ScopedStorageGateway(
                 $"Registration storage sort direction '{direction}' is not supported.",
                 nameof(direction)),
         };
+#pragma warning restore CA1308
 
     private readonly struct OptionalTransactionDisposal(IDbContextTransaction? transaction) : IAsyncDisposable
     {
@@ -1451,7 +1538,7 @@ internal sealed class ScopedStorageGateway(
     private sealed record StorageWrite(
         string Key,
         string ValueJson,
-        IReadOnlyList<ScopedStorageIndexEntryDB> Indexes);
+        List<ScopedStorageIndexEntryDB> Indexes);
 
     private sealed record PendingMutation(
         ScopedStorageMutation Mutation,
@@ -1459,7 +1546,7 @@ internal sealed class ScopedStorageGateway(
         ScopedStorageRecordDB? Record,
         long ActualRevision,
         string? ValueJson,
-        IReadOnlyList<ScopedStorageIndexEntryDB> Indexes);
+        List<ScopedStorageIndexEntryDB> Indexes);
 
     private sealed record StorageQuery(
         IReadOnlyList<StorageFilter> Filters,

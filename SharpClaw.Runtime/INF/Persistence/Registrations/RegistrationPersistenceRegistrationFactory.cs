@@ -7,6 +7,7 @@ namespace SharpClaw.Runtime.INF.Persistence.Registrations;
 
 public sealed class RegistrationPersistenceRegistrationFactory
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "The instance method is a published factory API; making it static would break existing binary callers.")]
     public IReadOnlyList<RuntimeRegistrationDbContextRegistration> CreateRegistrations(
         string SourceId,
         Assembly assembly)
@@ -25,7 +26,7 @@ public sealed class RegistrationPersistenceRegistrationFactory
             .ToList();
     }
 
-    private static IReadOnlyList<Type> GetEntityTypes(Type dbContextType)
+    private static List<Type> GetEntityTypes(Type dbContextType)
     {
         return dbContextType.GetProperties(BindingFlags.Instance | BindingFlags.Public)
             .Where(p => p.PropertyType.IsGenericType

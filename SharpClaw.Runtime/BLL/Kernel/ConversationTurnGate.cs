@@ -6,7 +6,7 @@ namespace SharpClaw.Runtime.BLL.Kernel;
 /// <summary>Serializes complete direct-chat turns for one conversation.</summary>
 internal sealed class ConversationTurnGate
 {
-    private readonly object _sync = new();
+    private readonly Lock _sync = new();
     private readonly Dictionary<Guid, GateEntry> _entries = [];
     private readonly Action? _beforeFinalEntryRemoval;
 

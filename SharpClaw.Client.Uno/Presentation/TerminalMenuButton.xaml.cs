@@ -2,6 +2,8 @@ using Microsoft.UI.Xaml.Input;
 
 namespace SharpClaw.Presentation;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1010",
+    Justification = "This Uno view inherits nongeneric enumeration from the framework for XAML children; it is not a public collection API and adding generic enumeration would change framework semantics.")]
 public sealed partial class TerminalMenuButton : UserControl
 {
     public static readonly DependencyProperty LabelProperty =
@@ -39,8 +41,20 @@ public sealed partial class TerminalMenuButton : UserControl
         set => SetValue(TagKeyProperty, value);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1003",
+        Justification = "This existing XAML control event publishes the TagKey string directly; changing its delegate argument to EventArgs would break current public handler contracts.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0046",
+        Justification = "This existing XAML control event publishes the TagKey string directly; changing its delegate argument to EventArgs would break current public handler contracts.")]
     public event EventHandler<string>? MenuClick;
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1003",
+        Justification = "This existing XAML control event publishes the TagKey string directly; changing its delegate argument to EventArgs would break current public handler contracts.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0046",
+        Justification = "This existing XAML control event publishes the TagKey string directly; changing its delegate argument to EventArgs would break current public handler contracts.")]
     public event EventHandler<string>? MenuPointerEntered;
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1003",
+        Justification = "This existing XAML control event publishes the TagKey string directly; changing its delegate argument to EventArgs would break current public handler contracts.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0046",
+        Justification = "This existing XAML control event publishes the TagKey string directly; changing its delegate argument to EventArgs would break current public handler contracts.")]
     public event EventHandler<string>? MenuPointerExited;
 
     private void OnClick(object sender, RoutedEventArgs e)

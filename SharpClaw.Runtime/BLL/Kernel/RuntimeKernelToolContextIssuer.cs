@@ -26,23 +26,7 @@ internal sealed class RuntimeKernelToolContextIssuer : IKernelToolContextIssuer
             return ValueTask.FromResult<HostActionEntryRequestContext?>(null);
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(request.Arguments);
-        var manifest = KernelActionCatalog.DescriptorFor(SharpClawActions.Tools.Invoke);
-        var descriptor = new ActionDescriptor<ToolInvocation, ToolInvocationOutcome>(
-            manifest.Key,
-            manifest.Version,
-            manifest.Category,
-            manifest.Capabilities,
-            manifest.ContainsSensitiveData,
-            manifest.HasIrreversibleEffects,
-            manifest.RepeatPolicy,
-            manifest.ContinuationPolicy,
-            manifest.DefaultTimeout)
-        {
-            ProtocolVersionRange = ContractVersionRange.Exact(1),
-            SafePoints = manifest.SafePoints,
-            InputSchema = manifest.InputSchema,
-            ResultSchema = manifest.ResultSchema
-        };
+        var descriptor = CreateToolDescriptor();
         var inputSchema = descriptor.InputSchema;
         if (inputSchema is null || string.IsNullOrWhiteSpace(inputSchema.ContentHash))
             return ValueTask.FromResult<HostActionEntryRequestContext?>(null);
@@ -81,5 +65,26 @@ internal sealed class RuntimeKernelToolContextIssuer : IKernelToolContextIssuer
         };
 
         return ValueTask.FromResult<HostActionEntryRequestContext?>(context);
+    }
+
+    private static ActionDescriptor<ToolInvocation, ToolInvocationOutcome> CreateToolDescriptor()
+    {
+        var manifest = KernelActionCatalog.DescriptorFor(SharpClawActions.Tools.Invoke);
+        return new ActionDescriptor<ToolInvocation, ToolInvocationOutcome>(
+            manifest.Key,
+            manifest.Version,
+            manifest.Category,
+            manifest.Capabilities,
+            manifest.ContainsSensitiveData,
+            manifest.HasIrreversibleEffects,
+            manifest.RepeatPolicy,
+            manifest.ContinuationPolicy,
+            manifest.DefaultTimeout)
+        {
+            ProtocolVersionRange = ContractVersionRange.Exact(1),
+            SafePoints = manifest.SafePoints,
+            InputSchema = manifest.InputSchema,
+            ResultSchema = manifest.ResultSchema,
+        };
     }
 }

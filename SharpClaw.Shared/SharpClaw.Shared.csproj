@@ -18,5 +18,9 @@
     <PackageReference Include="SharpClaw.Contracts" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SharpClaw.Tests" />
+  </ItemGroup>
+
 
 </Project>

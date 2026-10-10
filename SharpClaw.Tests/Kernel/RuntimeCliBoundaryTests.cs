@@ -48,7 +48,7 @@ internal sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test").ConfigureAwait(false);
+        await adapter.StartAsync("k04-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -70,7 +70,7 @@ internal sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -81,7 +81,7 @@ internal sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test").ConfigureAwait(false);
+        await adapter.StartAsync("k04-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -109,7 +109,7 @@ internal sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -120,7 +120,7 @@ internal sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test").ConfigureAwait(false);
+        await adapter.StartAsync("k04-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -144,7 +144,7 @@ internal sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -155,13 +155,13 @@ internal sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test").ConfigureAwait(false);
+        await adapter.StartAsync("k04-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
             using var error = new StringWriter();
             using var cancellation = new CancellationTokenSource();
-            cancellation.Cancel();
+            await cancellation.CancelAsync().ConfigureAwait(false);
 
             var exitCode = await RuntimeCliSession.RunAsync(
                 ["--cli", "help"],
@@ -181,7 +181,7 @@ internal sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -195,7 +195,7 @@ internal sealed class RuntimeCliBoundaryTests
         };
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test").ConfigureAwait(false);
+        await adapter.StartAsync("k04-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -223,7 +223,7 @@ internal sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -239,7 +239,7 @@ internal sealed class RuntimeCliBoundaryTests
         };
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test").ConfigureAwait(false);
+        await adapter.StartAsync("k04-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         try
         {
             using var output = new StringWriter();
@@ -253,11 +253,11 @@ internal sealed class RuntimeCliBoundaryTests
                 error,
                 CancellationToken.None).AsTask();
 
-            await probe.ChatStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-            actionCancellation.Cancel();
+            await probe.ChatStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await actionCancellation.CancelAsync().ConfigureAwait(false);
 
-            var exitCode = await session.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-            await probe.ChatCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            var exitCode = await session.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await probe.ChatCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
 
             exitCode.Should().Be(130);
             error.ToString().Should().Be(
@@ -273,7 +273,7 @@ internal sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -284,7 +284,7 @@ internal sealed class RuntimeCliBoundaryTests
         var probe = new CliProbe();
         var adapter = CreateAdapter(workspace, probe);
 
-        await adapter.StartAsync("k04-test").ConfigureAwait(false);
+        await adapter.StartAsync("k04-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         try
         {
             static async Task<int> RunHelpAsync(
@@ -329,7 +329,7 @@ internal sealed class RuntimeCliBoundaryTests
         }
         finally
         {
-            await adapter.StopAsync().ConfigureAwait(false);
+            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -338,37 +338,17 @@ internal sealed class RuntimeCliBoundaryTests
     {
         var root = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT")
             ?? FindSourceRoot();
-        var hostSource = File.ReadAllText(Path.Combine(
-            root,
-            "SharpClaw.Runtime",
-            "Host",
-            "LocalRuntimeHost.cs"));
-        var launcherSource = File.ReadAllText(Path.Combine(
-            root,
-            "SharpClaw.Runtime",
-            "Host",
-            "RuntimeLauncher.cs"));
-        var hostProject = File.ReadAllText(Path.Combine(
-            root,
-            "SharpClaw.Runtime",
-            "Host",
-            "SharpClaw.Runtime.Host.csproj"));
+        var hostSource = ReadHostSource(root, "LocalRuntimeHost.cs");
+        var launcherSource = ReadHostSource(root, "RuntimeLauncher.cs");
+        var hostProject = ReadHostSource(root, "SharpClaw.Runtime.Host.csproj");
         var adapterSource = File.ReadAllText(Path.Combine(
             root,
             "SharpClaw.Runtime",
             "BLL",
             "Kernel",
             "RuntimeKernelAdapter.cs"));
-        var sessionSource = File.ReadAllText(Path.Combine(
-            root,
-            "SharpClaw.Runtime",
-            "Host",
-            "RuntimeCliSession.cs"));
-        var programSource = File.ReadAllText(Path.Combine(
-            root,
-            "SharpClaw.Runtime",
-            "Host",
-            "Program.cs"));
+        var sessionSource = ReadHostSource(root, "RuntimeCliSession.cs");
+        var programSource = ReadHostSource(root, "Program.cs");
 
         var kernelStart = hostSource.IndexOf(
             "await kernel.StartAsync",
@@ -403,6 +383,14 @@ internal sealed class RuntimeCliBoundaryTests
         sessionSource.Should().Contain("RuntimeCliActionCatalog.Fail");
         sessionSource.Should().Contain("RuntimeCliActionCatalog.Cancel");
         sessionSource.Should().Contain("catch (KernelActionCancelledException)");
+        AssertCliExecuteTerminal(sessionSource);
+        hostSource.Should().Contain("CancellationToken cancellationToken = default");
+        programSource.Should().Contain("Console.CancelKeyPress");
+        programSource.Should().Contain("processCancellation.Token");
+    }
+
+    private static void AssertCliExecuteTerminal(string sessionSource)
+    {
         var executeTerminal = sessionSource.IndexOf(
             "cancellation => ExecuteAsync(",
             StringComparison.Ordinal);
@@ -413,10 +401,10 @@ internal sealed class RuntimeCliBoundaryTests
         executeTerminalSource.Should().Contain("applications,");
         executeTerminalSource.Should().Contain("context,");
         executeTerminalSource.Should().Contain("cancellation)");
-        hostSource.Should().Contain("CancellationToken cancellationToken = default");
-        programSource.Should().Contain("Console.CancelKeyPress");
-        programSource.Should().Contain("processCancellation.Token");
     }
+
+    private static string ReadHostSource(string root, string filename) =>
+        File.ReadAllText(Path.Combine(root, "SharpClaw.Runtime", "Host", filename));
 
     private static RuntimeKernelAdapter CreateAdapter(
         TemporaryWorkspace workspace,
@@ -493,8 +481,13 @@ internal sealed class RuntimeCliBoundaryTests
                 if (Directory.Exists(_root))
                     Directory.Delete(_root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }
@@ -515,7 +508,7 @@ internal sealed class RuntimeCliBoundaryTests
         public TaskCompletionSource<bool> ChatCancellationObserved { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public IReadOnlyList<string> Actions() =>
+        public string[] Actions() =>
             Observations.Select(static observation => observation.Action).ToArray();
 
         public void Record(ActionContext<KernelActionEnvelope> context) =>

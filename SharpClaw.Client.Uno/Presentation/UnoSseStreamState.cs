@@ -76,7 +76,7 @@ public sealed class UnoSseStreamState
         var source = document.RootElement.GetProperty(objectProperty);
         var actionKey = source.GetProperty("actionKey").GetString() ?? "?";
         var status = source.GetProperty("status").GetString() ?? defaultStatus;
-        _builder.Append($"\n[{actionKey}] -> {status}");
+        _builder.Append(System.Globalization.CultureInfo.InvariantCulture, $"\n[{actionKey}] -> {status}");
         _needsNewlineBeforeNextDelta = true;
         return new UnoSseEventResult(false, true);
     }
@@ -88,7 +88,7 @@ public sealed class UnoSseStreamState
             .GetProperty("pendingJob")
             .GetProperty("actionKey")
             .GetString() ?? "?";
-        _builder.Append($"\n[{actionKey}] awaiting approval");
+        _builder.Append(System.Globalization.CultureInfo.InvariantCulture, $"\n[{actionKey}] awaiting approval");
         _needsNewlineBeforeNextDelta = true;
         return new UnoSseEventResult(false, true);
     }

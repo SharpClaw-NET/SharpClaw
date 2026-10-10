@@ -14,10 +14,11 @@ public sealed class ClientNavigationService(
         await actions.NavigateAsync(
             route,
             qualifier,
-            async (_, _) => await navigator.NavigateRouteAsync(
+            async (_, token) => await navigator.NavigateRouteAsync(
                 sender,
                 route,
-                qualifier ?? string.Empty).ConfigureAwait(true),
+                qualifier ?? string.Empty,
+                cancellation: token).ConfigureAwait(true),
             cancellationToken).ConfigureAwait(true);
     }
 
@@ -31,10 +32,11 @@ public sealed class ClientNavigationService(
         await actions.NavigateAsync(
             route,
             qualifier,
-            async (_, _) => await navigator.NavigateViewModelAsync<TViewModel>(
+            async (_, token) => await navigator.NavigateViewModelAsync<TViewModel>(
                 sender,
                 qualifier: qualifier ?? string.Empty,
-                data: data).ConfigureAwait(true),
+                data: data,
+                cancellation: token).ConfigureAwait(true),
             cancellationToken).ConfigureAwait(true);
     }
 }

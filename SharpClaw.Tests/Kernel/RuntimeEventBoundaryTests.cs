@@ -460,6 +460,8 @@ internal sealed class RuntimeEventBoundaryTests
     {
         public IServiceProvider ServiceProvider { get; } = serviceProvider;
 
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "HLQ009",
+            Justification = "IServiceScope requires Dispose; this test scope only borrows already owned doubles and has no resource to release.")]
         public void Dispose()
         {
         }
@@ -502,8 +504,13 @@ internal sealed class RuntimeEventBoundaryTests
                 if (Directory.Exists(_root))
                     Directory.Delete(_root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }

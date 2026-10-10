@@ -39,14 +39,14 @@ internal sealed class InternalApiClientResolutionTests
         var sharedRoot = CreateTempDirectory();
         var apiKeyPath = Path.Combine(sharedRoot, "runtime", ".api-key");
         Directory.CreateDirectory(Path.GetDirectoryName(apiKeyPath)!);
-        File.WriteAllText(apiKeyPath, "explicit-api-key");
+        await File.WriteAllTextAsync(apiKeyPath, "explicit-api-key", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         Environment.SetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT", gatewayRoot);
         Environment.SetEnvironmentVariable("SHARPCLAW_SHARED_ROOT", sharedRoot);
 
         try
         {
-            var handler = new CaptureHandler();
-            var httpClient = new HttpClient(handler)
+            using var handler = new CaptureHandler();
+            using var httpClient = new HttpClient(handler)
             {
                 BaseAddress = new Uri("http://127.0.0.1:48923")
             };
@@ -64,7 +64,7 @@ internal sealed class InternalApiClientResolutionTests
             _ = await client.GetAsync<object>("/ping").ConfigureAwait(false);
 
             handler.LastRequest.Should().NotBeNull();
-            handler.LastRequest!.Headers.GetValues("X-Api-Key").Single().Should().Be("explicit-api-key");
+            handler.LastRequest!.Headers.GetValues("X-Api-Key").Should().ContainSingle().Which.Should().Be("explicit-api-key");
         }
         finally
         {
@@ -98,8 +98,8 @@ internal sealed class InternalApiClientResolutionTests
             Environment.SetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT", gatewayRoot);
             Environment.SetEnvironmentVariable("SHARPCLAW_SHARED_ROOT", sharedRoot);
 
-            var handler = new CaptureHandler();
-            var httpClient = new HttpClient(handler)
+            using var handler = new CaptureHandler();
+            using var httpClient = new HttpClient(handler)
             {
                 BaseAddress = new Uri("http://127.0.0.1:48923")
             };
@@ -116,8 +116,8 @@ internal sealed class InternalApiClientResolutionTests
             _ = await client.GetAsync<object>("/ping").ConfigureAwait(false);
 
             handler.LastRequest.Should().NotBeNull();
-            handler.LastRequest!.Headers.GetValues("X-Api-Key").Single().Should().Be("discovered-api-key");
-            handler.LastRequest.Headers.GetValues("X-Gateway-Token").Single().Should().Be("discovered-gateway-token");
+            handler.LastRequest!.Headers.GetValues("X-Api-Key").Should().ContainSingle().Which.Should().Be("discovered-api-key");
+            handler.LastRequest.Headers.GetValues("X-Gateway-Token").Should().ContainSingle().Which.Should().Be("discovered-gateway-token");
         }
         finally
         {
@@ -160,12 +160,7 @@ internal sealed class InternalApiClientResolutionTests
             LastSeenUtc = DateTimeOffset.UtcNow,
         };
 
-        var json = System.Text.Json.JsonSerializer.Serialize(entry, new System.Text.Json.JsonSerializerOptions
-        {
-            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
-            WriteIndented = true,
-            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
-        });
+        var json = System.Text.Json.JsonSerializer.Serialize(entry, TestSerializationOptions.CamelCaseIndentedEnums);
 
         File.WriteAllText(Path.Combine(discoveryDir, $"backend-{instanceId}.json"), json);
     }
@@ -186,8 +181,13 @@ internal sealed class InternalApiClientResolutionTests
         {
             Directory.Delete(path, recursive: true);
         }
-        catch
+        catch (IOException exception)
         {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
         }
     }
 

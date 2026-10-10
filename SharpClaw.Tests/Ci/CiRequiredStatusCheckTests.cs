@@ -80,16 +80,11 @@ internal sealed partial class CiRequiredStatusCheckTests
         var script = File.ReadAllText(Path.Combine(root, "build", "BuildFrozenBom.ps1"));
         var sourceSection = script.Split(
             "foreach ($repository in $sourceRepositories)", 2, StringSplitOptions.None)[0];
-        var packageMappings = Regex.Matches(
-                sourceSection,
-                @"PackageIds = @\((?<ids>.*?)\)",
-                RegexOptions.Singleline)
+        var packageMappings = PackageMappingRegex().Matches(sourceSection)
             .Cast<Match>()
             .ToArray();
         var packageIds = packageMappings
-            .SelectMany(mapping => Regex.Matches(
-                    mapping.Groups["ids"].Value,
-                    "\"(?<id>SharpClaw\\.[^\"]+)\"")
+            .SelectMany(mapping => PackageIdentityRegex().Matches(mapping.Groups["ids"].Value)
                 .Cast<Match>()
                 .Select(match => match.Groups["id"].Value))
             .ToArray();
@@ -119,7 +114,7 @@ internal sealed partial class CiRequiredStatusCheckTests
             "FullyQualifiedName~SharpClaw.Tests.Kernel.DefaultModuleSetHostGateTests|FullyQualifiedName~SharpClaw.Tests.Kernel.PackagedSidecarReadinessTests");
     }
 
-    private static IReadOnlyList<string> ExtractWorkflowContexts(string workflowPath)
+    private static List<string> ExtractWorkflowContexts(string workflowPath)
     {
         File.Exists(workflowPath).Should().BeTrue();
 
@@ -166,7 +161,7 @@ internal sealed partial class CiRequiredStatusCheckTests
         return contexts;
     }
 
-    private static IReadOnlyList<string> ExtractRequiredContexts(string rulesetPath)
+    private static string[] ExtractRequiredContexts(string rulesetPath)
     {
         File.Exists(rulesetPath).Should().BeTrue();
 
@@ -212,9 +207,14 @@ internal sealed partial class CiRequiredStatusCheckTests
         throw new DirectoryNotFoundException("Could not locate SharpClaw repository root.");
     }
 
-    [GeneratedRegex(@"^\s{4}name:\s*(?<name>.+?)\s*$")]
+    [GeneratedRegex(@"^\s{4}name:\s*(?<name>.+?)\s*$", RegexOptions.None, 1000)]
     private static partial Regex JobNameRegex();
 
-    [GeneratedRegex(@"^\s*-\s*domain:\s*(?<domain>.+?)\s*$")]
+    [GeneratedRegex(@"^\s*-\s*domain:\s*(?<domain>.+?)\s*$", RegexOptions.None, 1000)]
     private static partial Regex DomainRegex();
+    [GeneratedRegex(@"PackageIds = @\((?<ids>.*?)\)", RegexOptions.Singleline, 1000)]
+    private static partial Regex PackageMappingRegex();
+
+    [GeneratedRegex("\"(?<id>SharpClaw\\.[^\"]+)\"", RegexOptions.None, 1000)]
+    private static partial Regex PackageIdentityRegex();
 }

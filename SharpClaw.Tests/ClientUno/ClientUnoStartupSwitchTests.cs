@@ -243,7 +243,7 @@ internal sealed class ClientUnoStartupSwitchTests
             {
                 Directory.Delete(_root, recursive: true);
             }
-            catch
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 // Best-effort cleanup for temp test files.
             }

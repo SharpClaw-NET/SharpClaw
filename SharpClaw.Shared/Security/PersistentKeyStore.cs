@@ -58,10 +58,13 @@ public static class PersistentKeyStore
         return key;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD002",
+        Justification = "The existing synchronous key/configuration API must return the completed key. Its file/crypto-only asynchronous workflow starts on Task.Run without a caller/UI SynchronizationContext and has no UI callbacks.")]
     private static string GetOrCreateInstallationKeyAsBase64(string filePath)
     {
-        byte[] key = new SharpClawInstallationKeyStore(filePath)
-            .GetOrCreateKeyAsync()
+        byte[] key = Task.Run(
+            () => new SharpClawInstallationKeyStore(filePath).GetOrCreateKeyAsync(CancellationToken.None),
+            CancellationToken.None)
             .GetAwaiter()
             .GetResult();
         try

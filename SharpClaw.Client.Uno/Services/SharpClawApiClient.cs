@@ -11,8 +11,10 @@ namespace SharpClaw.Services;
 /// </summary>
 public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2213",
+        Justification = "DisposeOwnedHttpAsync owns one physical release task awaited by the disposal terminal and receipt settlement; the supplied client is released only when its constructor explicitly transfers ownership.")]
     private readonly HttpClient _http;
-    private readonly object _targetLock = new();
+    private readonly Lock _targetLock = new();
     private readonly FrontendInstanceService? _frontendInstance;
     private readonly ILogger<SharpClawApiClient> _logger;
     private readonly ClientActionDispatcher _clientActions;
@@ -21,8 +23,12 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
     private Uri _targetBaseUri;
     private string? _cachedApiKey;
     private Uri? _cachedApiKeyTarget;
-    private int _disposed;
+    private readonly Lock _disposeLock = new();
+    private Task? _disposeTask;
+    private Task? _ownedHttpDisposalTask;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public SharpClawApiClient(
         string baseUrl,
         ILogger<SharpClawApiClient> logger,
@@ -34,11 +40,31 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
         _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
         _ownsHttp = true;
         _targetBaseUri = CreateTargetUri(baseUrl);
-        _http = new HttpClient(new HttpLoggingHandler(new HttpClientHandler(), logger))
-        {
-            Timeout = TimeSpan.FromMinutes(10)
-        };
+        _http = CreateHttpClient(logger);
 
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2000",
+        Justification = "The returned HttpClient owns its handler through disposeHandler: true. Every constructor/configuration failure disposes the acquired handler/client before rethrowing; the analyzer cannot follow this explicit ownership transfer.")]
+    private static HttpClient CreateHttpClient(ILogger logger)
+    {
+        var inner = new HttpClientHandler();
+        HttpLoggingHandler? loggingHandler = null;
+        HttpClient? http = null;
+        try
+        {
+            loggingHandler = new HttpLoggingHandler(inner, logger);
+            http = new HttpClient(loggingHandler, disposeHandler: true);
+            http.Timeout = TimeSpan.FromMinutes(10);
+            return http;
+        }
+        catch
+        {
+            if (http is not null) http.Dispose();
+            else if (loggingHandler is not null) loggingHandler.Dispose();
+            else inner.Dispose();
+            throw;
+        }
     }
 
     internal SharpClawApiClient(
@@ -46,13 +72,16 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
         ILogger<SharpClawApiClient> logger,
         ClientActionDispatcher clientActions,
         string? fixedApiKey = null,
-        FrontendInstanceService? frontendInstance = null)
+        FrontendInstanceService? frontendInstance = null,
+        bool ownsHttp = false)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
         _frontendInstance = frontendInstance;
-        _ownsHttp = false;
+        // Ownership transfers only after this constructor successfully validates
+        // the supplied transport; existing internal callers keep borrowing it.
+        _ownsHttp = ownsHttp;
         _fixedApiKey = fixedApiKey;
         _targetBaseUri = http.BaseAddress
             ?? throw new ArgumentException(
@@ -61,6 +90,8 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
     }
 
     /// <summary>Base URL of the localhost API (e.g. http://127.0.0.1:48923).</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1056",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public string BaseUrl
     {
         get
@@ -73,6 +104,8 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
     /// <summary>
     /// Changes the target API base URL and clears the cached API key.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public async ValueTask UpdateBaseUrlAsync(
         string baseUrl,
         CancellationToken cancellationToken = default)
@@ -156,6 +189,10 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
     /// <summary>
     /// GET + deserialize a JSON list, swallowing errors and returning <c>null</c> on failure.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0016",
+        Justification = "The existing public Task<List<T>?> return type is retained for source and binary compatibility; changing generic task covariance is a breaking contract change.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "This existing optional-list API explicitly returns null on any transport, action or deserialization failure; the fault type is observed in the bounded journal and is never represented as a successful list.")]
     public async Task<List<T>?> FetchListAsync<T>(string path, JsonSerializerOptions json, CancellationToken ct = default)
     {
         try
@@ -167,7 +204,10 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
                 return await JsonSerializer.DeserializeAsync<List<T>>(s, json, ct).ConfigureAwait(true);
             }
         }
-        catch { /* swallow */ }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+        }
         return null;
     }
 
@@ -243,7 +283,7 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
         {
             try
             {
-                var response = await GetAsync("/ping", cts.Token).ConfigureAwait(true);
+                using var response = await GetAsync("/ping", cts.Token).ConfigureAwait(true);
                 if (response.IsSuccessStatusCode)
                     return;
 
@@ -342,22 +382,64 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
             cancellationToken).ConfigureAwait(true);
     }
 
-    public void Dispose() =>
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD002",
+        Justification = "IDisposable must complete synchronously. Shared disposal runs on Task.Run without a UI SynchronizationContext and never invokes UI callbacks; async consumers use DisposeAsync.")]
+    public void Dispose() => GetDisposalTaskAsync().GetAwaiter().GetResult();
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync() => new(GetDisposalTaskAsync());
+
+    private Task GetDisposalTaskAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-            return;
+        lock (_disposeLock)
+        {
+            // Both disposal contracts join one receipt, including its failure.
+            // The cleanup terminal owns only HTTP resources, so no UI turn is required.
+            return _disposeTask ??= Task.Run(DisposeCoreAsync, CancellationToken.None);
+        }
+    }
 
-        await _clientActions.RunCommandAsync(
-            "client.api.dispose",
-            _ =>
-            {
-                if (_ownsHttp)
-                    _http.Dispose();
-                return ValueTask.CompletedTask;
-            }).ConfigureAwait(true);
+    private async Task DisposeCoreAsync()
+    {
+        try
+        {
+            await _clientActions.RunCommandAsync(
+                "client.api.dispose",
+                async _ => await DisposeOwnedHttpAsync().ConfigureAwait(false),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A rejected/failed receipt cannot abandon an owned transport.
+            // Join physical cleanup while retaining this original action fault.
+            await CloseOwnedHttpAfterFailedReceiptAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        // A policy may settle successfully without invoking its terminal.
+        // Disposal still promises physical release of the resources we own.
+        await DisposeOwnedHttpAsync().ConfigureAwait(false);
+    }
+
+    private Task DisposeOwnedHttpAsync()
+    {
+        if (!_ownsHttp) return Task.CompletedTask;
+        lock (_disposeLock)
+        {
+            // Separate physical ownership from the action receipt. Both paths
+            // join this exact task, even if the action faults before settlement.
+            return _ownedHttpDisposalTask ??= Task.Run(_http.Dispose, CancellationToken.None);
+        }
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "A secondary resource-release failure is observed after a failed disposal receipt, while the original action fault remains the failure shared by all disposal callers.")]
+    private async Task CloseOwnedHttpAfterFailedReceiptAsync()
+    {
+        try { await DisposeOwnedHttpAsync().ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+        }
     }
 
     /// <summary>
@@ -368,17 +450,22 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
         HttpMessageHandler inner,
         ILogger logger) : DelegatingHandler(inner)
     {
+        private static readonly Action<ILogger, string, HttpMethod, string, long?, Exception?> LogStarted =
+            LoggerMessage.Define<string, HttpMethod, string, long?>(LogLevel.Debug,
+                new EventId(10, "HttpStarted"), "HTTP request {RequestId} started: {Method} {Path}; content length={ContentLength}");
+        private static readonly Action<ILogger, string, long, HttpMethod, string, Exception?> LogFailed =
+            LoggerMessage.Define<string, long, HttpMethod, string>(LogLevel.Error,
+                new EventId(11, "HttpFailed"), "HTTP request {RequestId} failed after {ElapsedMilliseconds}ms: {Method} {Path}");
+        private static readonly Action<ILogger, string, int, long, HttpMethod, string, long?, Exception?> LogCompleted =
+            LoggerMessage.Define<string, int, long, HttpMethod, string, long?>(LogLevel.Information,
+                new EventId(12, "HttpCompleted"), "HTTP request {RequestId} completed: {StatusCode} after {ElapsedMilliseconds}ms: {Method} {Path}; response length={ContentLength}");
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var id = Guid.NewGuid().ToString("N")[..8];
             var path = SafePath(request.RequestUri);
-            logger.LogDebug(
-                "HTTP request {RequestId} started: {Method} {Path}; content length={ContentLength}",
-                id,
-                request.Method,
-                path,
-                request.Content?.Headers.ContentLength);
+            LogStarted(logger, id, request.Method, path, request.Content?.Headers.ContentLength, null);
 
             var sw = Stopwatch.StartNew();
             HttpResponseMessage response;
@@ -389,25 +476,13 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
             catch (Exception ex)
             {
                 sw.Stop();
-                logger.LogError(
-                    ex,
-                    "HTTP request {RequestId} failed after {ElapsedMilliseconds}ms: {Method} {Path}",
-                    id,
-                    sw.ElapsedMilliseconds,
-                    request.Method,
-                    path);
+                LogFailed(logger, id, sw.ElapsedMilliseconds, request.Method, path, ex);
                 throw;
             }
             sw.Stop();
 
-            logger.LogInformation(
-                "HTTP request {RequestId} completed: {StatusCode} after {ElapsedMilliseconds}ms: {Method} {Path}; response length={ContentLength}",
-                id,
-                (int)response.StatusCode,
-                sw.ElapsedMilliseconds,
-                request.Method,
-                path,
-                response.Content?.Headers.ContentLength);
+            LogCompleted(logger, id, (int)response.StatusCode, sw.ElapsedMilliseconds,
+                request.Method, path, response.Content?.Headers.ContentLength, null);
 
             return response;
         }
@@ -439,7 +514,7 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
         if (HasAuthorityPrefix(requestTarget) ||
             HasUriScheme(requestTarget) ||
             !Uri.TryCreate(requestTarget, UriKind.Relative, out var relativeTarget) ||
-            requestTarget.Contains('#'))
+            requestTarget.Contains('#', StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 "The effective HTTP request target must contain only a local path and query.");

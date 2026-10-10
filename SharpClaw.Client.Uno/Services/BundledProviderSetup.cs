@@ -20,7 +20,8 @@ internal static class BundledProviderSetup
     {
         if (!backend.OwnsCurrentTarget || backend.SkipLaunch)
             throw new InvalidOperationException("Only the running, frontend-owned bundled Runtime can be configured here.");
-        ArgumentException.ThrowIfNullOrWhiteSpace(provider.Key);
+        if (string.IsNullOrWhiteSpace(provider.Key))
+            throw new ArgumentException("A provider key is required.", nameof(provider));
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
         if (!string.IsNullOrWhiteSpace(endpoint) &&
             (!Uri.TryCreate(endpoint.Trim(), UriKind.Absolute, out var uri) ||

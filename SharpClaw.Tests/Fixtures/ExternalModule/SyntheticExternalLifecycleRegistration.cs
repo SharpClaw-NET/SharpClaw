@@ -29,6 +29,8 @@ public sealed class SyntheticExternalLifecycleRegistration : ISharpClawModule
             new ToolDescriptor(InlineTool, "External lifecycle inline tool.", ToolSchemas.EmptyObject));
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+        Justification = "The module registration supplies this type to Microsoft DI, which activates its constructor through reflection.")]
     private sealed class SyntheticExternalToolHandler : IToolHandler
     {
         public ValueTask<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct)
@@ -42,6 +44,8 @@ public sealed class SyntheticExternalLifecycleRegistration : ISharpClawModule
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812",
+        Justification = "The module registration supplies this type to Microsoft DI, which activates its constructor through reflection.")]
     private sealed class SyntheticExternalProviderPlugin : IProviderPlugin
     {
         public string ProviderKey => SyntheticExternalLifecycleRegistration.ProviderKey;

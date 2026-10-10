@@ -27,7 +27,7 @@ internal sealed class RuntimeModelRegistrar(IServiceScopeFactory scopeFactory) :
             Name = displayName,
             ProviderKey = providerKey,
         };
-        db.Providers.Add(provider);
+        await db.Providers.AddAsync(provider, ct).ConfigureAwait(false);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return provider.Id;
     }
@@ -52,7 +52,7 @@ internal sealed class RuntimeModelRegistrar(IServiceScopeFactory scopeFactory) :
             ProviderId = providerId,
             CapabilityTagsRaw = capabilityTags.Count == 0 ? null : string.Join(',', capabilityTags),
         };
-        db.Models.Add(model);
+        await db.Models.AddAsync(model, ct).ConfigureAwait(false);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return model.Id;
     }

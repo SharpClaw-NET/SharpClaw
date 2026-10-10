@@ -6,6 +6,10 @@ using SharpClaw.Services;
 
 namespace SharpClaw.Presentation;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1010",
+    Justification = "This Uno view inherits nongeneric enumeration from the framework for XAML children; it is not a public collection API and adding generic enumeration would change framework semantics.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
+    Justification = "Uno owns reusable page instances. Per-visit cancellation sources are retired and disposed by OnUnloaded; the reusable send gate never allocates AvailableWaitHandle and releases every acquisition in finally.")]
 public sealed partial class MainPage : Page
 {
     private static readonly FontFamily MonoFont = TerminalUI.Mono;
@@ -30,65 +34,56 @@ public sealed partial class MainPage : Page
         Unloaded += OnUnloaded;
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    private void OnLoaded(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
-        if (App.Services is null)
-            return;
+        if (App.Services is null) return;
+        SetChatAvailability(false);
+        var previous = _pageLifetime;
+        var lifetime = new CancellationTokenSource();
+        _pageLifetime = lifetime;
+        var token = lifetime.Token;
+        if (previous is not null)
+        {
+            try { await previous.CancelAsync().ConfigureAwait(true); }
+            finally { previous.Dispose(); }
+        }
+        token.ThrowIfCancellationRequested();
+        if (_streamCts is { IsCancellationRequested: false } stream) await stream.CancelAsync().ConfigureAwait(true);
+        await CommitUiStateAsync(_ =>
+        {
+            ChatTitleBlock.Text = "> stateless chat (debug)";
+            MessagesPanel.Children.Clear();
+            _chatBubblePoolUsed = 0;
+            _isSending = false;
+            _streamCts = null;
+            SetChatAvailability(false);
+            CancelButton.Visibility = Visibility.Collapsed;
+            return ValueTask.CompletedTask;
+        }, token).ConfigureAwait(true);
+        UpdateCursor();
+        await RefreshChatAvailabilityAsync(token).ConfigureAwait(true);
+    });
 
-        _pageLifetime?.Cancel();
-        _pageLifetime?.Dispose();
-        _pageLifetime = new CancellationTokenSource();
-        var token = _pageLifetime.Token;
+    private void OnUnloaded(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
+    {
+        if (_pageLifetime is not { } lifetime) return;
+        var stream = _streamCts;
+        // Retire this visit before suspension; a new visit owns a different lifetime.
+        _pageLifetime = null;
         try
         {
-            await CommitUiStateAsync(_ =>
-            {
-                ChatTitleBlock.Text = "> stateless chat (debug)";
-                MessagesPanel.Children.Clear();
-                _chatBubblePoolUsed = 0;
-                _isSending = false;
-                _streamCts?.Cancel();
-                _streamCts = null;
-                SetChatAvailability(false);
-                CancelButton.Visibility = Visibility.Collapsed;
-                return ValueTask.CompletedTask;
-            }, token).ConfigureAwait(true);
-            UpdateCursor();
-            await RefreshChatAvailabilityAsync(token).ConfigureAwait(true);
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-            // A previous page visit cannot enable this page after navigation.
-        }
-        catch (Exception)
-        {
-            // Readiness and state-action failures never escape a UI event handler.
-            // The page starts fail-closed and the Settings link remains available.
-        }
-    }
-
-    private async void OnUnloaded(object sender, RoutedEventArgs e)
-    {
-        _pageLifetime?.Cancel();
-        try
-        {
+            await lifetime.CancelAsync().ConfigureAwait(true);
             var actions = App.Services?.GetService<ClientActionDispatcher>();
             if (actions is not null)
             {
-                await actions.RunCommandAsync(
-                    "client.chat.unload",
-                    _ =>
-                    {
-                        _streamCts?.Cancel();
-                        return ValueTask.CompletedTask;
-                    }).ConfigureAwait(true);
+                await actions.RunCommandAsync("client.chat.unload", async _ =>
+                {
+                    if (stream is { IsCancellationRequested: false }) await stream.CancelAsync().ConfigureAwait(true);
+                }, CancellationToken.None).ConfigureAwait(true);
             }
         }
-        catch
-        {
-            // The active stream owns its cancellation path while the page leaves the visual tree.
-        }
-    }
+        finally { lifetime.Dispose(); }
+    });
 
     private void SetChatAvailability(bool available)
     {
@@ -111,13 +106,11 @@ public sealed partial class MainPage : Page
         return available;
     }
 
-    private async void OnCheckProviderClick(object sender, RoutedEventArgs e)
+    private void OnCheckProviderClick(object sender, RoutedEventArgs e) => ClientUiEvent.Observe(async () =>
     {
         if (_isSending || _pageLifetime is not { IsCancellationRequested: false } lifetime) return;
-        try { await RefreshChatAvailabilityAsync(lifetime.Token).ConfigureAwait(true); }
-        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-        catch (Exception) { /* Keep the last fail-closed state if a client action is denied. */ }
-    }
+        await RefreshChatAvailabilityAsync(lifetime.Token).ConfigureAwait(true);
+    });
 
     private void OnMessageTextChanged(object sender, TextChangedEventArgs e)
         => UpdateCursor();
@@ -187,7 +180,7 @@ public sealed partial class MainPage : Page
         MessagesScroller.ChangeView(null, MessagesScroller.ScrollableHeight, null);
     }
 
-    private async Task CommitUiStateAsync(
+    private static async Task CommitUiStateAsync(
         Func<CancellationToken, ValueTask> mutation,
         CancellationToken cancellationToken = default)
     {

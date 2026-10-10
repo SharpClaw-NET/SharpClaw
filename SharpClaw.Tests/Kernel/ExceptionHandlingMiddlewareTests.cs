@@ -20,7 +20,7 @@ internal sealed class ExceptionHandlingMiddlewareTests
         var context = new DefaultHttpContext();
         context.Response.Body = body;
         var middleware = new ExceptionHandlingMiddleware(
-            _ => throw new Exception("provider secret and storage detail"),
+            _ => throw new IOException("provider secret and storage detail"),
             NullLogger<ExceptionHandlingMiddleware>.Instance);
 
         await middleware.InvokeAsync(context).ConfigureAwait(false);
@@ -52,7 +52,7 @@ internal sealed class ExceptionHandlingMiddlewareTests
         var body = new MemoryStream();
         await using var bodyAsyncDisposal_ = body.ConfigureAwait(false);
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync().ConfigureAwait(false);
         var context = new DefaultHttpContext();
         context.RequestAborted = cancellation.Token;
         context.Response.Body = body;
@@ -72,7 +72,7 @@ internal sealed class ExceptionHandlingMiddlewareTests
         var context = new DefaultHttpContext();
         context.Features.Set<IHttpResponseFeature>(new StartedResponseFeature());
         var middleware = new ExceptionHandlingMiddleware(
-            _ => throw new Exception("partial response failure"),
+            _ => throw new IOException("partial response failure"),
             NullLogger<ExceptionHandlingMiddleware>.Instance);
 
         var exception = Assert.ThrowsAsync<Exception>(() => middleware.InvokeAsync(context));
@@ -84,7 +84,8 @@ internal sealed class ExceptionHandlingMiddlewareTests
     private static async Task<string> ReadBodyAsync(MemoryStream body)
     {
         body.Position = 0;
-        return await new StreamReader(body, Encoding.UTF8, leaveOpen: true).ReadToEndAsync().ConfigureAwait(false);
+        using var reader = new StreamReader(body, Encoding.UTF8, leaveOpen: true);
+        return await reader.ReadToEndAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
     }
 
     private static async Task AssertGeneralFailureIsRedactedAsync(Exception exception)
@@ -111,6 +112,8 @@ internal sealed class ExceptionHandlingMiddlewareTests
 
         public string? ReasonPhrase { get; set; }
 
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "HLQ001",
+            Justification = "IHttpResponseFeature requires an IHeaderDictionary property; the test double must implement that exact framework signature.")]
         public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
 
         public Stream Body { get; set; } = Stream.Null;

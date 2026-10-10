@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -30,19 +32,33 @@ public sealed class DurableSegmentStore : IAsyncDisposable
     private const int ArtifactReferenceEntryBytes = sizeof(long) + 16 + 32;
     private readonly DurableStorageOptions _options;
     private readonly DurableStreamPathEncoder _paths;
+    private readonly Func<string, FileStream> _createSegmentStream;
     private readonly ConcurrentDictionary<string, StreamState> _states = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _verifiedSegments = new(StringComparer.Ordinal);
     private readonly FileStream? _writerLease;
     private string? _degradedReason;
     private DateTimeOffset? _lastSuccessfulFlush;
     private int _disposeState;
+    private readonly Lock _operationGate = new();
+    private int _activeOperations;
+    private TaskCompletionSource? _operationsDrained;
+    private Task? _disposalTask;
 
     public DurableSegmentStore(DurableStorageOptions options)
+        : this(options, CreateSegmentStream)
+    {
+    }
+
+    internal DurableSegmentStore(
+        DurableStorageOptions options,
+        Func<string, FileStream> createSegmentStream)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(createSegmentStream);
         ValidateOptions(options);
         _options = options;
         _paths = new DurableStreamPathEncoder(options.RootDirectory);
+        _createSegmentStream = createSegmentStream;
 
         Directory.CreateDirectory(options.RootDirectory);
         if (options.AcquireWriterLease)
@@ -71,7 +87,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         DurableWriteMode writeMode = DurableWriteMode.Durable,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         ArgumentNullException.ThrowIfNull(record);
         ValidateRecord(record);
 
@@ -79,82 +95,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             .ConfigureAwait(false);
         try
         {
-            await EnsureInitializedAsync(state, cancellationToken).ConfigureAwait(false);
-            if (record.Idempotent)
-            {
-                await EnsureIdempotencyReadyAsync(state, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            if (record.Idempotent
-                && state.IdempotentRecords.TryGetValue(
-                    record.RecordId,
-                    out var existingSequence))
-            {
-                return new DurableAppendReceipt(
-                    existingSequence,
-                    state.RecordCount,
-                    record.Timestamp);
-            }
-            var sequence = state.NextSequence;
-            var active = await EnsureActiveSegmentAsync(
-                state,
-                sequence,
-                cancellationToken).ConfigureAwait(false);
-            var frame = BuildFrame(active.SegmentId, sequence, record);
-
-            if (ShouldRotate(active, frame.Length + sizeof(int)))
-            {
-                await SealActiveAsync(state, cancellationToken).ConfigureAwait(false);
-                active = await EnsureActiveSegmentAsync(
-                    state,
-                    sequence,
-                    cancellationToken).ConfigureAwait(false);
-                frame = BuildFrame(active.SegmentId, sequence, record);
-            }
-
-            if (record.Artifact is { } artifact)
-            {
-                await AppendArtifactReferenceAsync(
-                        state,
-                        sequence,
-                        artifact.Id,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            await WriteInt32Async(active.Stream, frame.Length, cancellationToken)
-                .ConfigureAwait(false);
-            await active.Stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
-            active.Count++;
-            active.LastSequence = sequence;
-            if (state.FirstAvailableSequence >= state.NextSequence)
-                state.FirstAvailableSequence = sequence;
-            state.NextSequence = checked(sequence + 1);
-            state.RecordCount++;
-            state.LastTimestamp = record.Timestamp;
-            state.EncodedBytes += sizeof(int) + frame.Length;
-
-            if (writeMode == DurableWriteMode.Durable)
-                FlushToDisk(active.Stream);
-
-            if (writeMode == DurableWriteMode.Durable)
-                _lastSuccessfulFlush = DateTimeOffset.UtcNow;
-
-            if (record.Idempotent)
-            {
-                state.IdempotentRecords.Add(record.RecordId, sequence);
-                await AppendIdempotencyEntryAsync(
-                        state,
-                        sequence,
-                        record.RecordId,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            return new DurableAppendReceipt(
-                sequence,
-                state.RecordCount,
-                record.Timestamp);
+            return await AppendRecordAsync(state, record, writeMode, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -167,12 +108,122 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         }
     }
 
+    private async Task<DurableAppendReceipt> AppendRecordAsync(
+        StreamState state,
+        DurableRecordWrite record,
+        DurableWriteMode writeMode,
+        CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(state, cancellationToken).ConfigureAwait(false);
+        if (record.Idempotent)
+        {
+            await EnsureIdempotencyReadyAsync(state, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        if (record.Idempotent
+            && state.IdempotentRecords.TryGetValue(
+                record.RecordId,
+                out var existingSequence))
+        {
+            return new DurableAppendReceipt(
+                existingSequence,
+                state.RecordCount,
+                record.Timestamp);
+        }
+        var sequence = state.NextSequence;
+        var (active, frame) = await PrepareAppendFrameAsync(
+            state, sequence, record, cancellationToken).ConfigureAwait(false);
+
+        await AppendFrameAsync(state, active, sequence, record, frame,
+            writeMode, cancellationToken).ConfigureAwait(false);
+
+        if (record.Idempotent)
+        {
+            state.IdempotentRecords.Add(record.RecordId, sequence);
+            await AppendIdempotencyEntryAsync(
+                    state,
+                    sequence,
+                    record.RecordId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return new DurableAppendReceipt(
+            sequence,
+            state.RecordCount,
+            record.Timestamp);
+    }
+
+    private async Task<(ActiveSegment Segment, byte[] Frame)> PrepareAppendFrameAsync(
+        StreamState state,
+        long sequence,
+        DurableRecordWrite record,
+        CancellationToken cancellationToken)
+    {
+        var active = await EnsureActiveSegmentAsync(
+            state,
+            sequence,
+            cancellationToken).ConfigureAwait(false);
+        var frame = BuildFrame(active.SegmentId, sequence, record);
+
+        if (ShouldRotate(active, frame.Length + sizeof(int)))
+        {
+            await SealActiveAsync(state, cancellationToken).ConfigureAwait(false);
+            active = await EnsureActiveSegmentAsync(
+                state,
+                sequence,
+                cancellationToken).ConfigureAwait(false);
+            frame = BuildFrame(active.SegmentId, sequence, record);
+        }
+
+        return (active, frame);
+    }
+
+    private async Task AppendFrameAsync(
+        StreamState state,
+        ActiveSegment active,
+        long sequence,
+        DurableRecordWrite record,
+        byte[] frame,
+        DurableWriteMode writeMode,
+        CancellationToken cancellationToken)
+    {
+        if (record.Artifact is { } artifact)
+        {
+            await AppendArtifactReferenceAsync(
+                    state,
+                    sequence,
+                    artifact.Id,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        await WriteInt32Async(active.Stream, frame.Length, cancellationToken)
+            .ConfigureAwait(false);
+        await active.Stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
+        active.Count++;
+        active.LastSequence = sequence;
+        if (state.FirstAvailableSequence >= state.NextSequence)
+            state.FirstAvailableSequence = sequence;
+        state.NextSequence = checked(sequence + 1);
+        state.RecordCount++;
+        state.LastTimestamp = record.Timestamp;
+        state.EncodedBytes += sizeof(int) + frame.Length;
+
+        if (writeMode == DurableWriteMode.Durable)
+            FlushToDisk(active.Stream);
+
+        if (writeMode == DurableWriteMode.Durable)
+            _lastSuccessfulFlush = DateTimeOffset.UtcNow;
+
+    }
+
     public async ValueTask<DurableAppendReceipt?> FindIdempotentAppendAsync(
         DurableStreamKey key,
         Guid recordId,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         if (recordId == Guid.Empty)
             throw new ArgumentException("Record ID is required.", nameof(recordId));
         var state = await AcquireStateAsync(key, cancellationToken)
@@ -201,11 +252,10 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         DurableReadOptions options,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         ArgumentNullException.ThrowIfNull(options);
         ValidateReadOptions(options);
-        if (nextSequence < 1)
-            throw new ArgumentOutOfRangeException(nameof(nextSequence));
+        ArgumentOutOfRangeException.ThrowIfLessThan(nextSequence, 1);
 
         var state = await AcquireStateAsync(key, cancellationToken)
             .ConfigureAwait(false);
@@ -226,119 +276,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                     state.FirstAvailableSequence,
                     state.ExpiredRecordCount);
 
-            var records = new List<DurableRecord>(options.Take);
-            var returnedBytes = 0;
-            long scannedBytes = 0;
-            long? continuation = null;
-
-            foreach (var segment in EnumerateSegments(state))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (segment.LastSequence is { } segmentLast
-                    && segmentLast < nextSequence)
-                {
-                    continue;
-                }
-
-                if (segment.IsSealed)
-                    await VerifySealedSegmentAsync(segment.Path, cancellationToken)
-                        .ConfigureAwait(false);
-
-                var stream = new FileStream(
-                  segment.Path,
-                  FileMode.Open,
-                  FileAccess.Read,
-                  FileShare.ReadWrite,
-                  64 * 1024,
-                  FileOptions.Asynchronous | FileOptions.SequentialScan);
-                await using var streamAsyncDisposal = stream.ConfigureAwait(false);
-                var header = await ReadHeaderAsync(stream, cancellationToken)
-                    .ConfigureAwait(false);
-
-                while (stream.Position < stream.Length)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var frameLength = await ReadInt32Async(stream, cancellationToken)
-                        .ConfigureAwait(false);
-                    if (frameLength == FooterMarker)
-                        break;
-                    ValidateFrameLength(frameLength);
-                    var frame = new byte[frameLength];
-                    await ReadExactlyAsync(stream, frame, cancellationToken)
-                        .ConfigureAwait(false);
-                    scannedBytes += sizeof(int) + frameLength;
-
-                    var record = DecodeFrame(header.SegmentId, frame);
-                    if (record.Sequence < nextSequence)
-                        continue;
-                    if (record.Sequence > snapshot)
-                        return BuildPage(
-                            state,
-                            records,
-                            returnedBytes,
-                            null,
-                            false,
-                            snapshot);
-
-                    continuation = record.Sequence + 1;
-                    if (Matches(record, options))
-                    {
-                        var encodedBytes = JsonSerializer.SerializeToUtf8Bytes(record).Length;
-                        if (returnedBytes + encodedBytes > options.MaxBytes)
-                        {
-                            if (records.Count == 0)
-                            {
-                                throw new InvalidOperationException(
-                                    "The next record exceeds the requested page byte limit.");
-                            }
-
-                            return BuildPage(
-                                state,
-                                records,
-                                returnedBytes,
-                                record.Sequence,
-                                true,
-                                snapshot);
-                        }
-
-                        records.Add(record);
-                        returnedBytes += encodedBytes;
-                        if (records.Count == options.Take)
-                        {
-                            return BuildPage(
-                                state,
-                                records,
-                                returnedBytes,
-                                record.Sequence + 1,
-                                record.Sequence < snapshot,
-                                snapshot);
-                        }
-                    }
-
-                    // A frame that crosses the scan budget is still evaluated.
-                    // Advancing before evaluating it would permanently skip a
-                    // matching record when the caller follows the continuation.
-                    if (scannedBytes >= options.MaxScanBytes)
-                    {
-                        return BuildPage(
-                            state,
-                            records,
-                            returnedBytes,
-                            continuation,
-                            continuation <= snapshot,
-                            snapshot);
-                    }
-                }
-            }
-
-            var hasMore = continuation is { } next && next <= snapshot;
-            return BuildPage(
-                state,
-                records,
-                returnedBytes,
-                hasMore ? continuation : null,
-                hasMore,
-                snapshot);
+            return await ReadPageAsync(state, nextSequence, snapshot, options, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -351,11 +289,160 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         }
     }
 
+    private async Task<DurableRecordPage> ReadPageAsync(
+        StreamState state,
+        long nextSequence,
+        long snapshot,
+        DurableReadOptions options,
+        CancellationToken cancellationToken)
+    {
+        var progress = new ReadPageProgress(options.Take);
+        foreach (var segment in EnumerateSegments(state))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (segment.LastSequence is { } segmentLast
+                && segmentLast < nextSequence)
+            {
+                continue;
+            }
+
+            if (segment.IsSealed)
+                await VerifySealedSegmentAsync(segment.Path, cancellationToken)
+                    .ConfigureAwait(false);
+
+            var stream = new FileStream(
+              segment.Path,
+              FileMode.Open,
+              FileAccess.Read,
+              FileShare.ReadWrite,
+              64 * 1024,
+              FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await using var streamAsyncDisposal = stream.ConfigureAwait(false);
+            var header = await ReadHeaderAsync(stream, cancellationToken)
+                .ConfigureAwait(false);
+            var page = await ReadSegmentPageAsync(stream, header, state,
+                nextSequence, snapshot, options, progress, cancellationToken).ConfigureAwait(false);
+            if (page is not null)
+                return page;
+        }
+        var hasMore = progress.Continuation is { } next && next <= snapshot;
+        return BuildPage(state, progress.Records, progress.ReturnedBytes,
+            hasMore ? progress.Continuation : null, hasMore, snapshot);
+    }
+
+    private async Task<DurableRecordPage?> ReadSegmentPageAsync(
+        FileStream stream,
+        SegmentHeader header,
+        StreamState state,
+        long nextSequence,
+        long snapshot,
+        DurableReadOptions options,
+        ReadPageProgress progress,
+        CancellationToken cancellationToken)
+    {
+        while (stream.Position < stream.Length)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var frame = await ReadPageFrameAsync(stream, cancellationToken).ConfigureAwait(false);
+            if (frame is null)
+                break;
+            progress.ScannedBytes += sizeof(int) + frame.Length;
+
+            var record = DecodeFrame(header.SegmentId, frame);
+            if (record.Sequence < nextSequence)
+                continue;
+            if (record.Sequence > snapshot)
+                return BuildPage(
+                    state,
+                    progress.Records,
+                    progress.ReturnedBytes,
+                    null,
+                    false,
+                    snapshot);
+
+            progress.Continuation = record.Sequence + 1;
+            var completedPage = EvaluatePageRecord(state, record, options, snapshot, progress);
+            if (completedPage is not null)
+                return completedPage;
+
+            // A frame that crosses the scan budget is still evaluated.
+            // Advancing before evaluating it would permanently skip a
+            // matching record when the caller follows the continuation.
+            if (progress.ScannedBytes >= options.MaxScanBytes)
+            {
+                return BuildPage(
+                    state,
+                    progress.Records,
+                    progress.ReturnedBytes,
+                    progress.Continuation,
+                    progress.Continuation <= snapshot,
+                    snapshot);
+            }
+        }
+        return null;
+    }
+
+    private static DurableRecordPage? EvaluatePageRecord(
+        StreamState state,
+        DurableRecord record,
+        DurableReadOptions options,
+        long snapshot,
+        ReadPageProgress progress)
+    {
+        if (Matches(record, options))
+        {
+            var encodedBytes = JsonSerializer.SerializeToUtf8Bytes(record).Length;
+            if (progress.ReturnedBytes + encodedBytes > options.MaxBytes)
+            {
+                if (progress.Records.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        "The next record exceeds the requested page byte limit.");
+                }
+
+                return BuildPage(
+                    state,
+                    progress.Records,
+                    progress.ReturnedBytes,
+                    record.Sequence,
+                    true,
+                    snapshot);
+            }
+
+            progress.Records.Add(record);
+            progress.ReturnedBytes += encodedBytes;
+            if (progress.Records.Count == options.Take)
+            {
+                return BuildPage(
+                    state,
+                    progress.Records,
+                    progress.ReturnedBytes,
+                    record.Sequence + 1,
+                    record.Sequence < snapshot,
+                    snapshot);
+            }
+        }
+        return null;
+    }
+
+    private async Task<byte[]?> ReadPageFrameAsync(FileStream stream, CancellationToken cancellationToken)
+    {
+        var frameLength = await ReadInt32Async(stream, cancellationToken)
+            .ConfigureAwait(false);
+        if (frameLength == FooterMarker)
+            return null;
+        ValidateFrameLength(frameLength);
+        var frame = new byte[frameLength];
+        await ReadExactlyAsync(stream, frame, cancellationToken)
+            .ConfigureAwait(false);
+        return frame;
+    }
+
     public async ValueTask<DurableStreamSummary> GetSummaryAsync(
         DurableStreamKey key,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         var state = await AcquireStateAsync(key, cancellationToken)
             .ConfigureAwait(false);
         try
@@ -379,7 +466,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         DurableOperationalStreamEnumerationOptions options,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         ArgumentNullException.ThrowIfNull(options);
         ValidateEnumerationOptions(options);
 
@@ -391,102 +478,17 @@ public sealed class DurableSegmentStore : IAsyncDisposable
 
         try
         {
-            foreach (var kind in new[]
-                     {
-                         DurableStreamKind.ProcessLog,
-                         DurableStreamKind.RegistrationLog,
-                     })
+            foreach (var (kind, streamDirectory) in EnumerateCatalogDirectories(budget))
             {
-                var kindDirectory = Path.Combine(
-                    _options.RootDirectory,
-                    "streams",
-                    kind.ToString().ToLowerInvariant());
-                if (!Directory.Exists(kindDirectory))
-                    continue;
-
-                foreach (var prefixDirectory in Directory.EnumerateDirectories(kindDirectory))
+                if (streams.Count + identityGaps.Count >= options.MaxEntries)
                 {
-                    budget.ThrowIfExpired();
-                    if (IsReparsePoint(prefixDirectory))
-                        continue;
-
-                    foreach (var streamDirectory in Directory.EnumerateDirectories(prefixDirectory))
-                    {
-                        budget.ThrowIfExpired();
-                        if (IsReparsePoint(streamDirectory))
-                            continue;
-
-                        if (streams.Count + identityGaps.Count >= options.MaxEntries)
-                        {
-                            hasMore = true;
-                            return new DurableOperationalStreamCatalog(
-                                streams,
-                                identityGaps,
-                                hasMore,
-                                scannedDirectories,
-                                budget.ScannedBytes);
-                        }
-
-                        scannedDirectories++;
-                        var hash = Path.GetFileName(streamDirectory);
-                        try
-                        {
-                            var identity = await ReadCatalogIdentityAsync(
-                                    streamDirectory,
-                                    kind,
-                                    hash,
-                                    budget,
-                                    budget.Token)
-                                .ConfigureAwait(false);
-                            if (identity.Gap is not null)
-                            {
-                                identityGaps.Add(identity.Gap);
-                                continue;
-                            }
-
-                            if (identity.Value is null)
-                                continue;
-
-                            var scan = await ReadCatalogStreamAsync(
-                                    streamDirectory,
-                                    budget,
-                                    budget.Token)
-                                .ConfigureAwait(false);
-                            streams.Add(new DurableOperationalStreamSummary(
-                                identity.Value.Stream,
-                                identity.Value.AppName,
-                                identity.Value.SourceId,
-                                identity.Value.BootId,
-                                scan.HasActiveSegment,
-                                scan.HasSealedSegments,
-                                scan.RecordCount,
-                                scan.EncodedBytes,
-                                scan.FirstSequence,
-                                scan.LastSequence,
-                                scan.FirstAvailableSequence,
-                                scan.ExpiredRecordCount,
-                                scan.LastTimestamp));
-                        }
-                        catch (Exception ex) when (
-                            ex is IOException
-                            or UnauthorizedAccessException
-                            or InvalidDataException
-                            or JsonException
-                            or OverflowException
-                            or ArgumentOutOfRangeException)
-                        {
-                            identityGaps.Add(new DurableOperationalStreamIdentityGap(
-                                kind,
-                                hash,
-                                ex is InvalidDataException
-                                    or JsonException
-                                    or OverflowException
-                                    or ArgumentOutOfRangeException
-                                    ? "InvalidSegmentMetadata"
-                                    : "UnreadableStreamMetadata"));
-                        }
-                    }
+                    hasMore = true;
+                    return new DurableOperationalStreamCatalog(streams, identityGaps,
+                        hasMore, scannedDirectories, budget.ScannedBytes);
                 }
+                scannedDirectories++;
+                await AddCatalogStreamAsync(kind, streamDirectory, streams, identityGaps,
+                    budget, budget.Token).ConfigureAwait(false);
             }
         }
         catch (CatalogBudgetExceededException)
@@ -520,11 +522,108 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             budget.ScannedBytes);
     }
 
+    private IEnumerable<(DurableStreamKind Kind, string Directory)> EnumerateCatalogDirectories(EnumerationBudget budget)
+    {
+        foreach (var kind in new[] { DurableStreamKind.ProcessLog, DurableStreamKind.RegistrationLog })
+        {
+            var kindDirectory = Path.Combine(_options.RootDirectory, "streams",
+#pragma warning disable CA1308 // Persisted durable kind directories use lowercase names; retain lookup identity.
+                kind.ToString().ToLowerInvariant());
+#pragma warning restore CA1308
+            if (!Directory.Exists(kindDirectory))
+                continue;
+            foreach (var prefixDirectory in Directory.EnumerateDirectories(kindDirectory))
+            {
+                budget.ThrowIfExpired();
+                if (IsReparsePoint(prefixDirectory))
+                    continue;
+                foreach (var streamDirectory in Directory.EnumerateDirectories(prefixDirectory))
+                {
+                    budget.ThrowIfExpired();
+                    if (!IsReparsePoint(streamDirectory))
+                        yield return (kind, streamDirectory);
+                }
+            }
+        }
+    }
+
+    private async Task AddCatalogStreamAsync(
+        DurableStreamKind kind,
+        string streamDirectory,
+        List<DurableOperationalStreamSummary> streams,
+        List<DurableOperationalStreamIdentityGap> identityGaps,
+        EnumerationBudget budget,
+        CancellationToken cancellationToken)
+    {
+        var hash = Path.GetFileName(streamDirectory);
+        try
+        {
+            var identity = await ReadCatalogIdentityAsync(
+                    streamDirectory,
+                    kind,
+                    hash,
+                    budget,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (identity.Gap is not null)
+            {
+                identityGaps.Add(identity.Gap);
+                return;
+            }
+
+            if (identity.Value is null)
+                return;
+
+            var scan = await ReadCatalogStreamAsync(
+                    streamDirectory,
+                    budget,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            streams.Add(CreateCatalogSummary(identity.Value, scan));
+        }
+        catch (Exception ex) when (
+            ex is IOException
+            or UnauthorizedAccessException
+            or InvalidDataException
+            or JsonException
+            or OverflowException
+            or ArgumentOutOfRangeException)
+        {
+            identityGaps.Add(new DurableOperationalStreamIdentityGap(
+                kind,
+                hash,
+                ex is InvalidDataException
+                    or JsonException
+                    or OverflowException
+                    or ArgumentOutOfRangeException
+                    ? "InvalidSegmentMetadata"
+                    : "UnreadableStreamMetadata"));
+        }
+    }
+
+    private static DurableOperationalStreamSummary CreateCatalogSummary(CatalogIdentity identity, CatalogStreamScan scan)
+    {
+        return new DurableOperationalStreamSummary(
+            identity.Stream,
+            identity.AppName,
+            identity.SourceId,
+            identity.BootId,
+            scan.HasActiveSegment,
+            scan.HasSealedSegments,
+            scan.RecordCount,
+            scan.EncodedBytes,
+            scan.FirstSequence,
+            scan.LastSequence,
+            scan.FirstAvailableSequence,
+            scan.ExpiredRecordCount,
+            scan.LastTimestamp);
+    }
+
     public async ValueTask FlushAsync(
         DurableStreamKey key,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         var state = await AcquireStateAsync(key, cancellationToken)
             .ConfigureAwait(false);
         try
@@ -546,7 +645,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         DurableStreamKey key,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         var state = await AcquireStateAsync(key, cancellationToken)
             .ConfigureAwait(false);
         try
@@ -564,7 +663,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         DurableRetentionOptions options,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         ArgumentNullException.ThrowIfNull(options);
         ValidateRetentionOptions(options);
 
@@ -583,6 +682,38 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         await SealExpiredOpenSegmentsAsync(streamsRoot, cancellationToken)
             .ConfigureAwait(false);
 
+        var selected = SelectRetentionCandidates(streamsRoot, options);
+
+        var deleted = 0;
+        long reclaimed = 0;
+        foreach (var group in selected.GroupBy(
+                     candidate => candidate.DirectoryPath,
+                     PathComparer))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await DeleteRetainedPrefixAsync(
+                    group.Key,
+                    group.OrderBy(candidate => candidate.FirstSequence).ToArray(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            deleted += result.DeletedSegments;
+            reclaimed += result.ReclaimedBytes;
+        }
+
+        var remainingBytes = GetStreamBytes(streamsRoot);
+        var freeBytes = GetAvailableFreeBytes();
+        return new DurableRetentionResult(
+            deleted,
+            reclaimed,
+            remainingBytes,
+            freeBytes,
+            remainingBytes <= options.MaximumEncodedBytes
+                && freeBytes >= options.MinimumFreeBytes,
+            DateTimeOffset.UtcNow);
+    }
+
+    private List<RetentionCandidate> SelectRetentionCandidates(string streamsRoot, DurableRetentionOptions options)
+    {
         var candidates = EnumerateRetentionCandidates(streamsRoot).ToArray();
         var queues = candidates
             .GroupBy(candidate => candidate.DirectoryPath, PathComparer)
@@ -627,32 +758,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             freeBytes = checked(freeBytes + next.EncodedBytes);
         }
 
-        var deleted = 0;
-        long reclaimed = 0;
-        foreach (var group in selected.GroupBy(
-                     candidate => candidate.DirectoryPath,
-                     PathComparer))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var result = await DeleteRetainedPrefixAsync(
-                    group.Key,
-                    group.OrderBy(candidate => candidate.FirstSequence).ToArray(),
-                    cancellationToken)
-                .ConfigureAwait(false);
-            deleted += result.DeletedSegments;
-            reclaimed += result.ReclaimedBytes;
-        }
-
-        remainingBytes = GetStreamBytes(streamsRoot);
-        freeBytes = GetAvailableFreeBytes();
-        return new DurableRetentionResult(
-            deleted,
-            reclaimed,
-            remainingBytes,
-            freeBytes,
-            remainingBytes <= options.MaximumEncodedBytes
-                && freeBytes >= options.MinimumFreeBytes,
-            DateTimeOffset.UtcNow);
+        return selected;
     }
 
     public DurableStorageSnapshot GetSnapshot()
@@ -675,10 +781,11 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             _lastSuccessfulFlush);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "MA0016", Justification = "Preserve the published Task<HashSet<Guid>> return type for source and binary callers.")]
     public async Task<HashSet<Guid>> ReadArtifactReferencesAsync(
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
+        using var operation = BeginOperation();
         var result = new HashSet<Guid>();
         var streamsRoot = Path.Combine(_options.RootDirectory, "streams");
         if (!Directory.Exists(streamsRoot))
@@ -730,7 +837,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         return result;
     }
 
-    private IEnumerable<RetentionCandidate> EnumerateRetentionCandidates(
+    private static IEnumerable<RetentionCandidate> EnumerateRetentionCandidates(
         string streamsRoot)
     {
         foreach (var kindDirectory in Directory.EnumerateDirectories(streamsRoot))
@@ -751,8 +858,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                 var name = Path.GetFileNameWithoutExtension(path);
                 var pieces = name.Split('-');
                 if (pieces.Length < 3
-                    || !long.TryParse(pieces[0], out var first)
-                    || !long.TryParse(pieces[1], out var last))
+                    || !long.TryParse(pieces[0], NumberStyles.Integer, CultureInfo.CurrentCulture, out var first)
+                    || !long.TryParse(pieces[1], NumberStyles.Integer, CultureInfo.CurrentCulture, out var last))
                 {
                     throw new InvalidDataException(
                         $"Invalid sealed segment name '{name}'.");
@@ -765,7 +872,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                     first,
                     last,
                     info.Length,
-                    info.LastWriteTimeUtc);
+                    new DateTimeOffset(info.LastWriteTimeUtc));
             }
         }
     }
@@ -786,29 +893,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         {
             try
             {
-                await EnsureInitializedAsync(state, cancellationToken)
-                    .ConfigureAwait(false);
-                VerifyRetentionPrefix(directoryPath, candidates);
-                var result = await DeleteSegmentFilesAsync(
-                        candidates,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                state.ExpiredRecordCount = checked(
-                    state.ExpiredRecordCount + result.ExpiredRecords);
-                state.EncodedBytes = Math.Max(
-                    0,
-                    state.EncodedBytes - result.ReclaimedBytes);
-                state.FirstAvailableSequence = FindFirstAvailableSequence(state);
-                await PruneArtifactReferencesAsync(
-                        directoryPath,
-                        candidates.Max(candidate => candidate.LastSequence),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                await WriteManifestAsync(state, cancellationToken)
-                    .ConfigureAwait(false);
-                return new RetentionDeleteResult(
-                    result.DeletedSegments,
-                    result.ReclaimedBytes);
+                return await DeleteTrackedPrefixAsync(state, directoryPath,
+                    candidates, cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -816,6 +902,40 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             }
         }
 
+        return await DeleteUntrackedPrefixAsync(directoryPath, candidates, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<RetentionDeleteResult> DeleteTrackedPrefixAsync(
+        StreamState state, string directoryPath, IReadOnlyList<RetentionCandidate> candidates, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(state, cancellationToken)
+            .ConfigureAwait(false);
+        VerifyRetentionPrefix(directoryPath, candidates);
+        var result = await DeleteSegmentFilesAsync(
+                candidates,
+                cancellationToken)
+            .ConfigureAwait(false);
+        state.ExpiredRecordCount = checked(
+            state.ExpiredRecordCount + result.ExpiredRecords);
+        state.EncodedBytes = Math.Max(
+            0,
+            state.EncodedBytes - result.ReclaimedBytes);
+        state.FirstAvailableSequence = FindFirstAvailableSequence(state);
+        await PruneArtifactReferencesAsync(
+                directoryPath,
+                candidates.Max(candidate => candidate.LastSequence),
+                cancellationToken)
+            .ConfigureAwait(false);
+        await WriteManifestAsync(state, cancellationToken)
+            .ConfigureAwait(false);
+        return new RetentionDeleteResult(
+            result.DeletedSegments,
+            result.ReclaimedBytes);
+    }
+
+    private async Task<RetentionDeleteResult> DeleteUntrackedPrefixAsync(
+        string directoryPath, IReadOnlyList<RetentionCandidate> candidates, CancellationToken cancellationToken)
+    {
         if (Directory.EnumerateFiles(directoryPath, "*.open").Any())
             return new RetentionDeleteResult(0, 0);
 
@@ -931,7 +1051,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(authentication, cancellationToken).ConfigureAwait(false);
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-        stream.Flush(flushToDisk: true);
+        FlushToDisk(stream);
     }
 
     private async Task ReadArtifactReferenceEntriesAsync(
@@ -1025,7 +1145,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                             cancellationToken)
                         .ConfigureAwait(false);
                     await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                    stream.Flush(flushToDisk: true);
+                    FlushToDisk(stream);
                 }
             }
             File.Move(temporary, path, overwrite: true);
@@ -1062,21 +1182,27 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         if (options.MaxEntries is < 1
             or > DurableOperationalStreamEnumerationOptions.HardMaximumEntries)
         {
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.MaxEntries));
+#pragma warning restore CA2208, MA0015
         }
 
         if (options.MaxScanBytes <= 0
             || options.MaxScanBytes
                 > DurableOperationalStreamEnumerationOptions.HardMaximumScanBytes)
         {
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.MaxScanBytes));
+#pragma warning restore CA2208, MA0015
         }
 
         if (options.MaxDuration <= TimeSpan.Zero
             || options.MaxDuration
                 > DurableOperationalStreamEnumerationOptions.HardMaximumDuration)
         {
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.MaxDuration));
+#pragma warning restore CA2208, MA0015
         }
     }
 
@@ -1095,31 +1221,106 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposeState, 1) != 0)
-            return;
-
-        foreach (var state in _states.Values)
+        lock (_operationGate)
         {
-            await state.Gate.WaitAsync().ConfigureAwait(false);
-            try
-            {
-                if (state.Initialized)
-                    await SealActiveAsync(state, CancellationToken.None).ConfigureAwait(false);
-                if (state.IdempotencyIndex is not null)
-                    await state.IdempotencyIndex.DisposeAsync().ConfigureAwait(false);
-            }
-            finally
-            {
-                state.Gate.Release();
-                state.Gate.Dispose();
-            }
+            if (_disposalTask is { } disposal)
+                return new ValueTask(disposal);
+            _disposeState = 1;
+            var pendingOperations = _activeOperations == 0
+                ? Task.CompletedTask
+                : (_operationsDrained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+            _disposalTask = DisposeCoreAsync(pendingOperations);
+            return new ValueTask(_disposalTask);
         }
+    }
 
+    private async Task DisposeCoreAsync(Task pendingOperations)
+    {
+#pragma warning disable VSTHRD003 // This context-free receipt joins the store's admitted operations before releasing their resources and writer lease.
+        await pendingOperations.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
+        ExceptionDispatchInfo? failure = null;
+        foreach (var state in _states.Values)
+            failure = await DisposeStreamStateAsync(state, failure).ConfigureAwait(false);
         if (_writerLease is not null)
         {
-            await _writerLease.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await _writerLease.DisposeAsync().ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Release the writer lease even after stream cleanup fails, then rethrow the first captured failure below.
+            catch (Exception exception)
+            {
+                failure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+#pragma warning restore CA1031
+        }
+        failure?.Throw();
+    }
+
+    private async ValueTask<ExceptionDispatchInfo?> DisposeStreamStateAsync(StreamState state, ExceptionDispatchInfo? failure)
+    {
+        await state.Gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            if (state.Initialized)
+                failure = await CaptureDisposalFailureAsync(
+                    () => new ValueTask(SealActiveAsync(state, CancellationToken.None)), failure).ConfigureAwait(false);
+            if (state.Active is { } active)
+            {
+                failure = await CaptureDisposalFailureAsync(active.Stream.DisposeAsync, failure).ConfigureAwait(false);
+                state.Active = null;
+            }
+            if (state.IdempotencyIndex is { } index)
+            {
+                failure = await CaptureDisposalFailureAsync(index.DisposeAsync, failure).ConfigureAwait(false);
+                state.IdempotencyIndex = null;
+            }
+        }
+        finally
+        {
+            state.Gate.Release();
+            state.Gate.Dispose();
+        }
+        return failure;
+    }
+
+    private static async ValueTask<ExceptionDispatchInfo?> CaptureDisposalFailureAsync(
+        Func<ValueTask> operation, ExceptionDispatchInfo? failure)
+    {
+        try
+        {
+            await operation().ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Close every owned stream and the writer lease after a seal/disposal failure; DisposeCoreAsync rethrows the first captured failure.
+        catch (Exception exception)
+        {
+            failure ??= ExceptionDispatchInfo.Capture(exception);
+        }
+#pragma warning restore CA1031
+        return failure;
+    }
+
+    private OperationLease BeginOperation()
+    {
+        lock (_operationGate)
+        {
+            ThrowIfDisposed();
+            var lease = new OperationLease(this);
+            _activeOperations++;
+            return lease;
+        }
+    }
+
+    private void CompleteOperation()
+    {
+        lock (_operationGate)
+        {
+            _activeOperations--;
+            if (_activeOperations == 0)
+                _operationsDrained?.TrySetResult();
         }
     }
 
@@ -1132,27 +1333,13 @@ public sealed class DurableSegmentStore : IAsyncDisposable
     {
         if (hash.Length != 64 || !hash.All(Uri.IsHexDigit))
         {
-            return HasAnySegment(directoryPath)
-                ? new(
-                    null,
-                    new DurableOperationalStreamIdentityGap(
-                        expectedKind,
-                        hash,
-                        "InvalidStreamHash"))
-                : new(null, null);
+            return CatalogIdentityUnavailable(directoryPath, expectedKind, hash, "InvalidStreamHash");
         }
 
         var identityPath = Path.Combine(directoryPath, StreamIdentityFileName);
         if (!File.Exists(identityPath))
         {
-            return HasAnySegment(directoryPath)
-                ? new(
-                    null,
-                    new DurableOperationalStreamIdentityGap(
-                        expectedKind,
-                        hash,
-                        "IdentityUnavailableWithoutBodyScan"))
-                : new(null, null);
+            return CatalogIdentityUnavailable(directoryPath, expectedKind, hash, "IdentityUnavailableWithoutBodyScan");
         }
         if (IsReparsePoint(identityPath))
         {
@@ -1188,6 +1375,17 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             identity = null;
         }
 
+        return ValidateCatalogIdentity(identity, expectedKind, hash);
+    }
+
+    private static CatalogIdentityRead CatalogIdentityUnavailable(
+        string directoryPath, DurableStreamKind expectedKind, string hash, string reason) =>
+        HasAnySegment(directoryPath)
+            ? new(null, new DurableOperationalStreamIdentityGap(expectedKind, hash, reason))
+            : new(null, null);
+
+    private CatalogIdentityRead ValidateCatalogIdentity(StreamIdentity? identity, DurableStreamKind expectedKind, string hash)
+    {
         if (identity is null
             || identity.Version != 1
             || string.IsNullOrWhiteSpace(identity.CanonicalValue)
@@ -1234,77 +1432,91 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                 .ConfigureAwait(false);
         }
 
-        var hasSealedSegments = false;
-        var hasActiveSegment = false;
-        var physicalRecordCount = 0L;
-        var encodedBytes = 0L;
-        var firstSequence = long.MaxValue;
-        long? lastSequence = null;
+        var progress = new CatalogScanProgress();
+        await ReadCatalogSealedSegmentsAsync(directoryPath, budget, progress, cancellationToken).ConfigureAwait(false);
+        await ReadCatalogActiveSegmentAsync(directoryPath, budget, progress, cancellationToken).ConfigureAwait(false);
+        return BuildCatalogScan(manifest, progress);
+    }
 
+    private static async Task ReadCatalogSealedSegmentsAsync(
+        string directoryPath, EnumerationBudget budget, CatalogScanProgress progress, CancellationToken cancellationToken)
+    {
         foreach (var path in Directory.EnumerateFiles(directoryPath, "*.scseg"))
         {
             budget.ThrowIfExpired();
             if (IsReparsePoint(path))
                 continue;
 
-            var info = new FileInfo(path);
-            if (info.Length < SegmentHeaderBytes + FooterBytes)
-                throw new InvalidDataException("Sealed segment is too short.");
-
-            budget.Consume(SegmentHeaderBytes);
-            SegmentHeader header;
-            {
-                var stream = new FileStream(
-                             path,
-                             FileMode.Open,
-                             FileAccess.Read,
-                             FileShare.ReadWrite,
-                             4096,
-                             FileOptions.Asynchronous | FileOptions.RandomAccess);
-                await using (stream.ConfigureAwait(false))
-                {
-                    header = await ReadHeaderAsync(stream, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-            }
-
-            budget.Consume(FooterBytes);
-            var footer = await ReadSealedFooterAsync(path, cancellationToken)
-                .ConfigureAwait(false);
-            if (footer.RecordCount < 0)
-            {
-                throw new InvalidDataException("Sealed segment metadata is invalid.");
-            }
-
-            long expectedLastSequence;
-            try
-            {
-                expectedLastSequence = footer.RecordCount == 0
-                    ? checked(header.FirstSequence - 1)
-                    : checked(header.FirstSequence + footer.RecordCount - 1);
-            }
-            catch (OverflowException exception)
-            {
-                throw new InvalidDataException(
-                    "Sealed segment metadata is invalid.",
-                    exception);
-            }
-
-            if (footer.LastSequence != expectedLastSequence)
-                throw new InvalidDataException("Sealed segment metadata is invalid.");
-
-            hasSealedSegments = true;
-            physicalRecordCount = checked(physicalRecordCount + footer.RecordCount);
-            encodedBytes = checked(encodedBytes + info.Length);
+            var (length, header, footer) = await ReadCatalogSealedMetadataAsync(
+                path, budget, cancellationToken).ConfigureAwait(false);
+            progress.HasSealedSegments = true;
+            progress.PhysicalRecordCount = checked(progress.PhysicalRecordCount + footer.RecordCount);
+            progress.EncodedBytes = checked(progress.EncodedBytes + length);
             if (footer.RecordCount > 0)
             {
-                firstSequence = Math.Min(firstSequence, header.FirstSequence);
-                lastSequence = lastSequence is null
+                progress.FirstSequence = Math.Min(progress.FirstSequence, header.FirstSequence);
+                progress.LastSequence = progress.LastSequence is null
                     ? footer.LastSequence
-                    : Math.Max(lastSequence.Value, footer.LastSequence);
+                    : Math.Max(progress.LastSequence.Value, footer.LastSequence);
             }
         }
 
+    }
+
+    private static async Task<(long Length, SegmentHeader Header, SealedFooter Footer)> ReadCatalogSealedMetadataAsync(
+        string path, EnumerationBudget budget, CancellationToken cancellationToken)
+    {
+        var info = new FileInfo(path);
+        if (info.Length < SegmentHeaderBytes + FooterBytes)
+            throw new InvalidDataException("Sealed segment is too short.");
+
+        budget.Consume(SegmentHeaderBytes);
+        SegmentHeader header;
+        {
+            var stream = new FileStream(
+                         path,
+                         FileMode.Open,
+                         FileAccess.Read,
+                         FileShare.ReadWrite,
+                         4096,
+                         FileOptions.Asynchronous | FileOptions.RandomAccess);
+            await using (stream.ConfigureAwait(false))
+            {
+                header = await ReadHeaderAsync(stream, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        budget.Consume(FooterBytes);
+        var footer = await ReadSealedFooterAsync(path, cancellationToken)
+            .ConfigureAwait(false);
+        if (footer.RecordCount < 0)
+        {
+            throw new InvalidDataException("Sealed segment metadata is invalid.");
+        }
+
+        long expectedLastSequence;
+        try
+        {
+            expectedLastSequence = footer.RecordCount == 0
+                ? checked(header.FirstSequence - 1)
+                : checked(header.FirstSequence + footer.RecordCount - 1);
+        }
+        catch (OverflowException exception)
+        {
+            throw new InvalidDataException(
+                "Sealed segment metadata is invalid.",
+                exception);
+        }
+
+        if (footer.LastSequence != expectedLastSequence)
+            throw new InvalidDataException("Sealed segment metadata is invalid.");
+        return (info.Length, header, footer);
+    }
+
+    private async Task ReadCatalogActiveSegmentAsync(
+        string directoryPath, EnumerationBudget budget, CatalogScanProgress progress, CancellationToken cancellationToken)
+    {
         var openPaths = Directory.EnumerateFiles(directoryPath, "*.open")
             .Where(path => !IsReparsePoint(path))
             .Take(2)
@@ -1318,7 +1530,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             if (info.Length < SegmentHeaderBytes)
                 throw new InvalidDataException("Active segment is too short.");
 
-            hasActiveSegment = true;
+            progress.HasActiveSegment = true;
             budget.Consume(SegmentHeaderBytes);
             var stream = new FileStream(
               path,
@@ -1330,58 +1542,69 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             await using var streamAsyncDisposal = stream.ConfigureAwait(false);
             var header = await ReadHeaderAsync(stream, cancellationToken)
                 .ConfigureAwait(false);
-            var activeCount = 0L;
-            while (stream.Position < stream.Length)
-            {
-                budget.ThrowIfExpired();
-                if (stream.Length - stream.Position < sizeof(int))
-                    throw new InvalidDataException("Active segment frame header is truncated.");
+            var activeCount = await CountCatalogActiveFramesAsync(stream, budget, cancellationToken).ConfigureAwait(false);
 
-                budget.Consume(sizeof(int));
-                var frameLength = await ReadInt32Async(stream, cancellationToken)
-                    .ConfigureAwait(false);
-                if (frameLength == FooterMarker)
-                    throw new InvalidDataException("Active segment contains a footer.");
-                ValidateFrameLength(frameLength);
-                if (frameLength > stream.Length - stream.Position)
-                    throw new InvalidDataException("Active segment frame is truncated.");
-
-                stream.Position += frameLength;
-                activeCount = checked(activeCount + 1);
-            }
-
-            encodedBytes = checked(encodedBytes + info.Length);
+            progress.EncodedBytes = checked(progress.EncodedBytes + info.Length);
             if (activeCount > 0)
             {
-                firstSequence = Math.Min(firstSequence, header.FirstSequence);
+                progress.FirstSequence = Math.Min(progress.FirstSequence, header.FirstSequence);
                 var activeLast = checked(header.FirstSequence + activeCount - 1);
-                lastSequence = lastSequence is null
+                progress.LastSequence = progress.LastSequence is null
                     ? activeLast
-                    : Math.Max(lastSequence.Value, activeLast);
-                physicalRecordCount = checked(physicalRecordCount + activeCount);
+                    : Math.Max(progress.LastSequence.Value, activeLast);
+                progress.PhysicalRecordCount = checked(progress.PhysicalRecordCount + activeCount);
             }
         }
 
+    }
+
+    private async Task<long> CountCatalogActiveFramesAsync(
+        FileStream stream, EnumerationBudget budget, CancellationToken cancellationToken)
+    {
+        var activeCount = 0L;
+        while (stream.Position < stream.Length)
+        {
+            budget.ThrowIfExpired();
+            if (stream.Length - stream.Position < sizeof(int))
+                throw new InvalidDataException("Active segment frame header is truncated.");
+
+            budget.Consume(sizeof(int));
+            var frameLength = await ReadInt32Async(stream, cancellationToken)
+                .ConfigureAwait(false);
+            if (frameLength == FooterMarker)
+                throw new InvalidDataException("Active segment contains a footer.");
+            ValidateFrameLength(frameLength);
+            if (frameLength > stream.Length - stream.Position)
+                throw new InvalidDataException("Active segment frame is truncated.");
+
+            stream.Position += frameLength;
+            activeCount = checked(activeCount + 1);
+        }
+        return activeCount;
+    }
+
+    private static CatalogStreamScan BuildCatalogScan(StreamManifest? manifest, CatalogScanProgress progress)
+    {
         var expired = manifest?.ExpiredRecordCount ?? 0;
         var firstAvailable = Math.Max(1, checked(expired + 1));
-        if (firstSequence != long.MaxValue)
-            firstAvailable = Math.Max(firstAvailable, firstSequence);
+        if (progress.FirstSequence != long.MaxValue)
+            firstAvailable = Math.Max(firstAvailable, progress.FirstSequence);
 
         var logicalLast = manifest is { NextSequence: > 1 }
             ? manifest.NextSequence - 1
-            : lastSequence ?? 0;
-        if (lastSequence is { } physicalLast)
+            : progress.LastSequence ?? 0;
+        if (progress.LastSequence is { } physicalLast)
             logicalLast = Math.Max(logicalLast, physicalLast);
         var recordCount = Math.Max(
             logicalLast,
-            checked(physicalRecordCount + expired));
+            checked(progress.PhysicalRecordCount + expired));
 
         return new CatalogStreamScan(
-            hasActiveSegment,
-            hasSealedSegments,
+            progress.HasActiveSegment,
+            progress.HasSealedSegments,
             recordCount,
-            encodedBytes,
-            firstSequence == long.MaxValue ? firstAvailable : firstSequence,
+            progress.EncodedBytes,
+            progress.FirstSequence == long.MaxValue ? firstAvailable : progress.FirstSequence,
             logicalLast > 0 ? logicalLast : null,
             firstAvailable,
             expired,
@@ -1395,9 +1618,9 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             .Any(path => !IsReparsePoint(path));
 
     private static bool IsReparsePoint(string path) =>
-        (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+        File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
 
-    private async Task EnsureStreamIdentityAsync(
+    private static async Task EnsureStreamIdentityAsync(
         StreamState state,
         CancellationToken cancellationToken)
     {
@@ -1444,7 +1667,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                 await using (stream.ConfigureAwait(false))
                 {
                     await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
-                    stream.Flush(flushToDisk: true);
+                    FlushToDisk(stream);
                 }
             }
 
@@ -1468,7 +1691,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         {
             var state = _states.GetOrAdd(
                 key.CanonicalValue,
-                _ => new StreamState(key, _paths.GetStreamDirectory(key)));
+                static (_, factoryState) => new StreamState(factoryState.Key, factoryState.Paths.GetStreamDirectory(factoryState.Key)),
+                (Key: key, Paths: _paths));
             await state.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             if (_states.TryGetValue(key.CanonicalValue, out var current)
                 && ReferenceEquals(current, state))
@@ -1504,18 +1728,27 @@ public sealed class DurableSegmentStore : IAsyncDisposable
 
     private void ReleaseState(StreamState state)
     {
-        if (state.Active is null
-            && ((ICollection<KeyValuePair<string, StreamState>>)_states).Remove(
-                new KeyValuePair<string, StreamState>(
-                    state.Key.CanonicalValue,
-                    state)))
+        try
         {
-            state.IdempotencyIndex?.Dispose();
-            state.IdempotencyIndex = null;
-            state.IdempotentRecords.Clear();
+            if (state.Active is null
+                && ((ICollection<KeyValuePair<string, StreamState>>)_states).Remove(
+                    new KeyValuePair<string, StreamState>(state.Key.CanonicalValue, state)))
+            {
+                try
+                {
+                    state.IdempotencyIndex?.Dispose();
+                }
+                finally
+                {
+                    state.IdempotencyIndex = null;
+                    state.IdempotentRecords.Clear();
+                }
+            }
         }
-
-        state.Gate.Release();
+        finally
+        {
+            state.Gate.Release();
+        }
     }
 
     private async Task EnsureInitializedAsync(
@@ -1584,29 +1817,76 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         var path = Path.Combine(
             state.DirectoryPath,
             $"{firstSequence:D20}-{segmentId:N}.open");
-        var stream = new FileStream(
+        var stream = _createSegmentStream(path);
+        var created = DateTimeOffset.UtcNow;
+        try
+        {
+            await WriteHeaderAsync(
+                stream,
+                segmentId,
+                firstSequence,
+                created,
+                cancellationToken).ConfigureAwait(false);
+            var active = new ActiveSegment(
+                path,
+                stream,
+                segmentId,
+                firstSequence,
+                created);
+            state.EncodedBytes += SegmentHeaderBytes;
+            state.Active = active;
+            return active;
+        }
+        catch (Exception headerFailure)
+        {
+            try
+            {
+                await RemoveFailedSegmentAsync(stream, path).ConfigureAwait(false);
+            }
+            catch (Exception cleanupFailure)
+            {
+                throw new AggregateException(headerFailure, cleanupFailure);
+            }
+
+            throw;
+        }
+    }
+
+    private static async Task RemoveFailedSegmentAsync(FileStream stream, string path)
+    {
+        Exception? disposalFailure = null;
+        try
+        {
+            await stream.DisposeAsync().ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Remove the unpublished segment even when handle cleanup reports a fault; rethrow that retained fault after deletion.
+        catch (Exception exception)
+        {
+            disposalFailure = exception;
+        }
+#pragma warning restore CA1031
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception deletionFailure) when (disposalFailure is not null)
+        {
+            throw new AggregateException(disposalFailure, deletionFailure);
+        }
+
+        if (disposalFailure is not null)
+            ExceptionDispatchInfo.Capture(disposalFailure).Throw();
+    }
+
+    private static FileStream CreateSegmentStream(string path) =>
+        new(
             path,
             FileMode.CreateNew,
             FileAccess.ReadWrite,
             FileShare.Read,
             64 * 1024,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var created = DateTimeOffset.UtcNow;
-        await WriteHeaderAsync(
-            stream,
-            segmentId,
-            firstSequence,
-            created,
-            cancellationToken).ConfigureAwait(false);
-        state.EncodedBytes += SegmentHeaderBytes;
-        state.Active = new ActiveSegment(
-            path,
-            stream,
-            segmentId,
-            firstSequence,
-            created);
-        return state.Active;
-    }
 
     private bool ShouldRotate(ActiveSegment active, int nextFrameBytes) =>
         active.Count > 0
@@ -1643,7 +1923,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             return null;
         }
 
-        active.Stream.Flush(flushToDisk: false);
+        await active.Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         var digest = await ComputePrefixDigestAsync(
             active.Path,
             active.Stream.Length,
@@ -1673,6 +1953,30 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        await SealExpiredTrackedSegmentsAsync(now, cancellationToken).ConfigureAwait(false);
+
+        var trackedOpenPaths = _states.Values
+            .Select(state => state.Active?.Path)
+            .Where(path => path is not null)
+            .ToHashSet(PathComparer);
+        foreach (var path in Directory.EnumerateFiles(
+                     streamsRoot,
+                     "*.open",
+                     SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (trackedOpenPaths.Contains(path)
+                || now - new DateTimeOffset(File.GetLastWriteTimeUtc(path)) < _options.SegmentMaxAge)
+            {
+                continue;
+            }
+
+            await SealExpiredRecoveredSegmentAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task SealExpiredTrackedSegmentsAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
         var trackedDirectories = _states.Values
             .Select(state => state.DirectoryPath)
             .Distinct(PathComparer)
@@ -1708,62 +2012,50 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             }
         }
 
-        var trackedOpenPaths = _states.Values
-            .Select(state => state.Active?.Path)
-            .Where(path => path is not null)
-            .ToHashSet(PathComparer);
-        foreach (var path in Directory.EnumerateFiles(
-                     streamsRoot,
-                     "*.open",
-                     SearchOption.AllDirectories))
+    }
+
+    private async Task SealExpiredRecoveredSegmentAsync(string path, CancellationToken cancellationToken)
+    {
+        RecoveredOpenSegment recovered;
+        var retainedLastWriteTime = File.GetLastWriteTimeUtc(path);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (trackedOpenPaths.Contains(path)
-                || now - File.GetLastWriteTimeUtc(path) < _options.SegmentMaxAge)
-            {
-                continue;
-            }
-
-            RecoveredOpenSegment recovered;
-            var retainedLastWriteTime = File.GetLastWriteTimeUtc(path);
-            try
-            {
-                recovered = await RecoverOpenSegmentAsync(path, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (IOException)
-            {
-                continue;
-            }
-
-            var directoryPath = Path.GetDirectoryName(path)!;
-            var sealedPath = await SealSegmentFileAsync(
-                    recovered.Active,
-                    directoryPath,
-                    cancellationToken)
+            recovered = await RecoverOpenSegmentAsync(path, cancellationToken)
                 .ConfigureAwait(false);
-            if (sealedPath is not null)
-                File.SetLastWriteTimeUtc(sealedPath, retainedLastWriteTime);
-            var manifest = await ReadManifestAsync(directoryPath, cancellationToken)
-                .ConfigureAwait(false);
-            var nextSequence = Math.Max(
-                manifest?.NextSequence ?? 1,
-                recovered.Active.LastSequence + 1);
-            var expired = manifest?.ExpiredRecordCount ?? Math.Max(
-                0,
-                recovered.Active.FirstSequence - 1);
-            await WriteManifestAsync(
-                    directoryPath,
-                    new StreamManifest(
-                        1,
-                        nextSequence,
-                        expired,
-                        recovered.LastTimestamp ?? manifest?.LastTimestamp),
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (sealedPath is not null)
-                _verifiedSegments.TryAdd(sealedPath, 0);
         }
+        catch (IOException)
+        {
+            return;
+        }
+
+        await using var recoveredStreamDisposal = recovered.Active.Stream.ConfigureAwait(false);
+        var directoryPath = Path.GetDirectoryName(path)!;
+        var sealedPath = await SealSegmentFileAsync(
+                recovered.Active,
+                directoryPath,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (sealedPath is not null)
+            File.SetLastWriteTimeUtc(sealedPath, retainedLastWriteTime);
+        var manifest = await ReadManifestAsync(directoryPath, cancellationToken)
+            .ConfigureAwait(false);
+        var nextSequence = Math.Max(
+            manifest?.NextSequence ?? 1,
+            recovered.Active.LastSequence + 1);
+        var expired = manifest?.ExpiredRecordCount ?? Math.Max(
+            0,
+            recovered.Active.FirstSequence - 1);
+        await WriteManifestAsync(
+                directoryPath,
+                new StreamManifest(
+                    1,
+                    nextSequence,
+                    expired,
+                    recovered.LastTimestamp ?? manifest?.LastTimestamp),
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (sealedPath is not null)
+            _verifiedSegments.TryAdd(sealedPath, 0);
     }
 
     private byte[] BuildFrame(
@@ -1796,6 +2088,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         var digest = ComputeFrameDigest(associatedData, compressed);
         var nonce = new byte[12];
         var tag = new byte[16];
+        var payload = EncryptFramePayload(compressed, associatedData, nonce, tag);
+
+        return WriteEncodedFrame(sequence, record.RecordId, timestamp, flags,
+            body.Length, nonce, tag, digest, payload);
+    }
+
+    private byte[] EncryptFramePayload(byte[] compressed, byte[] associatedData, byte[] nonce, byte[] tag)
+    {
         byte[] payload;
         if (_options.EncryptionKey is { } key)
         {
@@ -1814,13 +2114,20 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             payload = compressed;
         }
 
+        return payload;
+    }
+
+    private static byte[] WriteEncodedFrame(
+        long sequence, Guid recordId, long timestamp, byte flags, int decodedLength,
+        byte[] nonce, byte[] tag, byte[] digest, byte[] payload)
+    {
         using var stream = new MemoryStream(MaxFrameOverheadBytes + payload.Length);
         using var writer = new BinaryWriter(stream);
         writer.Write(sequence);
-        writer.Write(record.RecordId.ToByteArray());
+        writer.Write(recordId.ToByteArray());
         writer.Write(timestamp);
         writer.Write(flags);
-        writer.Write(body.Length);
+        writer.Write(decodedLength);
         writer.Write(nonce);
         writer.Write(tag);
         writer.Write(digest);
@@ -1880,6 +2187,27 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             flags,
             uncompressedLength);
 
+        var compressed = DecryptFramePayload(flags, payload, nonce, tag, associatedData);
+
+        if (!CryptographicOperations.FixedTimeEquals(
+                ComputeFrameDigest(associatedData, compressed),
+                digest))
+        {
+            throw new InvalidDataException("Durable frame digest mismatch.");
+        }
+
+        var bodyBytes = (flags & 2) != 0
+            ? Decompress(compressed, uncompressedLength)
+            : compressed;
+        if (bodyBytes.Length != uncompressedLength)
+            throw new InvalidDataException("Durable frame decoded length mismatch.");
+        var body = JsonSerializer.Deserialize<RecordBody>(bodyBytes)
+            ?? throw new InvalidDataException("Durable frame body is invalid.");
+        return CreateDecodedFrame(sequence, recordId, timestamp, flags, body);
+    }
+
+    private byte[] DecryptFramePayload(byte flags, byte[] payload, byte[] nonce, byte[] tag, byte[] associatedData)
+    {
         byte[] compressed;
         if ((flags & 1) != 0)
         {
@@ -1900,20 +2228,11 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             compressed = payload;
         }
 
-        if (!CryptographicOperations.FixedTimeEquals(
-                ComputeFrameDigest(associatedData, compressed),
-                digest))
-        {
-            throw new InvalidDataException("Durable frame digest mismatch.");
-        }
+        return compressed;
+    }
 
-        var bodyBytes = (flags & 2) != 0
-            ? Decompress(compressed, uncompressedLength)
-            : compressed;
-        if (bodyBytes.Length != uncompressedLength)
-            throw new InvalidDataException("Durable frame decoded length mismatch.");
-        var body = JsonSerializer.Deserialize<RecordBody>(bodyBytes)
-            ?? throw new InvalidDataException("Durable frame body is invalid.");
+    private static DecodedFrame CreateDecodedFrame(long sequence, Guid recordId, DateTimeOffset timestamp, byte flags, RecordBody body)
+    {
         return new DecodedFrame(
             new DurableRecord(
                 sequence,
@@ -1947,7 +2266,28 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             FileShare.Read,
             64 * 1024,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var header = await ReadHeaderAsync(stream, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var header = await ReadHeaderAsync(stream, cancellationToken).ConfigureAwait(false);
+            return await RecoverOpenRecordsAsync(path, stream, header, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception recoveryFailure)
+        {
+            try
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception cleanupFailure)
+            {
+                throw new AggregateException(recoveryFailure, cleanupFailure);
+            }
+            throw;
+        }
+    }
+
+    private async Task<RecoveredOpenSegment> RecoverOpenRecordsAsync(
+        string path, FileStream stream, SegmentHeader header, CancellationToken cancellationToken)
+    {
         long count = 0;
         var lastSequence = header.FirstSequence - 1;
         DateTimeOffset? lastTimestamp = null;
@@ -1964,37 +2304,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                 .ConfigureAwait(false);
             if (frameLength == FooterMarker)
             {
-                var footerRemainder = stream.Length - stream.Position;
-                if (footerRemainder > FooterBodyBytes)
-                {
-                    throw new InvalidDataException(
-                        "Recovered durable segment has bytes after its footer.");
-                }
-                if (footerRemainder == FooterBodyBytes)
-                {
-                    var footerLastSequence = await ReadInt64Async(
-                        stream,
-                        cancellationToken).ConfigureAwait(false);
-                    var footerCount = await ReadInt64Async(
-                        stream,
-                        cancellationToken).ConfigureAwait(false);
-                    var footerDigest = new byte[32];
-                    await ReadExactlyAsync(stream, footerDigest, cancellationToken)
-                        .ConfigureAwait(false);
-                    var actualDigest = await ComputePrefixDigestAsync(
-                        path,
-                        frameStart,
-                        cancellationToken).ConfigureAwait(false);
-                    if (footerLastSequence != lastSequence
-                        || footerCount != count
-                        || !CryptographicOperations.FixedTimeEquals(
-                            footerDigest,
-                            actualDigest))
-                    {
-                        throw new InvalidDataException(
-                            "Recovered durable segment footer is inconsistent.");
-                    }
-                }
+                await ValidateRecoveredFooterAsync(stream, path, frameStart,
+                    lastSequence, count, cancellationToken).ConfigureAwait(false);
 
                 // A crash may occur after the footer is flushed but before the
                 // atomic rename. The records are already durable, so discard
@@ -2035,7 +2346,43 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             lastTimestamp);
     }
 
-    private IEnumerable<SegmentPath> EnumerateSegments(StreamState state)
+    private static async Task ValidateRecoveredFooterAsync(
+        FileStream stream, string path, long frameStart, long lastSequence, long count, CancellationToken cancellationToken)
+    {
+        var footerRemainder = stream.Length - stream.Position;
+        if (footerRemainder > FooterBodyBytes)
+        {
+            throw new InvalidDataException(
+                "Recovered durable segment has bytes after its footer.");
+        }
+        if (footerRemainder == FooterBodyBytes)
+        {
+            var footerLastSequence = await ReadInt64Async(
+                stream,
+                cancellationToken).ConfigureAwait(false);
+            var footerCount = await ReadInt64Async(
+                stream,
+                cancellationToken).ConfigureAwait(false);
+            var footerDigest = new byte[32];
+            await ReadExactlyAsync(stream, footerDigest, cancellationToken)
+                .ConfigureAwait(false);
+            var actualDigest = await ComputePrefixDigestAsync(
+                path,
+                frameStart,
+                cancellationToken).ConfigureAwait(false);
+            if (footerLastSequence != lastSequence
+                || footerCount != count
+                || !CryptographicOperations.FixedTimeEquals(
+                    footerDigest,
+                    actualDigest))
+            {
+                throw new InvalidDataException(
+                    "Recovered durable segment footer is inconsistent.");
+            }
+        }
+    }
+
+    private static IEnumerable<SegmentPath> EnumerateSegments(StreamState state)
     {
         foreach (var path in Directory.EnumerateFiles(state.DirectoryPath, "*.scseg")
                      .OrderBy(ParseFirstSequence))
@@ -2043,8 +2390,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             var name = Path.GetFileNameWithoutExtension(path);
             var pieces = name.Split('-');
             if (pieces.Length < 3
-                || !long.TryParse(pieces[0], out var first)
-                || !long.TryParse(pieces[1], out var last))
+                || !long.TryParse(pieces[0], NumberStyles.Integer, CultureInfo.CurrentCulture, out var first)
+                || !long.TryParse(pieces[1], NumberStyles.Integer, CultureInfo.CurrentCulture, out var last))
             {
                 throw new InvalidDataException($"Invalid sealed segment name '{name}'.");
             }
@@ -2104,7 +2451,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         if (completeLength != stream.Length)
         {
             stream.SetLength(completeLength);
-            stream.Flush(flushToDisk: true);
+            FlushToDisk(stream);
         }
         stream.Position = 0;
         long lastSequence = 0;
@@ -2119,7 +2466,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             if (sequence >= state.NextSequence)
             {
                 stream.SetLength(entryOffset);
-                stream.Flush(flushToDisk: true);
+                FlushToDisk(stream);
                 break;
             }
             if (sequence <= lastSequence
@@ -2306,7 +2653,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                             manifest,
                             cancellationToken: cancellationToken)
                         .ConfigureAwait(false);
-                    stream.Flush(flushToDisk: true);
+                    FlushToDisk(stream);
                 }
             }
             File.Move(temporary, path, overwrite: true);
@@ -2495,20 +2842,23 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             || record.Message.Contains(options.Contains, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static int GetLevelRank(string level) => level.ToLowerInvariant() switch
+    private static int GetLevelRank(string level)
     {
-        "trace" => 0,
-        "debug" => 1,
-        "information" or "info" => 2,
-        "warning" or "warn" => 3,
-        "error" => 4,
-        "critical" or "fatal" => 5,
-        _ => 2,
-    };
+        if (level.Equals("trace", StringComparison.OrdinalIgnoreCase)) return 0;
+        if (level.Equals("debug", StringComparison.OrdinalIgnoreCase)) return 1;
+        if (level.Equals("information", StringComparison.OrdinalIgnoreCase)
+            || level.Equals("info", StringComparison.OrdinalIgnoreCase)) return 2;
+        if (level.Equals("warning", StringComparison.OrdinalIgnoreCase)
+            || level.Equals("warn", StringComparison.OrdinalIgnoreCase)) return 3;
+        if (level.Equals("error", StringComparison.OrdinalIgnoreCase)) return 4;
+        if (level.Equals("critical", StringComparison.OrdinalIgnoreCase)
+            || level.Equals("fatal", StringComparison.OrdinalIgnoreCase)) return 5;
+        return 2;
+    }
 
     private static DurableRecordPage BuildPage(
         StreamState state,
-        IReadOnlyList<DurableRecord> records,
+        List<DurableRecord> records,
         int returnedBytes,
         long? nextSequence,
         bool hasMore,
@@ -2522,65 +2872,99 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             state.FirstAvailableSequence,
             state.ExpiredRecordCount);
 
-    private void ValidateRecord(DurableRecordWrite record)
+    private static void ValidateRecord(DurableRecordWrite record)
     {
         if (record.RecordId == Guid.Empty)
             throw new ArgumentException("Record ID is required.", nameof(record));
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
         ArgumentException.ThrowIfNullOrWhiteSpace(record.Level);
+#pragma warning restore CA2208, MA0015
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
         ArgumentException.ThrowIfNullOrWhiteSpace(record.EventName);
+#pragma warning restore CA2208, MA0015
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
         ArgumentNullException.ThrowIfNull(record.Message);
+#pragma warning restore CA2208, MA0015
     }
 
     private void ValidateReadOptions(DurableReadOptions options)
     {
         if (options.Take is < 1 || options.Take > _options.MaxPageRecords)
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.Take));
+#pragma warning restore CA2208, MA0015
         if (options.MaxBytes is < 1 || options.MaxBytes > _options.MaxPageBytes)
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.MaxBytes));
+#pragma warning restore CA2208, MA0015
         if (options.MaxScanBytes < options.MaxBytes
             || options.MaxScanBytes > _options.MaxReadScanBytes)
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.MaxScanBytes));
+#pragma warning restore CA2208, MA0015
         if (options.Contains is { Length: > 4096 })
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.Contains));
+#pragma warning restore CA2208, MA0015
         if (options.From is { } from
             && options.To is { } to
             && from > to)
         {
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentException(
                 "The durable read start time must not follow its end time.");
+#pragma warning restore CA2208, MA0015
         }
     }
 
     private static void ValidateOptions(DurableStorageOptions options)
     {
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
         ArgumentException.ThrowIfNullOrWhiteSpace(options.RootDirectory);
+#pragma warning restore CA2208, MA0015
         if (options.EncryptionKey is { Length: not 32 })
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentException("Durable encryption key must contain 256 bits.");
+#pragma warning restore CA2208, MA0015
         if (options.SegmentMaxBytes < 64 * 1024
             || options.SegmentMaxBytes > options.MaxReadScanBytes)
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.SegmentMaxBytes));
+#pragma warning restore CA2208, MA0015
         if (options.SegmentMaxAge <= TimeSpan.Zero)
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.SegmentMaxAge));
+#pragma warning restore CA2208, MA0015
         if (options.MaxRecordBytes is < 1024 or > 4 * 1024 * 1024)
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.MaxRecordBytes));
+#pragma warning restore CA2208, MA0015
         if (options.MaxPageRecords < 1)
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.MaxPageRecords));
+#pragma warning restore CA2208, MA0015
         if (options.MaxPageBytes < 1024
             || options.MaxPageBytes > DurableStorageOptions.HardMaximumPageBytes)
         {
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.MaxPageBytes));
+#pragma warning restore CA2208, MA0015
         }
         if (options.MaxPageBytes < options.MaxRecordBytes
                 + MaxFrameOverheadBytes
                 + SegmentHeaderBytes
                 + sizeof(int))
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(nameof(options.MaxPageBytes));
+#pragma warning restore CA2208, MA0015
         if (options.MaxReadScanBytes < options.MaxPageBytes
             || options.MaxReadScanBytes
                 > DurableStorageOptions.HardMaximumReadScanBytes)
         {
+#pragma warning disable CA2208, MA0015 // Preserve the contracted invalid property name (or compound failure without ParamName) and validation timing.
             throw new ArgumentOutOfRangeException(
                 nameof(options.MaxReadScanBytes));
+#pragma warning restore CA2208, MA0015
         }
     }
 
@@ -2596,8 +2980,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
     private static long ParseFirstSequence(string path)
     {
         var name = Path.GetFileName(path);
-        var separator = name.IndexOf('-');
-        return separator > 0 && long.TryParse(name[..separator], out var value)
+        var separator = name.IndexOf('-', StringComparison.Ordinal);
+        return separator > 0 && long.TryParse(name[..separator], NumberStyles.Integer, CultureInfo.CurrentCulture, out var value)
             ? value
             : throw new InvalidDataException($"Invalid segment name '{name}'.");
     }
@@ -2658,11 +3042,19 @@ public sealed class DurableSegmentStore : IAsyncDisposable
 
     private static void FlushToDisk(FileStream stream)
     {
+        // FlushAsync has no flushToDisk overload; acknowledged durable writes require this barrier.
         stream.Flush(flushToDisk: true);
     }
 
     private void ThrowIfDisposed() =>
         ObjectDisposedException.ThrowIf(_disposeState != 0, this);
+
+    private sealed class OperationLease(DurableSegmentStore owner) : IDisposable
+    {
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2213", Justification = "The lease borrows its store owner solely to release admission; disposing the owner would recursively wait for this lease and violate ownership.")]
+        private DurableSegmentStore? _owner = owner;
+        public void Dispose() => Interlocked.Exchange(ref _owner, null)?.CompleteOperation();
+    }
 
     private sealed class EnumerationBudget : IDisposable
     {
@@ -2708,8 +3100,12 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         public void Dispose() => _timeoutSource.Dispose();
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1064", Justification = "This private sentinel is caught by bounded catalog enumeration and never belongs to the public exception contract.")]
     private sealed class CatalogBudgetExceededException : Exception
     {
+        public CatalogBudgetExceededException() { }
+        public CatalogBudgetExceededException(string message) : base(message) { }
+        public CatalogBudgetExceededException(string message, Exception innerException) : base(message, innerException) { }
     }
 
     private sealed record CatalogIdentity(
@@ -2732,6 +3128,16 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         long FirstAvailableSequence,
         long ExpiredRecordCount,
         DateTimeOffset? LastTimestamp);
+
+    private sealed class CatalogScanProgress
+    {
+        public bool HasActiveSegment { get; set; }
+        public bool HasSealedSegments { get; set; }
+        public long PhysicalRecordCount { get; set; }
+        public long EncodedBytes { get; set; }
+        public long FirstSequence { get; set; } = long.MaxValue;
+        public long? LastSequence { get; set; }
+    }
 
     private sealed record StreamIdentity(
         int Version,
@@ -2769,6 +3175,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         public DateTimeOffset CreatedAt { get; } = createdAt;
         public long Count { get; set; }
         public long LastSequence { get; set; } = firstSequence - 1;
+    }
+
+    private sealed class ReadPageProgress(int capacity)
+    {
+        public List<DurableRecord> Records { get; } = new(capacity);
+        public int ReturnedBytes { get; set; }
+        public long ScannedBytes { get; set; }
+        public long? Continuation { get; set; }
     }
 
     private sealed record RecordBody(

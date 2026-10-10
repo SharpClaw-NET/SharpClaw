@@ -283,7 +283,7 @@ internal sealed class RuntimeSecurityBoundaryTests
         using var workspace = new TemporaryWorkspace();
         var adapter = CreateAdapter(workspace, new SecurityProbe());
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync().ConfigureAwait(false);
         var terminalCalled = false;
 
         Func<Task> action = async () => await adapter.RunSecurityDecisionAsync(
@@ -406,10 +406,7 @@ internal sealed class RuntimeSecurityBoundaryTests
                             descriptor.Version,
                             types.ActionType.AssemblyQualifiedName!,
                             types.ResultType.AssemblyQualifiedName!,
-                            KernelSchemaIdentity.Action(
-                                descriptor,
-                                typeof(KernelActionEnvelope),
-                                typeof(object)));
+                            KernelSchemaIdentity.Action(descriptor));
                     })
                     .ToArray(),
             },
@@ -471,8 +468,13 @@ internal sealed class RuntimeSecurityBoundaryTests
                 if (Directory.Exists(_root))
                     Directory.Delete(_root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }
@@ -538,21 +540,7 @@ internal sealed class RuntimeSecurityBoundaryTests
                 context.Caller.SubjectId,
                 context.Depth));
 
-            if (string.Equals(context.ActionKey.Value, "security.secret.delete", StringComparison.Ordinal) && Interlocked.Exchange(ref probe.NestedDispatches, 1) == 0
-                && probe.Dispatcher is { } dispatcher
-                && probe.Snapshot is { } snapshot)
-            {
-                var nestedKey = new SharpClawActionKey("security.secret.read");
-                var nestedDescriptor = KernelActionCatalog.DescriptorFor(nestedKey).ToDescriptor();
-                await dispatcher.RunRequiredAsync<KernelActionEnvelope, object>(
-                    nestedDescriptor,
-                    new KernelActionEnvelope(
-                        nestedKey,
-                        new RuntimeSecurityActionInvocation("nested-read", "/env/core")),
-                    static (_, _) => ValueTask.FromResult<object>(true),
-                    snapshot,
-                    cancellationToken).ConfigureAwait(false);
-            }
+            await DispatchNestedSecretReadAsync(context, cancellationToken).ConfigureAwait(false);
 
             if (string.Equals(
                     probe.FailureAction,
@@ -601,6 +589,26 @@ internal sealed class RuntimeSecurityBoundaryTests
 
             return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
         }
+        private async ValueTask DispatchNestedSecretReadAsync(ActionContext<KernelActionEnvelope> context, CancellationToken cancellationToken)
+        {
+            if (string.Equals(context.ActionKey.Value, "security.secret.delete", StringComparison.Ordinal) && Interlocked.Exchange(ref probe.NestedDispatches, 1) == 0
+                && probe.Dispatcher is { } dispatcher
+                && probe.Snapshot is { } snapshot)
+            {
+                var nestedKey = new SharpClawActionKey("security.secret.read");
+                var nestedDescriptor = KernelActionCatalog.DescriptorFor(nestedKey).ToDescriptor();
+                await dispatcher.RunRequiredAsync<KernelActionEnvelope, object>(
+                    nestedDescriptor,
+                    new KernelActionEnvelope(
+                        nestedKey,
+                        new RuntimeSecurityActionInvocation("nested-read", "/env/core")),
+                    static (_, _) => ValueTask.FromResult<object>(true),
+                    snapshot,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+        }
+
     }
 
     private sealed class SecurityRegistration(

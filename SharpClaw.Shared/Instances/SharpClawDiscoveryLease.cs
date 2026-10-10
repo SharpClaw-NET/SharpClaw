@@ -14,6 +14,8 @@ public sealed class SharpClawDiscoveryLease : IDisposable
     private readonly Timer _timer;
     private int _disposeState;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "The existing published constructor accepts exact discovery endpoint text and forwards it unchanged to the versioned discovery file; its CLR signature and null-literal source compatibility are maintained.")]
     public SharpClawDiscoveryLease(
         SharpClawInstancePaths instancePaths,
         string baseUrl,
@@ -27,7 +29,8 @@ public sealed class SharpClawDiscoveryLease : IDisposable
 
         _instancePaths = instancePaths;
         _baseUrl = baseUrl;
-        _startedAtUtc = Process.GetCurrentProcess().StartTime.ToUniversalTime();
+        using var process = Process.GetCurrentProcess();
+        _startedAtUtc = new DateTimeOffset(process.StartTime.ToUniversalTime());
         _processId = Environment.ProcessId;
         _timer = new Timer(_ => Refresh(), null, refreshInterval, refreshInterval);
     }

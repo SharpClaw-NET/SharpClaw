@@ -15,6 +15,8 @@ namespace SharpClaw.Tests.Kernel;
 [TestFixture]
 internal sealed class RuntimeToolBoundaryTests
 {
+    private static readonly string[] ExpectedSubjects = ["tool-user-a", "tool-user-b"];
+
     [Test]
     public void Tool_manifest_matches_the_published_catalog_without_local_keys()
     {
@@ -37,12 +39,11 @@ internal sealed class RuntimeToolBoundaryTests
                 Path.Combine(sourceRoot, "SharpClaw.Runtime"),
                 "*.cs",
                 SearchOption.AllDirectories)
-            .Where(path => !path.Contains(
+            .Where(path => (!path.Contains(
                 $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
-                StringComparison.OrdinalIgnoreCase))
-            .Where(path => !path.Contains(
+                StringComparison.OrdinalIgnoreCase)) && (!path.Contains(
                 $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
-                StringComparison.OrdinalIgnoreCase));
+                StringComparison.OrdinalIgnoreCase)));
 
         var offenders = runtimeSources
             .SelectMany(path => File.ReadLines(path)
@@ -161,7 +162,7 @@ internal sealed class RuntimeToolBoundaryTests
             .NotBeEmpty()
             .And.AllSatisfy(value =>
             {
-                new[] { "tool-user-a", "tool-user-b" }
+                ExpectedSubjects
                     .Should()
                     .Contain(value.Subject);
                 value.Depth.Should().BeGreaterThan(0);
@@ -220,10 +221,7 @@ internal sealed class RuntimeToolBoundaryTests
                         descriptor.Version,
                         types.ActionType.AssemblyQualifiedName!,
                         types.ResultType.AssemblyQualifiedName!,
-                        KernelSchemaIdentity.Action(
-                            descriptor,
-                            typeof(KernelActionEnvelope),
-                            typeof(object)));
+                        KernelSchemaIdentity.Action(descriptor));
                 })
                 .ToArray(),
         };
@@ -292,8 +290,13 @@ internal sealed class RuntimeToolBoundaryTests
                 if (Directory.Exists(_root))
                     Directory.Delete(_root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }

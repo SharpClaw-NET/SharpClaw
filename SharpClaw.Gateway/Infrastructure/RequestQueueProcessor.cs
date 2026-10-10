@@ -31,74 +31,105 @@ internal sealed class RequestQueueProcessor(
         {
             await backgroundActions.StartAsync(serviceInvocation, stoppingToken).ConfigureAwait(false);
 
-            if (!queue.Enabled)
+            if (queue.Enabled)
             {
-                logger.LogInformation("Request queue is disabled — processor will not start.");
-                return;
-            }
-
-            var opts = options.Value;
-            logger.LogInformation(
-                "Request queue processor started. Concurrency={Concurrency}, Timeout={Timeout}s, " +
-                "MaxRetries={MaxRetries}, RetryDelay={RetryDelay}ms, QueueCapacity={Capacity}.",
-                opts.MaxConcurrency, opts.TimeoutSeconds, opts.MaxRetries, opts.RetryDelayMs, opts.MaxQueueSize);
-
-            if (opts.MaxConcurrency <= 1)
-            {
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    var request = await queue.DequeueAsync(stoppingToken).ConfigureAwait(false);
-                    await RunTickAsync(request, opts, stoppingToken).ConfigureAwait(false);
-                }
+                var opts = options.Value;
+                GatewayLog.QueueStarted(logger, opts.MaxConcurrency, opts.TimeoutSeconds,
+                    opts.MaxRetries, opts.RetryDelayMs, opts.MaxQueueSize);
+                await ProcessQueueAsync(opts, stoppingToken).ConfigureAwait(false);
             }
             else
             {
-                using var semaphore = new SemaphoreSlim(opts.MaxConcurrency, opts.MaxConcurrency);
-                var tasks = new List<Task>();
-
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    var request = await queue.DequeueAsync(stoppingToken).ConfigureAwait(false);
-                    await semaphore.WaitAsync(stoppingToken).ConfigureAwait(false);
-
-                    tasks.Add(Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await RunTickAsync(request, opts, stoppingToken).ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    }, stoppingToken));
-
-                    tasks.RemoveAll(t => t.IsCompleted);
-                }
-
-                await Task.WhenAll(tasks).ConfigureAwait(false);
+                GatewayLog.QueueDisabled(logger);
             }
         }
+#pragma warning disable CA1031 // Retain the service failure until all owned requests and service.stop settle, then rethrow it.
         catch (Exception exception)
         {
             failure = exception;
         }
-        finally
+#pragma warning restore CA1031
+        await StopServiceAsync(serviceInvocation, failure, stoppingToken).ConfigureAwait(false);
+    }
+
+    private async Task StopServiceAsync(
+        GatewayBackgroundServiceInvocation invocation, Exception? failure, CancellationToken stoppingToken)
+    {
+        queue.CompleteWaitingRequests(stoppingToken, failure);
+        try
+        {
+            await backgroundActions.StopAsync(invocation, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception stopFailure) when (failure is not null)
+        {
+            throw new AggregateException(failure, stopFailure);
+        }
+        if (failure is not null)
+            ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
+    private async Task ProcessQueueAsync(RequestQueueOptions opts, CancellationToken stoppingToken)
+    {
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        await RunQueueWorkersAsync(opts, session).ConfigureAwait(false);
+    }
+
+    private Task RunQueueWorkersAsync(RequestQueueOptions opts, CancellationTokenSource session)
+    {
+        var workers = new Task[Math.Max(1, opts.MaxConcurrency)];
+        foreach (ref var worker in workers.AsSpan())
+            worker = RunQueueWorkerAsync(opts, session);
+
+        // Every worker, including one that faults, stays owned until shutdown settles.
+        return Task.WhenAll(workers);
+    }
+
+    private async Task RunQueueWorkerAsync(RequestQueueOptions opts, CancellationTokenSource session)
+    {
+        try
+        {
+            while (!session.IsCancellationRequested)
+            {
+                var request = await queue.DequeueAsync(session.Token).ConfigureAwait(false);
+                await ProcessOwnedTickAsync(request, opts, session.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (session.IsCancellationRequested)
+        {
+            // Host shutdown has cancelled this worker; its active receipt is already settled.
+        }
+        catch (Exception failure)
         {
             try
             {
-                await backgroundActions.StopAsync(serviceInvocation, CancellationToken.None).ConfigureAwait(false);
+                await session.CancelAsync().ConfigureAwait(false);
             }
-            catch (Exception stopFailure)
+            catch (Exception cancellationFailure)
             {
-                failure = failure is null
-                    ? stopFailure
-                    : new AggregateException(failure, stopFailure);
+                throw new AggregateException(failure, cancellationFailure);
             }
-        }
 
-        if (failure is not null)
-            ExceptionDispatchInfo.Capture(failure).Throw();
+            throw;
+        }
+    }
+
+    private async Task ProcessOwnedTickAsync(
+        QueuedRequest request, RequestQueueOptions opts, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RunTickAsync(request, opts, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            request.Completion.TrySetCanceled(cancellationToken);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            request.Completion.TrySetException(exception);
+            throw;
+        }
     }
 
     private ValueTask RunTickAsync(
@@ -129,27 +160,7 @@ internal sealed class RequestQueueProcessor(
                 cts.CancelAfter(TimeSpan.FromSeconds(opts.TimeoutSeconds));
 
                 var response = await ForwardToCoreAsync(request, cts.Token).ConfigureAwait(false);
-                sw.Stop();
-
-                response.Meta = new QueueResponseMeta(
-                    request.Id,
-                    request.QueuePosition,
-                    sw.Elapsed.TotalMilliseconds,
-                    queue.Metrics.AverageProcessingMs);
-
-                queue.Metrics.RecordCompletion(sw.Elapsed.TotalMilliseconds);
-                request.Completion.TrySetResult(response);
-
-                if (response.IsSuccess)
-                {
-                    logger.LogDebug("Processed {Method} {Path} ({Id}) → {Status} in {Ms:F0}ms on attempt {Attempt}.",
-                        request.Method, request.Path, request.Id, (int)response.StatusCode, sw.Elapsed.TotalMilliseconds, attempt);
-                }
-                else
-                {
-                    logger.LogWarning("Processed {Method} {Path} ({Id}) → {Status}: {Error}.",
-                        request.Method, request.Path, request.Id, (int)response.StatusCode, response.Error);
-                }
+                CompleteRequest(request, response, sw, attempt);
                 return;
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
@@ -163,33 +174,58 @@ internal sealed class RequestQueueProcessor(
 
                 if (attempt > opts.MaxRetries)
                 {
-                    sw.Stop();
-                    queue.Metrics.RecordCompletion(sw.Elapsed.TotalMilliseconds);
-
-                    logger.LogError(ex, "Failed {Method} {Path} ({Id}) after {Attempts} attempts in {Ms:F0}ms.",
-                        request.Method, request.Path, request.Id, attempt, sw.Elapsed.TotalMilliseconds);
-
-                    request.Completion.TrySetResult(new QueuedResponse
-                    {
-                        StatusCode = HttpStatusCode.BadGateway,
-                        Error = $"Core API unreachable after {attempt} attempts: {ex.Message}",
-                        Meta = new QueueResponseMeta(
-                            request.Id,
-                            request.QueuePosition,
-                            sw.Elapsed.TotalMilliseconds,
-                            queue.Metrics.AverageProcessingMs),
-                    });
+                    CompleteFailedRequest(request, ex, sw, attempt);
                     return;
                 }
 
-                logger.LogWarning(ex,
-                    "Transient failure on {Method} {Path} ({Id}), attempt {Attempt}/{MaxRetries}. Retrying in {Delay}ms.",
-                    request.Method, request.Path, request.Id, attempt, opts.MaxRetries, delay);
+                GatewayLog.RetryingRequest(logger, ex, request.Method, request.Path,
+                    request.Id, attempt, opts.MaxRetries, delay);
 
                 await Task.Delay(delay, ct).ConfigureAwait(false);
                 delay = Math.Min(delay * 2, 10_000); // exponential backoff, cap at 10s
             }
         }
+    }
+
+    private void CompleteRequest(QueuedRequest request, QueuedResponse response, Stopwatch elapsed, int attempt)
+    {
+        elapsed.Stop();
+        response.Meta = CreateCompletionMeta(request, elapsed);
+        queue.Metrics.RecordCompletion(elapsed.Elapsed.TotalMilliseconds);
+        request.Completion.TrySetResult(response);
+        if (response.IsSuccess)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+                GatewayLog.RequestProcessed(logger, request.Method, request.Path, request.Id,
+                    (int)response.StatusCode, elapsed.Elapsed.TotalMilliseconds, attempt);
+        }
+        else
+        {
+            GatewayLog.UnsuccessfulRequest(logger, request.Method, request.Path, request.Id,
+                (int)response.StatusCode, response.Error);
+        }
+    }
+
+    private void CompleteFailedRequest(QueuedRequest request, Exception exception, Stopwatch elapsed, int attempt)
+    {
+        elapsed.Stop();
+        queue.Metrics.RecordCompletion(elapsed.Elapsed.TotalMilliseconds);
+        var meta = CreateCompletionMeta(request, elapsed);
+        if (logger.IsEnabled(LogLevel.Error))
+            GatewayLog.RequestFailed(logger, exception, request.Method, request.Path, request.Id,
+                attempt, elapsed.Elapsed.TotalMilliseconds);
+        request.Completion.TrySetResult(new QueuedResponse
+        {
+            StatusCode = HttpStatusCode.BadGateway,
+            Error = $"Core API unreachable after {attempt} attempts: {exception.Message}",
+            Meta = meta,
+        });
+    }
+
+    private QueueResponseMeta CreateCompletionMeta(QueuedRequest request, Stopwatch elapsed)
+    {
+        return new QueueResponseMeta(request.Id, request.QueuePosition,
+            elapsed.Elapsed.TotalMilliseconds, queue.Metrics.AverageProcessingMs);
     }
 
     private async Task<QueuedResponse> ForwardToCoreAsync(QueuedRequest request, CancellationToken ct)
@@ -203,7 +239,7 @@ internal sealed class RequestQueueProcessor(
         }
 
         // Use the InternalApiClient's underlying HttpClient with API key
-        var response = await coreApi.SendRawAsync(httpRequest, ct).ConfigureAwait(false);
+        using var response = await coreApi.SendRawAsync(httpRequest, ct).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
         return new QueuedResponse

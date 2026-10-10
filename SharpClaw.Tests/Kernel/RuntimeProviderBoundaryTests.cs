@@ -15,6 +15,8 @@ namespace SharpClaw.Tests.Kernel;
 [TestFixture]
 internal sealed class RuntimeProviderBoundaryTests
 {
+    private static readonly string[] ExpectedSubjects = ["provider-user-a", "provider-user-b"];
+
     [Test]
     public void Provider_transport_calls_are_confined_to_the_terminal_adapter()
     {
@@ -128,7 +130,7 @@ internal sealed class RuntimeProviderBoundaryTests
             .NotBeEmpty()
             .And.AllSatisfy(observation =>
             {
-                new[] { "provider-user-a", "provider-user-b" }
+                ExpectedSubjects
                     .Should()
                     .Contain(observation.Subject);
                 observation.Depth.Should().BeGreaterThan(0);
@@ -228,10 +230,7 @@ internal sealed class RuntimeProviderBoundaryTests
                         descriptor.Version,
                         types.ActionType.AssemblyQualifiedName!,
                         types.ResultType.AssemblyQualifiedName!,
-                        KernelSchemaIdentity.Action(
-                            descriptor,
-                            typeof(KernelActionEnvelope),
-                            typeof(object)));
+                        KernelSchemaIdentity.Action(descriptor));
                 })
                 .ToArray(),
         };
@@ -300,8 +299,13 @@ internal sealed class RuntimeProviderBoundaryTests
                 if (Directory.Exists(_root))
                     Directory.Delete(_root, recursive: true);
             }
-            catch
+            catch (IOException exception)
             {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                TestContext.Progress.WriteLine($"Temporary directory cleanup failed: {exception.Message}");
             }
         }
     }

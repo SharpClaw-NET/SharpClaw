@@ -6,6 +6,8 @@ using System.Text;
 using System.Text.Json;
 
 
+namespace SharpClaw.TestFixtures.ForeignSidecar;
+
 internal sealed record SidecarRequest(
     string Method,
     string Path,

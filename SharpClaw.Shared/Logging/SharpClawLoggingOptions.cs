@@ -34,19 +34,8 @@ public sealed record SharpClawLoggingOptions
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
-        var queueCapacity = ReadInt(configuration, "Logging:QueueCapacity", 4096);
-        if (queueCapacity is < 16 or > 1_000_000)
-            throw new InvalidOperationException("Logging:QueueCapacity must be between 16 and 1000000.");
-
-        var flushMilliseconds = ReadInt(
-            configuration,
-            "Logging:FlushIntervalMilliseconds",
-            1000);
-        if (flushMilliseconds is < 10 or > 60_000)
-        {
-            throw new InvalidOperationException(
-                "Logging:FlushIntervalMilliseconds must be between 10 and 60000.");
-        }
+        var queueCapacity = ReadQueueCapacity(configuration);
+        var flushMilliseconds = ReadFlushMilliseconds(configuration);
 
         var minimumLevel = ReadLevel(
             configuration,
@@ -95,6 +84,22 @@ public sealed record SharpClawLoggingOptions
             QueueCapacity = queueCapacity,
             FlushInterval = TimeSpan.FromMilliseconds(flushMilliseconds),
         };
+    }
+
+    private static int ReadQueueCapacity(IConfiguration configuration)
+    {
+        var value = ReadInt(configuration, "Logging:QueueCapacity", 4096);
+        if (value is < 16 or > 1_000_000)
+            throw new InvalidOperationException("Logging:QueueCapacity must be between 16 and 1000000.");
+        return value;
+    }
+
+    private static int ReadFlushMilliseconds(IConfiguration configuration)
+    {
+        var value = ReadInt(configuration, "Logging:FlushIntervalMilliseconds", 1000);
+        if (value is < 10 or > 60_000)
+            throw new InvalidOperationException("Logging:FlushIntervalMilliseconds must be between 10 and 60000.");
+        return value;
     }
 
     private static LogEventLevel ReadLevel(

@@ -21,6 +21,10 @@ internal sealed class ScopedStorageTelemetry(
         Meter.CreateHistogram<long>("sharpclaw.registration_storage.output_bytes");
     private static readonly Histogram<int> RecordCountHistogram =
         Meter.CreateHistogram<int>("sharpclaw.registration_storage.records");
+    private static readonly Action<ILogger, string, string, string, bool, double, int, Exception?> LogStorageCompleted =
+        LoggerMessage.Define<string, string, string, bool, double, int>(
+            LogLevel.Debug, new EventId(1, nameof(LogStorageCompleted)),
+            "Registration storage {Operation} for {SourceId}/{StorageName} completed Success={Success} DurationMs={DurationMs:F2} Records={RecordCount}");
 
     public void Record(ScopedStorageTelemetryEvent telemetryEvent)
     {
@@ -41,13 +45,16 @@ internal sealed class ScopedStorageTelemetry(
         OutputBytesHistogram.Record(telemetryEvent.OutputBytes, tags);
         RecordCountHistogram.Record(telemetryEvent.RecordCount, tags);
 
-        logger.LogDebug(
-            "Registration storage {Operation} for {SourceId}/{StorageName} completed Success={Success} DurationMs={DurationMs:F2} Records={RecordCount}",
-            telemetryEvent.Operation,
-            telemetryEvent.SourceId,
-            telemetryEvent.StorageName,
-            telemetryEvent.Success,
-            telemetryEvent.Duration.TotalMilliseconds,
-            telemetryEvent.RecordCount);
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            LogStorageCompleted(logger,
+                telemetryEvent.Operation,
+                telemetryEvent.SourceId,
+                telemetryEvent.StorageName,
+                telemetryEvent.Success,
+                telemetryEvent.Duration.TotalMilliseconds,
+                telemetryEvent.RecordCount,
+                null);
+        }
     }
 }

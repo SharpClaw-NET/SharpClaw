@@ -18,8 +18,7 @@ public sealed class DurableCursorCodec(byte[] key, DurableStreamPathEncoder path
         long snapshotLastSequence,
         string filterFingerprint)
     {
-        if (nextSequence < 1)
-            throw new ArgumentOutOfRangeException(nameof(nextSequence));
+        ArgumentOutOfRangeException.ThrowIfLessThan(nextSequence, 1);
         ArgumentNullException.ThrowIfNull(filterFingerprint);
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(new CursorPayload(

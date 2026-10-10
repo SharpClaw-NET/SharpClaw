@@ -19,7 +19,7 @@ internal sealed class BaseClientFeatureOwnershipTests
             Path.Combine(sourceRoot, "SharpClaw.Client.Uno", "Presentation", "SettingsPage.xaml.cs"),
         };
 
-        var source = string.Join("\n", paths.Select(File.ReadAllText));
+        var source = string.Join('\n', paths.Select(File.ReadAllText));
 
         source.Should().NotContain("ClearanceOptions");
         source.Should().NotContain("MakeClearanceCombo");
@@ -101,7 +101,7 @@ internal sealed class BaseClientFeatureOwnershipTests
         boot.Should().NotContain("NavigateRouteAsync(this, \"Main\"");
         var menu = File.ReadAllText(Path.Combine(sourceRoot, "SharpClaw.Client.Uno", "Presentation", "BootPage.Modules.cs"));
         menu.Should().Contain("OnStatelessChatClick");
-        menu.Should().Contain("NavigateRouteAsync(this, \"Main\")");
+        menu.Should().Contain("NavigateRouteAsync(this, \"Main\"");
         boot.Should().NotContain("TryAutoLoginAsync");
         boot.Should().NotContain("FirstSetup");
         boot.Should().NotContain("Login");

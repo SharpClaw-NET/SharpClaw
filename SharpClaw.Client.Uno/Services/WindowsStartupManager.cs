@@ -32,6 +32,8 @@ public static class WindowsStartupManager
     /// <summary>
     /// Registers (or removes) the backend process auto-start entry.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public static void SetBackendAutoStart(bool enabled, string? executablePath = null, string? apiUrl = null)
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -45,6 +47,8 @@ public static class WindowsStartupManager
     /// <summary>
     /// Registers (or removes) the gateway process auto-start entry.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public static void SetGatewayAutoStart(bool enabled, string? executablePath = null, string? gatewayUrl = null)
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -74,6 +78,8 @@ public static class WindowsStartupManager
     /// paths.  Call on every app launch to handle MSIX path changes after
     /// updates.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054",
+        Justification = "This existing string contract carries editable or persisted endpoint text, including bind addresses; retaining its exact representation and null-literal source compatibility is required. URI construction happens at the HTTP boundary.")]
     public static void RefreshIfNeeded(
         string? backendExePath, string? backendUrl,
         string? gatewayExePath, string? gatewayUrl)
@@ -119,7 +125,7 @@ public static class WindowsStartupManager
 
             File.WriteAllText(Path.Combine(startupDir, scriptName), script);
         }
-        catch { /* best-effort — may fail in restricted environments */ }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* Startup-folder access can be restricted. */ }
     }
 
     private static void RemoveStartupScript(string scriptName)
@@ -130,6 +136,6 @@ public static class WindowsStartupManager
             if (File.Exists(path))
                 File.Delete(path);
         }
-        catch { /* best-effort */ }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The entry may already be gone or inaccessible. */ }
     }
 }
