@@ -28,6 +28,7 @@ public sealed class RuntimeKernelAdapter :
     private readonly IServiceProvider _hostServices;
     private bool _started;
     private readonly Lock _stopGate = new();
+    private Task? _startTask;
     private Task? _stopTask;
     private static readonly JsonSerializerOptions EventActionJsonOptions =
         new(JsonSerializerDefaults.General)
@@ -979,29 +980,42 @@ public sealed class RuntimeKernelAdapter :
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(hostVersion);
+        Task starting;
         lock (_stopGate)
         {
             if (_started)
                 throw new InvalidOperationException("The Runtime kernel has already started.");
+            if (_startTask is { IsCompleted: false })
+                throw new InvalidOperationException("The Runtime kernel is still starting.");
             if (_stopTask is { IsCompleted: false })
                 throw new InvalidOperationException("The Runtime kernel is still stopping.");
+            _stopTask = null;
+            // Publish ownership before context-free startup can invoke a participant.
+            starting = _startTask = Task.Run(() => StartCoreAsync(hostVersion,
+                caller ?? RequestPrincipal.Anonymous, features ?? ExtensionFeatureSet.Empty,
+                cancellationToken), CancellationToken.None);
         }
+        await starting.ConfigureAwait(false);
+    }
 
-        var effectiveCaller = caller ?? RequestPrincipal.Anonymous;
-        var effectiveFeatures = features ?? ExtensionFeatureSet.Empty;
+    private async Task StartCoreAsync(string hostVersion, RequestPrincipal effectiveCaller,
+        ExtensionFeatureSet effectiveFeatures, CancellationToken cancellationToken)
+    {
         var executionContext = CreateHostExecutionContext(effectiveCaller, effectiveFeatures);
-        await RunRuntimeLifecycleActionCoreAsync(
-            RuntimeLifecycleActionCatalog.StartConfigure,
-            hostVersion,
-            executionContext,
-            ct => StartParticipantsAsync(
-                hostVersion,
-                effectiveFeatures,
-                ct),
-            cancellationToken).ConfigureAwait(false);
+        var startup = new RuntimeStartupWork(ct => StartParticipantsAsync(hostVersion, effectiveFeatures, ct));
+        var failure = await CaptureLifecycleFailureAsync(
+            () => RunRuntimeLifecycleActionCoreAsync(RuntimeLifecycleActionCatalog.StartConfigure,
+                hostVersion, executionContext, startup.RunAsync, cancellationToken), null).ConfigureAwait(false);
+        // Receipt cancellation/deadline does not settle physical participant startup.
+        failure = await CaptureLifecycleFailureAsync(startup.JoinAsync, failure).ConfigureAwait(false);
+        if (failure is not null)
+        {
+            failure = await CaptureLifecycleFailureAsync(
+                () => StopParticipantsAsync(CancellationToken.None), failure).ConfigureAwait(false);
+            failure?.Throw();
+        }
         lock (_stopGate)
         {
-            _stopTask = null;
             _started = true;
         }
     }
@@ -1016,7 +1030,7 @@ public sealed class RuntimeKernelAdapter :
         {
             if (_stopTask is { } stopping)
                 return new ValueTask(stopping);
-            if (!_started)
+            if (_startTask is null)
                 return ValueTask.CompletedTask;
             _stopTask = StopCoreAsync(onPrepare, onComplete, cancellationToken);
             return new ValueTask(_stopTask);
@@ -1032,12 +1046,15 @@ public sealed class RuntimeKernelAdapter :
         var prepare = new RuntimeShutdownWork(CreateStopPreparation(
             onPrepare ?? (static _ => ValueTask.CompletedTask)));
         var completion = new RuntimeShutdownWork(onComplete ?? (static _ => ValueTask.CompletedTask));
-        ExceptionDispatchInfo? failure = null;
+        // Startup owns its compensation; shutdown joins it before host preparation.
+        var failure = await CaptureLifecycleFailureAsync(
+            () => _startTask is { } starting ? new ValueTask(starting) : ValueTask.CompletedTask,
+            null).ConfigureAwait(false);
         try
         {
             try
             {
-                failure = await CaptureShutdownFailureAsync(
+                failure = await CaptureLifecycleFailureAsync(
                     () => RunRuntimeLifecycleActionCoreAsync(RuntimeLifecycleActionCatalog.StopPrepare,
                         null, executionContext, prepare.RunAsync, cancellationToken), failure).ConfigureAwait(false);
             }
@@ -1045,17 +1062,17 @@ public sealed class RuntimeKernelAdapter :
             {
                 // A Core receipt can settle before its terminal. Join the cached
                 // physical preparation (or start the required fallback) first.
-                failure = await CaptureShutdownFailureAsync(
+                failure = await CaptureLifecycleFailureAsync(
                     () => prepare.RunAsync(CancellationToken.None), failure).ConfigureAwait(false);
                 lock (_stopGate) _started = false;
-                failure = await CaptureShutdownFailureAsync(
+                failure = await CaptureLifecycleFailureAsync(
                     () => RunRuntimeLifecycleActionCoreAsync(RuntimeLifecycleActionCatalog.StopComplete,
                         null, executionContext, completion.RunAsync, CancellationToken.None), failure).ConfigureAwait(false);
             }
         }
         finally
         {
-            failure = await CaptureShutdownFailureAsync(
+            failure = await CaptureLifecycleFailureAsync(
                 () => completion.RunAsync(CancellationToken.None), failure).ConfigureAwait(false);
         }
         failure?.Throw();
@@ -1066,23 +1083,23 @@ public sealed class RuntimeKernelAdapter :
     {
         async ValueTask PrepareHostAndParticipantsAsync(CancellationToken _)
         {
-            var failure = await CaptureShutdownFailureAsync(
+            var failure = await CaptureLifecycleFailureAsync(
                 () => prepare(CancellationToken.None), null).ConfigureAwait(false);
-            failure = await CaptureShutdownFailureAsync(
+            failure = await CaptureLifecycleFailureAsync(
                 () => StopParticipantsAsync(CancellationToken.None), failure).ConfigureAwait(false);
             failure?.Throw();
         }
         return PrepareHostAndParticipantsAsync;
     }
 
-    private static async ValueTask<ExceptionDispatchInfo?> CaptureShutdownFailureAsync(
+    private static async ValueTask<ExceptionDispatchInfo?> CaptureLifecycleFailureAsync(
         Func<ValueTask> operation, ExceptionDispatchInfo? failure)
     {
         try
         {
             await operation().ConfigureAwait(false);
         }
-#pragma warning disable CA1031 // Shutdown must complete later host and participant cleanup even when an earlier step fails; StopAsync rethrows the first captured failure.
+#pragma warning disable CA1031 // Lifecycle settlement must attempt later participant and host cleanup; the owning startup or shutdown task rethrows the first captured failure.
         catch (Exception exception)
         {
             failure ??= ExceptionDispatchInfo.Capture(exception);

@@ -110,7 +110,6 @@ internal static class LocalRuntimeHost
         var kernel = app.Services.GetRequiredService<RuntimeKernelAdapter>();
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         var databaseReadiness = app.Services.GetRequiredService<RuntimeDatabaseReadiness>();
-        var runtimeStarted = false;
         var appStartAttempted = false;
         ExceptionDispatchInfo? failure = null;
         var cleanup = new RuntimeHostCleanup(
@@ -132,7 +131,6 @@ internal static class LocalRuntimeHost
             await kernel.StartAsync(
                 typeof(LocalRuntimeHost).Assembly.GetName().Version?.ToString() ?? "0.5.0.0",
                 cancellationToken: cancellationToken).ConfigureAwait(false);
-            runtimeStarted = true;
 
             await RunRuntimeAsync(args, instancePaths, registrationSet, app, kernel, readiness,
                 runtimeBaseUrl, () => appStartAttempted = true, cancellationToken).ConfigureAwait(false);
@@ -145,7 +143,7 @@ internal static class LocalRuntimeHost
 #pragma warning restore CA1031
         finally
         {
-            failure = await StopAndCleanUpAsync(kernel, cleanup, runtimeStarted, failure).ConfigureAwait(false);
+            failure = await StopAndCleanUpAsync(kernel, cleanup, failure).ConfigureAwait(false);
         }
 
         failure?.Throw();
@@ -196,28 +194,25 @@ internal static class LocalRuntimeHost
         await app.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<ExceptionDispatchInfo?> StopAndCleanUpAsync(
+    internal static async Task<ExceptionDispatchInfo?> StopAndCleanUpAsync(
         RuntimeKernelAdapter kernel,
         RuntimeHostCleanup cleanup,
-        bool runtimeStarted,
         ExceptionDispatchInfo? failure)
     {
-        if (runtimeStarted)
+        // StopAsync also joins an admitted startup whose Core receipt failed.
+        try
         {
-            try
-            {
-                await kernel.StopAsync(
-                    CancellationToken.None,
-                    _ => cleanup.BeginAsync(),
-                    _ => cleanup.CompleteAsync()).ConfigureAwait(false);
-            }
-#pragma warning disable CA1031 // Continue later cleanup operations and return the first captured failure for rethrow.
-            catch (Exception exception)
-            {
-                failure ??= ExceptionDispatchInfo.Capture(exception);
-            }
-#pragma warning restore CA1031
+            await kernel.StopAsync(
+                CancellationToken.None,
+                _ => cleanup.BeginAsync(),
+                _ => cleanup.CompleteAsync()).ConfigureAwait(false);
         }
+#pragma warning disable CA1031 // Continue later cleanup operations and return the first captured failure for rethrow.
+        catch (Exception exception)
+        {
+            failure ??= ExceptionDispatchInfo.Capture(exception);
+        }
+#pragma warning restore CA1031
 
         if (!cleanup.PreparationAttempted)
         {
