@@ -32,6 +32,16 @@ internal sealed partial class ClientStartupLifetime
         }
     }
 
+    internal bool TryPublish(Action publication)
+    {
+        lock (_gate)
+        {
+            if (_closed) return false;
+            publication();
+            return true;
+        }
+    }
+
     internal bool TryPublishOwned<T>(T resource, Action<T> publication) where T : class
     {
         lock (_gate)

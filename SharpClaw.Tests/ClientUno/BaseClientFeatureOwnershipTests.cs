@@ -17,13 +17,15 @@ internal sealed class BaseClientFeatureOwnershipTests
         var source = File.ReadAllText(Path.Combine(FindSourceRoot(), "SharpClaw.Client.Uno", "App.xaml.cs"));
         var launch = MethodBody(source, "LaunchAsync");
         AssertSourceOrder(launch, "_startup.SetMutationOwner", "CreateApplicationBuilder");
-        AssertSourceOrder(launch, "AttachWindow(builder.Window)", "builder.NavigateAsync");
+        AssertSourceOrder(launch, "AttachWindow(builder.Window)", "BeginOwnedNavigationAsync");
         AssertSourceOrder(launch, "AttachWindow(builder.Window)", "window.Activate()");
         MethodBody(source, "AttachWindow").Should().Contain("MainWindow.Closed += OnWindowClosed");
         MethodBody(source, "OnLaunched").Should().Contain("if (_startup.IsClosed) return;");
         launch.Should().Contain("navigation.ConfigureAwait(false)");
-        AssertSourceOrder(launch, "_startup.AcquireOwnedAsync", "builder.NavigateAsync");
-        launch.Should().Contain("}, RetireHostAsync)");
+        var acquisition = MethodBody(source, "BeginOwnedNavigationAsync");
+        AssertSourceOrder(acquisition, "_startup.AcquireOwnedAsync", "builder.Build()");
+        AssertSourceOrder(acquisition, "_startup.CreateOwned", "InitializeHostedNavigationAsync");
+        acquisition.Should().Contain("static owner => owner.DisposeAsync()");
         var cleanup = MethodBody(source, "CloseResourcesAsync");
         cleanup.Should().Contain("_startup.GetOwned<SharpClawApiClient>");
         cleanup.Should().Contain("_startup.GetOwned<ModulePackageStore>()?.DisposeAsync()");
@@ -34,7 +36,11 @@ internal sealed class BaseClientFeatureOwnershipTests
         MethodBody(source, "OnWindowClosed").Should().Contain("await ShutdownAsync().ConfigureAwait(false)");
         var program = File.ReadAllText(Path.Combine(FindSourceRoot(), "SharpClaw.Client.Uno", "Platforms", "Desktop", "Program.cs"));
         program.Should().Contain("using var instance = InstalledClientInstanceGuard.Acquire()");
-        program.Should().Contain("await ClientDesktopLifetime.RunAsync");
+        program.Should().Contain("await desktop.RunHostAsync");
+        program.Should().Contain("new App(desktop)");
+        cleanup.Should().Contain("_startup.GetOwned<ClientHostOwner>()?.DisposeAsync()");
+        MethodBody(source, "InitializeHostedNavigationAsync").Should().NotContain(".Activate()");
+        MethodBody(source, "NavigateInitialRouteAsync").Should().Contain("_startup.TryPublish(() => Services = services)");
         program.Should().Contain("application?.ShutdownAsync()");
     }
 

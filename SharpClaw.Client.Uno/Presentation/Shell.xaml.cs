@@ -11,27 +11,59 @@ namespace SharpClaw.Presentation;
 public sealed partial class Shell : UserControl, IContentControlProvider
 {
     private readonly DispatcherTimer _dotsTimer;
+    private readonly ShellLoadingSource _loading = new();
+    private Task? _navigation;
     private int _dotCount;
 
     public Shell()
     {
         this.InitializeComponent();
+        Splash.Source = _loading;
 
         _dotsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
         _dotsTimer.Tick += OnDotsTick;
-        _dotsTimer.Start();
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
 
     public ContentControl ContentControl => Splash;
 
+    internal void SetLoadingTask(Task navigation) => _navigation = navigation;
+
+    private void OnLoaded(object sender, RoutedEventArgs e) => _dotsTimer.Start();
+    private void OnUnloaded(object sender, RoutedEventArgs e) => _dotsTimer.Stop();
+
     private void OnDotsTick(object? sender, object e)
     {
+        if (!IsLoaded) return;
+        // Borrow the actual startup task retained by ClientStartupLifetime. This
+        // existing UI timer publishes loading completion only while the view is
+        // loaded; no asynchronous notification targets a closed dispatcher.
+        if (_navigation is { IsCompleted: true })
+        {
+            _dotsTimer.Stop();
+            _loading.Complete();
+            return;
+        }
         _dotCount = (_dotCount % 3) + 1;
         var dots = new string('.', _dotCount);
 
         var textBlock = FindChildByName<TextBlock>(Splash, "LoadingDots");
         if (textBlock is not null)
             textBlock.Text = dots;
+    }
+
+    private sealed class ShellLoadingSource : Uno.Toolkit.ILoadable
+    {
+        public bool IsExecuting { get; private set; } = true;
+        public event EventHandler? IsExecutingChanged;
+
+        internal void Complete()
+        {
+            if (!IsExecuting) return;
+            IsExecuting = false;
+            IsExecutingChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private static T? FindChildByName<T>(DependencyObject parent, string name) where T : FrameworkElement

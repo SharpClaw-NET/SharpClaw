@@ -18,9 +18,10 @@ internal static class Program
                 diagnostics.Record(ClientStartupStage.DuplicateActivation);
                 return;
             }
+            var desktop = new ClientDesktopLifetime();
             App? application = null;
             var host = UnoPlatformHostBuilder.Create()
-                .App(() => application = new App())
+                .App(() => application = new App(desktop))
                 .UseX11()
                 .UseLinuxFrameBuffer()
                 .UseMacOS()
@@ -29,7 +30,7 @@ internal static class Program
 
             // The native loop can finish before Window.Closed's async handler.
             // Keep the instance guard until that same actual shutdown settles.
-            await ClientDesktopLifetime.RunAsync(async () => await host.RunAsync().ConfigureAwait(false),
+            await desktop.RunHostAsync(async () => await host.RunAsync().ConfigureAwait(false),
                 () => application?.ShutdownAsync() ?? Task.CompletedTask).ConfigureAwait(false);
         }
         catch (Exception exception)

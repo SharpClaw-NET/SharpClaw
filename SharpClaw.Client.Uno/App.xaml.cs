@@ -16,13 +16,17 @@ namespace SharpClaw;
 public partial class App : Application
 {
     private readonly ClientStartupLifetime _startup = new();
+    private readonly ClientDesktopLifetime? _desktopLifetime;
 
     /// <summary>
     /// Initializes the singleton application object. This is the first line of authored code
     /// executed, and as such is the logical equivalent of main() or WinMain().
     /// </summary>
-    public App()
+    public App() : this(null) { }
+
+    internal App(ClientDesktopLifetime? desktopLifetime)
     {
+        _desktopLifetime = desktopLifetime;
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.AppInitializing);
         UnhandledException += (_, eventArgs) =>
             ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, eventArgs.Exception);
@@ -102,40 +106,44 @@ public partial class App : Application
 #if DEBUG
         window.UseStudio();
 #endif
-        var navigation = _startup.AcquireOwnedAsync(() => builder.NavigateAsync<Shell>
-            (initialNavigate: async (services, navigator) =>
-            {
-                ClientStartupDiagnostics.Current.Record(ClientStartupStage.InitialNavigationStarting);
-                // Capture the service provider early — Host is not yet
-                // assigned at this point, but BootPage needs services.
-                _startup.Publish(() => Services = services);
-
-                // Boot is the module-neutral home, not a transient route into chat.
-                // Use the scoped navigator supplied by Uno for this shell, while
-                // retaining the same client action boundary as later navigation.
-                await new ClientNavigationService(navigator, services.GetRequiredService<ClientActionDispatcher>())
-                    .NavigateRouteAsync(this, "Boot", Qualifiers.Nested).ConfigureAwait(true);
-            }), host =>
-            {
-                Host = host;
-                ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationReady);
-            }, RetireHostAsync);
+        var navigation = BeginOwnedNavigationAsync(builder, window);
         if (_startup.IsClosed)
         {
             await navigation.ConfigureAwait(false);
             return;
         }
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationScheduled);
-        // NavigateAsync installs the Shell synchronously before yielding. The
-        // toolkit otherwise defers activation when its native splash is disabled,
-        // although host/window initialization may itself require a loaded window.
-        // Activate the installed shell BEFORE awaiting host/navigation completion.
+        // The Shell is installed synchronously; initialization may need it loaded.
+        // Activate once before awaiting, with no toolkit fallback reactivation.
         window.Activate();
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.WindowActivated);
         if (!_startup.IsClosed) SetWindowIconFromFile(window);
         // The retained operation owns Host adoption/retirement independently of
         // this launch continuation and of a closed window's dispatcher.
         await navigation.ConfigureAwait(false);
+    }
+
+    private Task<ClientHostOwner?> BeginOwnedNavigationAsync(
+        Uno.Extensions.Hosting.IApplicationBuilder builder, Window window)
+    {
+        var shell = new Shell();
+        if (shell.ContentControl is Uno.Toolkit.UI.ExtendedSplashScreen splash)
+            splash.Initialize(window, builder.Arguments);
+        window.Content = shell;
+        var navigation = _startup.AcquireOwnedAsync(async () =>
+            {
+                // Register the real Host BEFORE asynchronous initialization. A
+                // failed navigation must still leave its physical retirement owned.
+                var owner = _startup.CreateOwned(() => new ClientHostOwner(builder.Build(), _desktopLifetime));
+                await InitializeHostedNavigationAsync(window, shell.ContentControl, owner.Host).ConfigureAwait(false);
+                return owner;
+            }, owner =>
+            {
+                Host = owner.Host;
+                ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationReady);
+            }, static owner => owner.DisposeAsync());
+        shell.SetLoadingTask(navigation);
+        return navigation;
     }
 
     private Window AttachWindow(Window window)
@@ -146,10 +154,29 @@ public partial class App : Application
         return window;
     }
 
-    private static async ValueTask RetireHostAsync(IHost host)
+    private async Task InitializeHostedNavigationAsync(Window window, ContentControl root, IHost host)
     {
-        if (host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync().ConfigureAwait(false);
-        else host.Dispose();
+        // Yield on the caller UI thread so LaunchAsync can activate the installed
+        // Shell. The Host is already owned if close wins during this suspension.
+        await Task.Yield();
+        if (_startup.IsClosed) return;
+        var services = await window.AttachServicesAsync(host.Services).ConfigureAwait(true);
+        if (!_startup.TryPublish(() => Services = services)) return;
+        var navigation = root.HostAsync(services, initialNavigate: NavigateInitialRouteAsync);
+        var start = Task.Run(() => host.StartAsync(CancellationToken.None), CancellationToken.None);
+        // Both actual operations settle even when one fails. No subsequent UI
+        // activation or dispatcher continuation is needed by this ownership join.
+        await Task.WhenAll(start, navigation).ConfigureAwait(false);
+    }
+
+    private async Task NavigateInitialRouteAsync(IServiceProvider services, INavigator navigator)
+    {
+        // Boot can read the window scope during initial loading, but later page
+        // navigation needs this actual root navigator's scoped service provider.
+        if (!_startup.TryPublish(() => Services = services)) return;
+        ClientStartupDiagnostics.Current.Record(ClientStartupStage.InitialNavigationStarting);
+        await new ClientNavigationService(navigator, services.GetRequiredService<ClientActionDispatcher>())
+            .NavigateRouteAsync(this, "Boot", Qualifiers.Nested).ConfigureAwait(true);
     }
 
     private Uno.Extensions.Hosting.IApplicationBuilder CreateApplicationBuilder(
@@ -324,7 +351,7 @@ public partial class App : Application
             () => _startup.GetOwned<ModulePackageStore>()?.DisposeAsync() ?? ValueTask.CompletedTask,
             failure).ConfigureAwait(false);
         failure = await AttemptShutdownStepAsync(
-            () => _startup.GetOwned<IHost>() is { } host ? RetireHostAsync(host) : ValueTask.CompletedTask,
+            () => _startup.GetOwned<ClientHostOwner>()?.DisposeAsync() ?? ValueTask.CompletedTask,
             failure).ConfigureAwait(false);
         failure = await AttemptShutdownStepAsync(
             () => _startup.GetOwned<SharpClawLogRuntime>()?.DisposeAsync() ?? ValueTask.CompletedTask,
