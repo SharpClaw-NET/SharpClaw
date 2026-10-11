@@ -24,6 +24,8 @@ namespace SharpClaw.Services;
 /// On non-Windows platforms all methods are safe no-ops.
 /// </para>
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public startup configuration helpers. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public static class WindowsStartupManager
 {
     private const string BackendScriptName = "SharpClaw.Backend.vbs";

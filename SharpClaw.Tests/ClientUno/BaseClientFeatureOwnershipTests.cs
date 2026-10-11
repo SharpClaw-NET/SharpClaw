@@ -31,6 +31,11 @@ internal sealed class BaseClientFeatureOwnershipTests
         AssertSourceOrder(MethodBody(lifetime, "CloseAsync"), "CloseAdmission()", "_shutdown.ShutdownAsync");
         cleanup.Should().NotContain("GetService<");
         cleanup.Should().NotContain("GetRequiredService<");
+        MethodBody(source, "OnWindowClosed").Should().Contain("await ShutdownAsync().ConfigureAwait(false)");
+        var program = File.ReadAllText(Path.Combine(FindSourceRoot(), "SharpClaw.Client.Uno", "Platforms", "Desktop", "Program.cs"));
+        program.Should().Contain("using var instance = InstalledClientInstanceGuard.Acquire()");
+        program.Should().Contain("await ClientDesktopLifetime.RunAsync");
+        program.Should().Contain("application?.ShutdownAsync()");
     }
 
     private static string MethodBody(string source, string name)

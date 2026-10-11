@@ -11,6 +11,8 @@ using Uno.Resizetizer;
 
 namespace SharpClaw;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public App XAML type and its framework constructor/binding contracts. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public partial class App : Application
 {
     private readonly ClientStartupLifetime _startup = new();
@@ -40,6 +42,9 @@ public partial class App : Application
     internal IHost? Host { get; private set; }
 
     internal static IServiceProvider? Services { get; private set; }
+
+    internal Task ShutdownAsync() => _startup.CloseAsync(
+        _startup.GetOwned<ClientActionDispatcher>(), CloseResourcesAsync);
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
         Justification = "The top-level async-void startup boundary must persist any failure and show a failure window rather than leave an invisible process; failure is not treated as startup success.")]
@@ -275,8 +280,7 @@ public partial class App : Application
     {
         try
         {
-            await _startup.CloseAsync(_startup.GetOwned<ClientActionDispatcher>(),
-                CloseResourcesAsync).ConfigureAwait(true);
+            await ShutdownAsync().ConfigureAwait(false);
         }
         catch (Exception exception)
         {

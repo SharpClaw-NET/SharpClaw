@@ -10,6 +10,8 @@ namespace SharpClaw.Presentation;
     Justification = "This Uno view inherits nongeneric enumeration from the framework for XAML children; it is not a public collection API and adding generic enumeration would change framework semantics.")]
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
     Justification = "Uno owns reusable page instances. The only owned disposable fields are per-visit/tab cancellation sources; OnUnloaded retires and disposes each through its awaited cancellation completion.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public SettingsPage XAML type and its framework constructor/binding contracts. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public sealed partial class SettingsPage : Page
 {
     private static FontFamily Mono => TerminalUI.Mono;

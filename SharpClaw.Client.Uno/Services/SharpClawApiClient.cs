@@ -9,7 +9,9 @@ namespace SharpClaw.Services;
 /// HTTP client that communicates with the selected SharpClaw internal API
 /// and resolves its per-session API key from backend discovery metadata.
 /// </summary>
-public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public HTTP and discovery service. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
+public sealed partial class SharpClawApiClient : IDisposable, IAsyncDisposable
 {
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2213",
         Justification = "DisposeOwnedHttpAsync owns one physical release task awaited by the disposal terminal and receipt settlement; the supplied client is released only when its constructor explicitly transfers ownership.")]
@@ -287,22 +289,7 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
 
         while (!cts.Token.IsCancellationRequested)
         {
-            try
-            {
-                using var response = await GetAsync("/ping", cts.Token).ConfigureAwait(true);
-                if (response.IsSuccessStatusCode)
-                    return;
-
-                // API key mismatch — the API process may have restarted
-                // and written a new key to disk.  Clear the cache so the
-                // next attempt re-reads the file.
-                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                    await InvalidateApiKeyAsync(cts.Token).ConfigureAwait(true);
-            }
-            catch (HttpRequestException) { }
-            catch (InvalidOperationException) { await InvalidateApiKeyAsync(cts.Token).ConfigureAwait(true); }
-            catch (TaskCanceledException) when (!ct.IsCancellationRequested) { }
-
+            if (await ProbeReadinessAsync(cts.Token).ConfigureAwait(true)) return;
             await Task.Delay(250, cts.Token).ConfigureAwait(true);
         }
 
@@ -316,7 +303,12 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
         request.Headers.Add("X-Api-Key", key);
     }
 
-    private string ResolveApiKey(Uri targetBaseUri)
+    private string ResolveApiKey(Uri targetBaseUri) => TryResolveApiKey(targetBaseUri)
+        ?? throw new InvalidOperationException(
+            $"API key file could not be resolved for backend '{targetBaseUri}'. " +
+            "Ensure the selected SharpClaw backend is running and has published discovery metadata.");
+
+    private string? TryResolveApiKey(Uri targetBaseUri)
     {
         if (_fixedApiKey is not null)
             return _fixedApiKey;
@@ -331,9 +323,7 @@ public sealed class SharpClawApiClient : IDisposable, IAsyncDisposable
         var keyFilePath = _frontendInstance?.ResolveBackendApiKeyPath(targetBaseUrl);
 
         if (string.IsNullOrWhiteSpace(keyFilePath) || !File.Exists(keyFilePath))
-            throw new InvalidOperationException(
-                $"API key file could not be resolved for backend '{targetBaseUrl}'. " +
-                "Ensure the selected SharpClaw backend is running and has published discovery metadata.");
+            return null;
 
         var apiKey = File.ReadAllText(keyFilePath).Trim();
         lock (_targetLock)

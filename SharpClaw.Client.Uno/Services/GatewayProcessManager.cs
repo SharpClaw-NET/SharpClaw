@@ -15,6 +15,8 @@ namespace SharpClaw.Services;
 /// <c>true</c> (default), the client never attempts to start it.
 /// </para>
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public owned Gateway process service. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public sealed class GatewayProcessManager : IDisposable
 {
     private static readonly Action<ILogger, string, Exception?> LogStdout =

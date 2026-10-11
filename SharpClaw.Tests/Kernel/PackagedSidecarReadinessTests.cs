@@ -102,17 +102,23 @@ internal sealed class PackagedSidecarReadinessTests
     [Test]
     public async Task BootstrapBudgetCancelsAnInFlightProbeAsync()
     {
+        var clock = new InFlightBudgetClock();
+        var entered = false;
         using var handler = new ProbeHandler(async (_, token) =>
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+            entered = true;
+            clock.ExpireBudget();
+            await Task.Delay(Timeout.InfiniteTimeSpan, clock, token).ConfigureAwait(false);
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
         using var http = Client(handler);
         var act = async () => await PackagedSidecarReadiness.WaitAsync(http, () => false,
-            TimeSpan.FromMilliseconds(50), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5))
+            TimeSpan.FromMilliseconds(50), CancellationToken.None, clock)
+            .WaitAsync(TimeSpan.FromSeconds(5), TimeProvider.System, TestContext.CurrentContext.CancellationToken)
             .ConfigureAwait(false);
 
         var failure = await act.Should().ThrowAsync<TimeoutException>().ConfigureAwait(false);
+        entered.Should().BeTrue("the bootstrap timer is advanced only after actual HTTP probe admission");
         failure.Which.InnerException.Should().BeAssignableTo<OperationCanceledException>();
     }
 

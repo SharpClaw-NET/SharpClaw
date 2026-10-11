@@ -11,6 +11,8 @@ namespace SharpClaw.Configuration;
 /// Client-specific defaults remain here; parsing, protection, import, and
 /// recovery belong to the package.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public configuration helpers. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public static class LocalEnvironment
 {
     public const string DefaultApiUrl = "http://127.0.0.1:48923";

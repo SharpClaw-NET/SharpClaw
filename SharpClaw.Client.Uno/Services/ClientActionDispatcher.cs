@@ -8,6 +8,8 @@ namespace SharpClaw.Services;
 /// <summary>Routes all Uno commands and state transitions through one Core dispatcher.</summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
     Justification = "This application-lifetime dispatcher retains reusable managed-only gates; AvailableWaitHandle is never accessed and every acquisition is released in finally. No native wait handle or disposable service is owned by these gates.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public action dispatcher and terminal callbacks. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public sealed class ClientActionDispatcher
 {
     private readonly KernelGraph _graph;

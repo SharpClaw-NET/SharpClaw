@@ -9,6 +9,8 @@ namespace SharpClaw.Services;
 /// <summary>
 /// Resolves and owns frontend instance-scoped paths and manifest state.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public instance and target binding service. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public sealed class FrontendInstanceService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

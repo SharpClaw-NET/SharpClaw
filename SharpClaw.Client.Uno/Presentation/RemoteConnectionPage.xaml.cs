@@ -7,6 +7,8 @@ namespace SharpClaw.Presentation;
     Justification = "This Uno view inherits nongeneric enumeration for XAML children; it does not expose a collection API and generic enumeration would change framework semantics.")]
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
     Justification = "Uno owns reusable page instances. The per-visit cancellation source is retired and disposed through awaited cancellation on unload, while each admitted service operation owns and joins its process settlement.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public RemoteConnectionPage XAML type and its framework constructor/binding contracts. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public sealed partial class RemoteConnectionPage : Page
 {
     private CancellationTokenSource? _visit;

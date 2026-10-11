@@ -3,7 +3,7 @@ using SharpClaw.Services;
 
 namespace SharpClaw;
 
-internal class Program
+internal static class Program
 {
     [STAThread]
     public static async Task Main(string[] args)
@@ -18,15 +18,19 @@ internal class Program
                 diagnostics.Record(ClientStartupStage.DuplicateActivation);
                 return;
             }
+            App? application = null;
             var host = UnoPlatformHostBuilder.Create()
-                .App(() => new App())
+                .App(() => application = new App())
                 .UseX11()
                 .UseLinuxFrameBuffer()
                 .UseMacOS()
                 .UseWin32()
                 .Build();
 
-            await host.RunAsync().ConfigureAwait(true);
+            // The native loop can finish before Window.Closed's async handler.
+            // Keep the instance guard until that same actual shutdown settles.
+            await ClientDesktopLifetime.RunAsync(async () => await host.RunAsync().ConfigureAwait(false),
+                () => application?.ShutdownAsync() ?? Task.CompletedTask).ConfigureAwait(false);
         }
         catch (Exception exception)
         {

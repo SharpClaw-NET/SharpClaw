@@ -4,6 +4,8 @@ namespace SharpClaw.Presentation;
 
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1010",
     Justification = "This Uno view inherits nongeneric enumeration from the framework for XAML children; it is not a public collection API and adding generic enumeration would change framework semantics.")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public TerminalMenuButton XAML type and its framework constructor/binding contracts. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public sealed partial class TerminalMenuButton : UserControl
 {
     public static readonly DependencyProperty LabelProperty =

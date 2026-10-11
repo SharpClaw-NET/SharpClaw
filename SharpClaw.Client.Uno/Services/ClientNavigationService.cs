@@ -1,6 +1,8 @@
 namespace SharpClaw.Services;
 
 /// <summary>Routes Uno navigation commits through the client action boundary.</summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public navigation service. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public sealed class ClientNavigationService(
     INavigator navigator,
     ClientActionDispatcher actions)

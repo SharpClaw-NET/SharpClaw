@@ -19,6 +19,8 @@ namespace SharpClaw.Services;
 /// <see cref="IsApiReachableAsync"/> and skips process launch.
 /// </para>
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1515",
+    Justification = "The net10.0 headless target exposes this public owned Runtime process service. The Uno desktop target shares its declaration; changing accessibility would split the existing source/binary contract across these targets.")]
 public sealed class BackendProcessManager : IDisposable
 {
     private static readonly Action<ILogger, string, Exception?> LogStdout =
