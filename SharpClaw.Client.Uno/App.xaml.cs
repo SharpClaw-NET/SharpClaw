@@ -13,7 +13,7 @@ namespace SharpClaw;
 
 public partial class App : Application
 {
-    private SharpClawLogRuntime? _logging;
+    private readonly ClientStartupLifetime _startup = new();
 
     /// <summary>
     /// Initializes the singleton application object. This is the first line of authored code
@@ -54,10 +54,11 @@ public partial class App : Application
         catch (Exception exception)
         {
             ClientStartupDiagnostics.Current.Record(ClientStartupStage.StartupFailed, exception);
+            if (_startup.IsClosed) return;
             // A startup failure must never leave a responsive, invisible process.
-            MainWindow ??= new Window();
-            MainWindow.Title = "SharpClaw — startup failed";
-            MainWindow.Content = new Border
+            var window = MainWindow ?? AttachWindow(new Window());
+            window.Title = "SharpClaw — startup failed";
+            window.Content = new Border
             {
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Black),
                 Child = new TextBlock
@@ -68,7 +69,7 @@ public partial class App : Application
                     Margin = new Thickness(24),
                 },
             };
-            MainWindow.Activate();
+            window.Activate();
         }
     }
 
@@ -76,25 +77,25 @@ public partial class App : Application
     {
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.LaunchStarting);
         var frontendInstance = new FrontendInstanceService();
+        _startup.SetMutationOwner(frontendInstance.BackendMutations);
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.InstanceReady);
         var loggingOptions = SharpClawLoggingOptions.FromConfiguration(
             new ConfigurationBuilder()
                 .AddLocalEnvironment(isDevelopment: false, instancePaths: frontendInstance.Paths)
                 .Build());
-        _logging = SharpClawLogRuntime.Create(
+        var logging = _startup.CreateOwned(() => SharpClawLogRuntime.Create(
             "uno",
             frontendInstance.Paths,
-            loggingOptions);
-        var logging = _logging;
+            loggingOptions));
         RegisterGlobalExceptionLogging(logging.SerilogLogger);
 
         var builder = CreateApplicationBuilder(args, logging, loggingOptions, frontendInstance);
-        MainWindow = builder.Window;
-        MainWindow.Title = "SharpClaw";
+        var window = AttachWindow(builder.Window);
+        window.Title = "SharpClaw";
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.BuilderReady);
 
 #if DEBUG
-        MainWindow.UseStudio();
+        window.UseStudio();
 #endif
         var navigation = builder.NavigateAsync<Shell>
             (initialNavigate: async (services, navigator) =>
@@ -102,7 +103,7 @@ public partial class App : Application
                 ClientStartupDiagnostics.Current.Record(ClientStartupStage.InitialNavigationStarting);
                 // Capture the service provider early — Host is not yet
                 // assigned at this point, but BootPage needs services.
-                Services = services;
+                _startup.Publish(() => Services = services);
 
                 // Boot is the module-neutral home, not a transient route into chat.
                 // Use the scoped navigator supplied by Uno for this shell, while
@@ -115,13 +116,32 @@ public partial class App : Application
         // toolkit otherwise defers activation when its native splash is disabled,
         // although host/window initialization may itself require a loaded window.
         // Activate the installed shell BEFORE awaiting host/navigation completion.
-        MainWindow.Activate();
+        window.Activate();
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.WindowActivated);
-        SetWindowIconFromFile(MainWindow);
-        Host = await navigation.ConfigureAwait(true);
+        SetWindowIconFromFile(window);
+        // Once the UI has been activated, host adoption/retirement must continue
+        // even when a closed window can no longer dispatch UI continuations.
+        var host = await navigation.ConfigureAwait(false);
+        if (!_startup.TryPublishOwned(host, value => Host = value))
+        {
+            await RetireHostAsync(host).ConfigureAwait(false);
+            return;
+        }
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationReady);
+    }
 
+    private Window AttachWindow(Window window)
+    {
+        if (ReferenceEquals(MainWindow, window)) return window;
+        MainWindow = window;
         MainWindow.Closed += OnWindowClosed;
+        return window;
+    }
+
+    private static async ValueTask RetireHostAsync(IHost host)
+    {
+        if (host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync().ConfigureAwait(false);
+        else host.Dispose();
     }
 
     private Uno.Extensions.Hosting.IApplicationBuilder CreateApplicationBuilder(
@@ -171,7 +191,7 @@ public partial class App : Application
             .CoreLogLevel(LogLevel.Warning);
     }
 
-    private static void RegisterServices(
+    private void RegisterServices(
         IServiceCollection services,
         SharpClawLogRuntime logging,
         FrontendInstanceService frontendInstance,
@@ -183,21 +203,28 @@ public partial class App : Application
         var isDev = isDevelopment;
         var apiUrl = RegisterProcesses(services, frontendInstance, isDev);
         services.AddSingleton<ClientActionContextSource>();
-        services.AddSingleton<ClientActionDispatcher>(sp =>
+        services.AddSingleton<ClientActionDispatcher>(sp => _startup.CreateOwned(() =>
             ClientActionDispatcher.CreateProduction(
-                sp.GetRequiredService<ClientActionContextSource>()));
+                sp.GetRequiredService<ClientActionContextSource>())));
         services.AddTransient<ClientNavigationService>();
-        services.AddSingleton<ModulePackageStore>();
-        services.AddSingleton<SharpClawApiClient>(sp =>
+        services.AddSingleton<ModulePackageStore>(_ => _startup.CreateOwned(() =>
+            new ModulePackageStore(frontendInstance)));
+        services.AddSingleton<SharpClawApiClient>(sp => _startup.CreateOwned(() =>
             new SharpClawApiClient(
                 apiUrl,
                 sp.GetRequiredService<ILogger<SharpClawApiClient>>(),
                 frontendInstance,
-                sp.GetRequiredService<ClientActionDispatcher>()));
-        services.AddSingleton<RemoteBackendConnectionService>();
+                sp.GetRequiredService<ClientActionDispatcher>())));
+        services.AddSingleton<RemoteBackendConnectionService>(sp => _startup.CreateOwned(() =>
+            new RemoteBackendConnectionService(frontendInstance,
+                sp.GetRequiredService<BackendProcessManager>(),
+                sp.GetRequiredService<GatewayProcessManager>(),
+                sp.GetRequiredService<SharpClawApiClient>(),
+                sp.GetRequiredService<ClientActionDispatcher>(),
+                sp.GetRequiredService<ModulePackageStore>())));
     }
 
-    private static string RegisterProcesses(
+    private string RegisterProcesses(
         IServiceCollection services, FrontendInstanceService frontendInstance, bool isDev)
     {
         var configuredApiUrl = LocalEnvironment.LoadApiUrl(isDev);
@@ -207,7 +234,7 @@ public partial class App : Application
         var backendEnabled = LocalEnvironment.LoadBackendEnabled(isDev);
         var persistent = LocalEnvironment.LoadProcessesPersistent(isDev);
 
-        services.AddSingleton<BackendProcessManager>(sp =>
+        services.AddSingleton<BackendProcessManager>(sp => _startup.CreateOwned(() =>
         {
             var manager = new BackendProcessManager(
                 apiUrl,
@@ -218,12 +245,12 @@ public partial class App : Application
                 Persistent = persistent,
             };
             return manager;
-        });
+        }));
 
         var gatewayUrl = LocalEnvironment.LoadGatewayUrl(isDev);
         var gatewayEnabled = LocalEnvironment.LoadGatewayEnabled(isDev);
 
-        services.AddSingleton<GatewayProcessManager>(sp =>
+        services.AddSingleton<GatewayProcessManager>(sp => _startup.CreateOwned(() =>
         {
             var manager = new GatewayProcessManager(
                 gatewayUrl,
@@ -235,7 +262,7 @@ public partial class App : Application
                 Persistent = persistent,
             };
             return manager;
-        });
+        }));
 
         return apiUrl;
     }
@@ -248,12 +275,8 @@ public partial class App : Application
     {
         try
         {
-            var services = Host?.Services;
-            var actions = services?.GetService<ClientActionDispatcher>();
-            if (services is null || actions is null) return;
-            await actions.RunCommandAsync("client.app.close",
-                async _ => await CloseResourcesAsync(services).ConfigureAwait(false),
-                CancellationToken.None).ConfigureAwait(true);
+            await _startup.CloseAsync(_startup.GetOwned<ClientActionDispatcher>(),
+                CloseResourcesAsync).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
@@ -261,37 +284,46 @@ public partial class App : Application
         }
     }
 
-    private async Task CloseResourcesAsync(IServiceProvider services)
+    private async Task CloseResourcesAsync()
     {
-        // Join a committed restart before disposing its process/HTTP owners.
-        // Every later cleanup is attempted, retaining the first failure.
+        // The shutdown owner has already joined all local/remote mutations.
+        // Every cleanup is attempted, retaining the first failure.
         ExceptionDispatchInfo? failure = null;
-        failure = await AttemptShutdownStepAsync(
-            () => services.GetService<RemoteBackendConnectionService>()?.DisposeAsync() ?? ValueTask.CompletedTask,
-            failure).ConfigureAwait(false);
         failure = await AttemptShutdownStepAsync(() =>
         {
-            var backend = services.GetService<BackendProcessManager>();
-            var gateway = services.GetService<GatewayProcessManager>();
+            var backend = _startup.GetOwned<BackendProcessManager>();
+            var gateway = _startup.GetOwned<GatewayProcessManager>();
             WindowsStartupManager.RefreshIfNeeded(backend?.ExecutablePath, backend?.ApiUrl,
                 gateway?.ExecutablePath, gateway?.GatewayUrl);
             return ValueTask.CompletedTask;
         }, failure).ConfigureAwait(false);
         failure = await AttemptShutdownStepAsync(() =>
         {
-            services.GetService<GatewayProcessManager>()?.Dispose();
+            _startup.GetOwned<GatewayProcessManager>()?.Dispose();
             return ValueTask.CompletedTask;
         }, failure).ConfigureAwait(false);
         failure = await AttemptShutdownStepAsync(() =>
         {
-            services.GetService<BackendProcessManager>()?.Dispose();
+            _startup.GetOwned<BackendProcessManager>()?.Dispose();
             return ValueTask.CompletedTask;
         }, failure).ConfigureAwait(false);
         failure = await AttemptShutdownStepAsync(
-            () => services.GetService<SharpClawApiClient>()?.DisposeAsync() ?? ValueTask.CompletedTask,
+            () => _startup.GetOwned<SharpClawApiClient>()?.DisposeAsync() ?? ValueTask.CompletedTask,
             failure).ConfigureAwait(false);
         failure = await AttemptShutdownStepAsync(
-            () => _logging?.DisposeAsync() ?? ValueTask.CompletedTask, failure).ConfigureAwait(false);
+            () => _startup.GetOwned<RemoteBackendConnectionService>()?.DisposeAsync() ?? ValueTask.CompletedTask,
+            failure).ConfigureAwait(false);
+        failure = await AttemptShutdownStepAsync(() =>
+        {
+            _startup.GetOwned<ModulePackageStore>()?.Dispose();
+            return ValueTask.CompletedTask;
+        }, failure).ConfigureAwait(false);
+        failure = await AttemptShutdownStepAsync(
+            () => _startup.GetOwned<IHost>() is { } host ? RetireHostAsync(host) : ValueTask.CompletedTask,
+            failure).ConfigureAwait(false);
+        failure = await AttemptShutdownStepAsync(
+            () => _startup.GetOwned<SharpClawLogRuntime>()?.DisposeAsync() ?? ValueTask.CompletedTask,
+            failure).ConfigureAwait(false);
         failure?.Throw();
     }
 

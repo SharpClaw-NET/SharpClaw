@@ -25,6 +25,12 @@ public sealed class FrontendInstanceService
         string? explicitInstanceRoot = null,
         string? sharedRootOverride = null,
         string? installAnchorOverride = null)
+        : this(explicitInstanceRoot, sharedRootOverride, installAnchorOverride, backendMutations: null)
+    {
+    }
+
+    internal FrontendInstanceService(string? explicitInstanceRoot, string? sharedRootOverride,
+        string? installAnchorOverride, BundledBackendMutationCoordinator? backendMutations)
     {
         var resolvedInstanceRoot = string.IsNullOrWhiteSpace(explicitInstanceRoot)
             ? Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT")
@@ -51,9 +57,12 @@ public sealed class FrontendInstanceService
             installAnchorOverride);
         Paths.EnsureDirectories();
         _ = Paths.Manifest;
+        BackendMutations = backendMutations ?? new BundledBackendMutationCoordinator();
     }
 
     public SharpClawInstancePaths Paths { get; }
+
+    internal BundledBackendMutationCoordinator BackendMutations { get; }
 
     internal static string? ResolveInstalledFrontendRoot(string installDirectory, string sharedRoot, bool isWindows)
         => isWindows && File.Exists(Path.Combine(installDirectory, "sharpclaw-installation.json"))

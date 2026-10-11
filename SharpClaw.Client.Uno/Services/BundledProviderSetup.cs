@@ -11,6 +11,7 @@ internal static class BundledProviderSetup
         FrontendInstanceService frontend,
         BackendProcessManager backend,
         GatewayProcessManager? gateway,
+        SharpClawApiClient api,
         ClientActionDispatcher actions,
         SharpClawProviderSetupOption provider,
         string model,
@@ -18,9 +19,6 @@ internal static class BundledProviderSetup
         string? credential,
         CancellationToken cancellationToken = default)
     {
-        BundledModuleSetup.RequireLocalMode(frontend);
-        if (!backend.OwnsCurrentTarget || backend.SkipLaunch)
-            throw new InvalidOperationException("Only the running, frontend-owned bundled Runtime can be configured here.");
         if (string.IsNullOrWhiteSpace(provider.Key))
             throw new ArgumentException("A provider key is required.", nameof(provider));
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
@@ -29,20 +27,27 @@ internal static class BundledProviderSetup
              uri.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(uri.UserInfo)))
             throw new InvalidOperationException("Use an absolute HTTP or HTTPS provider endpoint without embedded credentials.");
 
-        var paths = new SharpClawInstancePaths(SharpClawInstanceKind.Backend,
-            frontend.BundledBackendInstanceRoot, frontend.Paths.SharedRoot);
-        var store = new SupprocomSecretFileStore(LocalEnvironment.CreateSecretsOptions(
-            paths.ConfigDirectory, isDevelopment: false, paths));
-        await actions.RunCommandAsync("client.provider.configure", async token =>
+        await frontend.BackendMutations.RunAsync(actions, "client.provider.configure", async token =>
         {
+            using var targetGuard = api.HoldTarget(new Uri(backend.ApiUrl));
+            BundledModuleSetup.RequireLocalMode(frontend);
+            BundledBackendProcesses.RequireOwnedTarget(backend, api);
+            if (!backend.OwnsCurrentTarget || backend.SkipLaunch)
+                throw new InvalidOperationException("Only the running, frontend-owned bundled Runtime can be configured here.");
+            var paths = new SharpClawInstancePaths(SharpClawInstanceKind.Backend,
+                frontend.BundledBackendInstanceRoot, frontend.Paths.SharedRoot);
+            var store = new SupprocomSecretFileStore(LocalEnvironment.CreateSecretsOptions(
+                paths.ConfigDirectory, isDevelopment: false, paths));
+            await frontend.BackendMutations.CheckpointAsync("client.provider.configure",
+                BundledBackendMutationStage.BeforeCommit, token).ConfigureAwait(false);
             // Persist a single protected document, preserving unrelated settings.
             // Never silently rebind a previous provider's fallback credentials.
             await store.UpdateDocumentAsync(settings => UpdateSettings(
                 settings, provider, model.Trim(), endpoint?.Trim(), credential), token).ConfigureAwait(false);
-            gateway?.Stop();
-            backend.Stop();
-            if (backend.IsRunning)
-                throw new InvalidOperationException("The previous Runtime did not stop; it has not been replaced.");
+            using var settlement = new CancellationTokenSource(BundledBackendProcesses.SettlementTimeout);
+            await frontend.BackendMutations.CheckpointAsync("client.provider.configure",
+                BundledBackendMutationStage.Committed, settlement.Token).ConfigureAwait(false);
+            await BundledBackendProcesses.StopAsync(backend, gateway, api, settlement.Token).ConfigureAwait(false);
             // The Boot route creates a complete new graph and reads the new
             // protected document. No live singleton or client is mutated.
         }, cancellationToken).ConfigureAwait(false);
@@ -55,6 +60,7 @@ internal static class BundledProviderSetup
         string? endpoint,
         string? credential)
     {
+        BundledModuleSetup.RequireLocalMode(settings);
         var values = settings.ToDictionary(setting => setting.Key, setting => setting.Value,
             StringComparer.OrdinalIgnoreCase);
         var previousDefault = values.GetValueOrDefault("Provider:Key") ?? values.GetValueOrDefault("Providers:Default");

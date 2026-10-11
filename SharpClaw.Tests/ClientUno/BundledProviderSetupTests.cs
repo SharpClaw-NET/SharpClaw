@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using SharpClaw.Core.Kernel;
 using SharpClaw.Services;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Runtime.INF.Configuration;
@@ -49,9 +50,10 @@ internal sealed class BundledProviderSetupTests
     [Test]
     public async Task Local_setup_uses_the_existing_protected_document_and_requires_a_new_runtime_generationAsync()
     {
-        using var scope = new SetupScope();
+        var scope = new SetupScope();
+        await using var scopeDisposal = scope.ConfigureAwait(false);
         await scope.Backend.EnsureStartedAsync().ConfigureAwait(false);
-        await BundledProviderSetup.ApplyAsync(scope.Frontend, scope.Backend, null, new ClientActionDispatcher(),
+        await BundledProviderSetup.ApplyAsync(scope.Frontend, scope.Backend, null, scope.Api, scope.Actions,
             new("future-provider", "Future Provider", true, true), "future-model", "https://future.example", "test-secret").ConfigureAwait(false);
         scope.Backend.IsRunning.Should().BeFalse();
         var protectedFile = await File.ReadAllBytesAsync(Path.Combine(scope.BackendPaths.ConfigDirectory, ".env")).ConfigureAwait(false);
@@ -68,16 +70,17 @@ internal sealed class BundledProviderSetupTests
     [Test]
     public async Task Invalid_credentials_preserve_the_document_and_do_not_stop_the_running_runtimeAsync()
     {
-        using var scope = new SetupScope();
+        var scope = new SetupScope();
+        await using var scopeDisposal = scope.ConfigureAwait(false);
         var store = new SupprocomSecretFileStore(RuntimeEnvironment.CreateSecretsOptions(
             scope.BackendPaths.ConfigDirectory, false, scope.BackendPaths));
         await store.LoadAsync().ConfigureAwait(false);
         var file = Path.Combine(scope.BackendPaths.ConfigDirectory, ".env");
         var before = await File.ReadAllBytesAsync(file).ConfigureAwait(false);
         await scope.Backend.EnsureStartedAsync().ConfigureAwait(false);
-        Func<Task> save = () => BundledProviderSetup.ApplyAsync(scope.Frontend, scope.Backend, null,
-            new ClientActionDispatcher(), new("future-provider", "Future", true, false), "model", null, null);
-        await save.Should().ThrowAsync<Exception>().ConfigureAwait(false);
+        Func<Task> save = () => BundledProviderSetup.ApplyAsync(scope.Frontend, scope.Backend, null, scope.Api,
+            scope.Actions, new("future-provider", "Future", true, false), "model", null, null);
+        await save.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
         (await File.ReadAllBytesAsync(file).ConfigureAwait(false)).Should().Equal(before);
         scope.Backend.IsRunning.Should().BeTrue();
     }
@@ -85,20 +88,21 @@ internal sealed class BundledProviderSetupTests
     [Test]
     public async Task External_runtime_is_never_written_or_stopped_by_local_setupAsync()
     {
-        using var scope = new SetupScope();
+        var scope = new SetupScope();
+        await using var scopeDisposal = scope.ConfigureAwait(false);
         using var external = new BackendProcessManager("http://127.0.0.1:48923",
             NullLogger<BackendProcessManager>.Instance, scope.Frontend, scope.Executable,
             () => true, _ => Task.FromResult(true), _ => throw new AssertionException("must not launch"));
         await external.EnsureStartedAsync().ConfigureAwait(false);
         var active = Path.Combine(scope.BackendPaths.ConfigDirectory, ".env");
-        var rejected = false;
+        KernelActionFailedException? failure = null;
         try
         {
-            await BundledProviderSetup.ApplyAsync(scope.Frontend, external, null,
-                new ClientActionDispatcher(), new("local", "Local", false, false), "model", null, null).ConfigureAwait(false);
+            await BundledProviderSetup.ApplyAsync(scope.Frontend, external, null, scope.Api,
+                scope.Actions, new("local", "Local", false, false), "model", null, null).ConfigureAwait(false);
         }
-        catch (InvalidOperationException) { rejected = true; }
-        rejected.Should().BeTrue();
+        catch (KernelActionFailedException exception) { failure = exception; }
+        failure.Should().NotBeNull();
         File.Exists(active).Should().BeFalse();
         external.IsExternal.Should().BeTrue();
     }
@@ -106,20 +110,21 @@ internal sealed class BundledProviderSetupTests
     [Test]
     public async Task Retargeted_runtime_does_not_gain_write_authority_from_a_still_running_owned_processAsync()
     {
-        using var scope = new SetupScope();
+        var scope = new SetupScope();
+        await using var scopeDisposal = scope.ConfigureAwait(false);
         await scope.Backend.EnsureStartedAsync().ConfigureAwait(false);
         scope.Backend.OwnsCurrentTarget.Should().BeTrue();
         scope.Backend.UpdateApiUrl("https://external.example");
         scope.Backend.IsRunning.Should().BeTrue();
         scope.Backend.OwnsCurrentTarget.Should().BeFalse();
-        Func<Task> save = () => BundledProviderSetup.ApplyAsync(scope.Frontend, scope.Backend, null,
-            new ClientActionDispatcher(), new("local", "Local", false, false), "model", null, null);
-        await save.Should().ThrowAsync<InvalidOperationException>().ConfigureAwait(false);
+        Func<Task> save = () => BundledProviderSetup.ApplyAsync(scope.Frontend, scope.Backend, null, scope.Api,
+            scope.Actions, new("local", "Local", false, false), "model", null, null);
+        await save.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
         File.Exists(Path.Combine(scope.BackendPaths.ConfigDirectory, ".env")).Should().BeFalse();
         scope.Backend.IsRunning.Should().BeTrue();
     }
 
-    private sealed class SetupScope : IDisposable
+    private sealed class SetupScope : IAsyncDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), "sharpclaw-provider-setup-" + Guid.NewGuid().ToString("N"));
         public SetupScope()
@@ -132,11 +137,22 @@ internal sealed class BundledProviderSetupTests
             File.WriteAllText(Executable, string.Empty);
             Backend = new BackendProcessManager("http://127.0.0.1:48923", NullLogger<BackendProcessManager>.Instance,
                 Frontend, Executable, () => false, _ => Task.FromResult(false), _ => { });
+            Actions = new ClientActionDispatcher();
+            Api = new SharpClawApiClient(Backend.ApiUrl, NullLogger<SharpClawApiClient>.Instance, Frontend, Actions);
         }
         public FrontendInstanceService Frontend { get; }
         public SharpClawInstancePaths BackendPaths { get; }
         public string Executable { get; }
         public BackendProcessManager Backend { get; }
-        public void Dispose() { Backend.Dispose(); Directory.Delete(root, recursive: true); }
+        public ClientActionDispatcher Actions { get; }
+        public SharpClawApiClient Api { get; }
+        public async ValueTask DisposeAsync()
+        {
+            await Frontend.BackendMutations.DisposeAsync().ConfigureAwait(false);
+            await Api.DisposeAsync().ConfigureAwait(false);
+            Backend.Stop();
+            Backend.Dispose();
+            Directory.Delete(root, recursive: true);
+        }
     }
 }

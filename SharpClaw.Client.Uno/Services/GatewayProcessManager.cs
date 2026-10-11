@@ -259,6 +259,7 @@ public sealed class GatewayProcessManager : IDisposable
                 "SharpClaw Gateway is not reachable and no bundled gateway was found. " +
                 "Start the gateway project manually or publish with /p:BundleGateway=true.");
 
+        ct.ThrowIfCancellationRequested();
         Start();
     }
 

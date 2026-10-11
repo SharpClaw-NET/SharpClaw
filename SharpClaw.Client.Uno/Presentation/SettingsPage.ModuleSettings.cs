@@ -177,11 +177,8 @@ public sealed partial class SettingsPage
                 toggle.IsEnabled = false;
                 try
                 {
-                    await Actions.RunCommandAsync("client.module.enablement", async token =>
-                    {
-                        await BundledModuleSetup.StopAsync(backend, Gateway, frontend, token).ConfigureAwait(true);
-                        await BundledModuleSetup.ConfigureAsync(frontend, store.ActiveRoot, [module], !enabled, token).ConfigureAwait(true);
-                    }, pageToken).ConfigureAwait(true);
+                    await BundledModuleSetup.SetEnabledAsync(frontend, backend, Gateway, Api, Actions,
+                        store, module, !enabled, pageToken).ConfigureAwait(true);
                     await services.GetRequiredService<ClientNavigationService>().NavigateRouteAsync(this, "Boot", cancellationToken: pageToken).ConfigureAwait(true);
                 }
                 catch (Exception exception)

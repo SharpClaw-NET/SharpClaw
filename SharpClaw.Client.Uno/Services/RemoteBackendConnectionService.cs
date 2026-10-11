@@ -21,12 +21,6 @@ internal sealed class RemoteBackendConnectionService : IAsyncDisposable
     private readonly ClientActionDispatcher _actions;
     private readonly ModulePackageStore _modules;
     private readonly Func<HttpMessageHandler> _createPeerHandler;
-    private readonly Lock _changeLock = new();
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2213",
-        Justification = "DisposeAsync joins one cached context-free shutdown task. DisposeCoreAsync cancels this source, joins the retained active change and its physical terminal, then disposes this source in finally. The analyzer cannot trace the Task.Run/ValueTask disposal path; early disposal would violate active-operation ownership.")]
-    private readonly CancellationTokenSource _lifetime;
-    private Task<RemoteBackendConnectionStatus>? _activeChange;
-    private Task? _shutdownTask;
 
     public RemoteBackendConnectionService(
         FrontendInstanceService frontend,
@@ -56,7 +50,6 @@ internal sealed class RemoteBackendConnectionService : IAsyncDisposable
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
         _modules = modules ?? throw new ArgumentNullException(nameof(modules));
         _createPeerHandler = createPeerHandler ?? throw new ArgumentNullException(nameof(createPeerHandler));
-        _lifetime = new CancellationTokenSource();
     }
 
     public bool IsProxyConfigured() => IsProxyConfigured(_frontend);
@@ -80,14 +73,14 @@ internal sealed class RemoteBackendConnectionService : IAsyncDisposable
         var connection = RemoteGatewayConnection.Create(gatewayAddress, accessToken);
         RequireOwnedTarget();
         RejectLocalProxyLoop(connection);
-        return RunChangeAsync("client.remote.connect",
+        return _frontend.BackendMutations.RunAsync(_actions, "client.remote.connect",
             token => ConnectCoreAsync(connection, token), cancellationToken);
     }
 
     public Task<RemoteBackendConnectionStatus> DisconnectAsync(CancellationToken cancellationToken)
     {
         RequireOwnedTarget();
-        return RunChangeAsync("client.remote.disconnect", DisconnectCoreAsync, cancellationToken);
+        return _frontend.BackendMutations.RunAsync(_actions, "client.remote.disconnect", DisconnectCoreAsync, cancellationToken);
     }
 
     public async Task<RemoteBackendConnectionStatus> GetStatusAsync(CancellationToken cancellationToken)
@@ -129,13 +122,19 @@ internal sealed class RemoteBackendConnectionService : IAsyncDisposable
         RemoteGatewayConnection connection, CancellationToken cancellationToken)
     {
         using var targetGuard = _api.HoldTarget(new Uri(_backend.ApiUrl));
+        RequireOwnedTarget();
+        RejectLocalProxyLoop(connection);
         await ProbePeerAsync(connection, cancellationToken).ConfigureAwait(false);
         RequireOwnedTarget();
         cancellationToken.ThrowIfCancellationRequested();
+        await _frontend.BackendMutations.CheckpointAsync("client.remote.connect",
+            BundledBackendMutationStage.BeforeCommit, cancellationToken).ConfigureAwait(false);
         await WriteConnectionAsync(connection, cancellationToken).ConfigureAwait(false);
         // The protected document is now authoritative. Page/action cancellation
         // cannot abandon process settlement or silently restore local mode.
         using var settlement = new CancellationTokenSource(StartupTimeout);
+        await _frontend.BackendMutations.CheckpointAsync("client.remote.connect",
+            BundledBackendMutationStage.Committed, settlement.Token).ConfigureAwait(false);
         await StopOwnedProcessesAsync(settlement.Token).ConfigureAwait(false);
         await StartOwnedProcessesAsync(settlement.Token).ConfigureAwait(false);
         return await GetStatusAsync(settlement.Token).ConfigureAwait(false);
@@ -148,123 +147,22 @@ internal sealed class RemoteBackendConnectionService : IAsyncDisposable
         // Check local activation before changing the protected remote binding.
         var startLocal = HasEnabledLocalModules();
         cancellationToken.ThrowIfCancellationRequested();
+        await _frontend.BackendMutations.CheckpointAsync("client.remote.disconnect",
+            BundledBackendMutationStage.BeforeCommit, cancellationToken).ConfigureAwait(false);
         await WriteConnectionAsync(null, cancellationToken).ConfigureAwait(false);
         using var settlement = new CancellationTokenSource(StartupTimeout);
+        await _frontend.BackendMutations.CheckpointAsync("client.remote.disconnect",
+            BundledBackendMutationStage.Committed, settlement.Token).ConfigureAwait(false);
         await StopOwnedProcessesAsync(settlement.Token).ConfigureAwait(false);
         if (startLocal) await StartOwnedProcessesAsync(settlement.Token).ConfigureAwait(false);
         return new(false, false, null, false);
     }
 
-    private Task<RemoteBackendConnectionStatus> RunChangeAsync(
-        string operation,
-        Func<CancellationToken, Task<RemoteBackendConnectionStatus>> change,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_changeLock)
-        {
-            ObjectDisposedException.ThrowIf(_shutdownTask is not null, this);
-            if (_activeChange is { IsCompleted: false })
-                throw new InvalidOperationException("A remote connection change is already in progress.");
-            // Publish ownership before the context-free task can execute. App
-            // shutdown closes admission under this same lock and joins it.
-            return _activeChange = Task.Run(() => RunAdmittedChangeAsync(
-                operation, change, cancellationToken), CancellationToken.None);
-        }
-    }
-
-    private async Task<RemoteBackendConnectionStatus> RunAdmittedChangeAsync(
-        string operation,
-        Func<CancellationToken, Task<RemoteBackendConnectionStatus>> change,
-        CancellationToken cancellationToken)
-    {
-        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-        var admission = new Lock();
-        var accepting = true;
-        Task<RemoteBackendConnectionStatus>? work = null;
-        try
-        {
-            var result = await _actions.RunCommandAsync(operation, token =>
-            {
-                lock (admission)
-                {
-                    if (!accepting || work is not null)
-                        throw new InvalidOperationException("This remote connection change may run only once.");
-                    // This terminal owns configuration/process work, never UI.
-                    // Retain its task even if the action receipt settles early.
-                    work = Task.Run(() => change(token), CancellationToken.None);
-                    return new ValueTask<RemoteBackendConnectionStatus>(work);
-                }
-            }, lifetime.Token).ConfigureAwait(false);
-            lock (admission)
-            {
-                accepting = false;
-                if (work is null) throw new InvalidOperationException("The remote connection change was not accepted.");
-            }
-            return result;
-        }
-        finally
-        {
-            Task<RemoteBackendConnectionStatus>? ownedWork;
-            lock (admission)
-            {
-                accepting = false;
-                ownedWork = work;
-            }
-            if (ownedWork is not null) await ObserveSettlementAsync(ownedWork).ConfigureAwait(false);
-        }
-    }
-
     public ValueTask DisposeAsync()
     {
-        lock (_changeLock)
-        {
-            // All callers join one shutdown receipt. No UI synchronization
-            // context is needed to cancel probes or settle owned processes.
-            var shutdown = _shutdownTask ??= Task.Run(DisposeCoreAsync, CancellationToken.None);
-            GC.SuppressFinalize(this);
-            return new ValueTask(shutdown);
-        }
-    }
-
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
-        Justification = "Shutdown observes a cancellation-callback fault using bounded metadata, then still joins the admitted change and disposes its cancellation source. Cancellation failures cannot abandon a committed restart.")]
-    private async Task DisposeCoreAsync()
-    {
-        try { await _lifetime.CancelAsync().ConfigureAwait(false); }
-        catch (Exception exception)
-        {
-            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
-        }
-        finally
-        {
-            Task<RemoteBackendConnectionStatus>? active;
-            lock (_changeLock) active = _activeChange;
-            try { if (active is not null) await ObserveSettlementAsync(active).ConfigureAwait(false); }
-            finally
-            {
-                _lifetime.Dispose();
-            }
-        }
-    }
-
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
-        Justification = "The admitted physical terminal is joined after action settlement. Its secondary failure is observed using bounded exception metadata while the original receipt failure is retained for the caller.")]
-    private static async Task ObserveSettlementAsync(Task<RemoteBackendConnectionStatus> work)
-    {
-        try
-        {
-            // Both call sites supply a retained Task.Run owned by this service.
-            // The terminal has no UI dependency and must be joined before its
-            // process/HTTP owners are disposed, even after receipt cancellation.
-#pragma warning disable VSTHRD003
-            await work.ConfigureAwait(false);
-#pragma warning restore VSTHRD003
-        }
-        catch (Exception exception)
-        {
-            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
-        }
+        var shutdown = _frontend.BackendMutations.DisposeAsync();
+        GC.SuppressFinalize(this);
+        return shutdown;
     }
 
     private async Task ProbePeerAsync(RemoteGatewayConnection connection, CancellationToken cancellationToken)

@@ -17,9 +17,10 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
     private readonly HttpClient _http;
     private int _backendStarts;
 
-    internal RemoteConnectionTestScope()
+    internal RemoteConnectionTestScope(ClientActionDispatcher? actions = null,
+        BundledBackendMutationCoordinator? mutations = null)
     {
-        Frontend = new FrontendInstanceService(Path.Combine(_root, "frontend"), _root, _root);
+        Frontend = new FrontendInstanceService(Path.Combine(_root, "frontend"), _root, _root, mutations);
         BackendPaths = new SharpClawInstancePaths(SharpClawInstanceKind.Backend, Frontend.BundledBackendInstanceRoot, _root);
         BackendPaths.EnsureDirectories();
         File.WriteAllText(Path.Combine(BackendPaths.ConfigDirectory, ".env.template"), "Unrelated__Option=preserved\n");
@@ -32,7 +33,7 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
             () => false, _ => Task.FromResult(false), _ => throw new AssertionException("The disabled Gateway must not launch."))
         { SkipLaunch = true };
         _http = CreateLocalHttpClient();
-        Actions = new ClientActionDispatcher();
+        Actions = actions ?? new ClientActionDispatcher();
         Api = new SharpClawApiClient(_http, NullLogger<SharpClawApiClient>.Instance, Actions, "local-runtime-key");
         Modules = new ModulePackageStore(Path.Combine(_root, "packages"), _sources);
         Service = new RemoteBackendConnectionService(Frontend, Backend, Gateway, Api, Actions, Modules, CreatePeerHandler);
@@ -51,8 +52,10 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
     internal int BackendStarts => Volatile.Read(ref _backendStarts);
     internal HttpStatusCode PeerStatus { get; set; } = HttpStatusCode.OK;
     internal bool BlockPeer { get; set; }
+    internal bool PausePeer { get; set; }
     internal bool LocalReady { get; set; } = true;
     internal bool CompatiblePeer { get; set; } = true;
+    internal ControlledOperationGate? StartupReadinessGate { get; set; }
     internal ConcurrentQueue<PeerRequest> PeerRequests { get; } = new();
     internal ConcurrentQueue<PeerHandler> PeerHandlers { get; } = new();
     internal TaskCompletionSource PeerEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -67,6 +70,20 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
 
     internal ConfigurationRoot ReadConfiguration() => (ConfigurationRoot)new ConfigurationBuilder()
         .AddLocalEnvironmentFrom(BackendPaths.ConfigDirectory, false, BackendPaths).Build();
+
+    internal async Task<PreparedModulePackage> PrepareModuleAsync()
+    {
+        var source = Path.Combine(_root, "module-source");
+        Directory.CreateDirectory(source);
+        File.Copy(typeof(RemoteConnectionTestScope).Assembly.Location, Path.Combine(source, "Fixture.dll"));
+        await File.WriteAllTextAsync(Path.Combine(source, "package.json"), JsonSerializer.Serialize(new
+        {
+            id = "race_fixture", displayName = "Race fixture", version = "0.5.0", toolPrefix = "race",
+            entryAssembly = "Fixture.dll", minHostVersion = "0.1.0", runtime = "dotnet", hostMode = "in-process",
+        }), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        return await Modules.PrepareAsync(new ModulePackageSource("race-fixture", LocalPath: source), null,
+            TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+    }
 
     private HttpClient CreateLocalHttpClient()
     {
@@ -99,6 +116,7 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         PeerRelease.TrySetResult();
+        StartupReadinessGate?.Release();
         await Service.DisposeAsync().ConfigureAwait(false);
         await Api.DisposeAsync().ConfigureAwait(false);
         _http.Dispose();
@@ -121,6 +139,8 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
             scope.PeerRequests.Enqueue(new PeerRequest(request.RequestUri!, request.Headers.Authorization?.ToString(),
                 request.Headers.Contains("X-Api-Key"), request.Headers.Contains("X-Gateway-Token"), request.Headers.Contains("Cookie")));
             scope.PeerEntered.TrySetResult();
+            if (scope.PausePeer)
+                await scope.PeerRelease.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             if (scope.BlockPeer)
             {
                 try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false); }
@@ -148,9 +168,11 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
 
     private sealed class LocalHandler(RemoteConnectionTestScope scope) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (string.Equals(request.RequestUri!.AbsolutePath, "/ping", StringComparison.Ordinal) && scope.StartupReadinessGate is { } gate)
+                await gate.RunAsync().ConfigureAwait(false);
             var status = !scope.LocalReady && string.Equals(request.RequestUri!.AbsolutePath, "/readyz", StringComparison.Ordinal)
                 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK;
             var json = string.Equals(request.RequestUri!.AbsolutePath, "/remote/status", StringComparison.Ordinal)
@@ -160,7 +182,7 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
                     gatewayUrl = RemoteGatewayConnection.Create(PeerAddress, null).GatewayBaseUri.AbsoluteUri,
                     connected = true,
                 }) : "{}";
-            return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(json) });
+            return new HttpResponseMessage(status) { Content = new StringContent(json) };
         }
     }
 }

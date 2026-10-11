@@ -21,36 +21,86 @@ internal static class BundledModuleSetup
             throw new InvalidOperationException("Module installation here configures only this frontend's bundled Runtime, never an external host.");
     }
 
-    public static Task StopAsync(BackendProcessManager backend, GatewayProcessManager? gateway, CancellationToken token)
-    {
-        token.ThrowIfCancellationRequested();
-        RequireOwnedTarget(backend);
-        gateway?.Stop();
-        backend.Stop();
-        if (backend.IsRunning) throw new InvalidOperationException("The previous Runtime is still running; no module has been replaced.");
-        return Task.CompletedTask;
-    }
-
-    internal static Task StopAsync(BackendProcessManager backend, GatewayProcessManager? gateway,
-        FrontendInstanceService frontend, CancellationToken token)
-    {
-        RequireLocalMode(frontend);
-        return StopAsync(backend, gateway, token);
-    }
-
-    public static async Task ConfigureAsync(FrontendInstanceService frontend, string root,
+    public static Task ConfigureAsync(FrontendInstanceService frontend, string root,
         IReadOnlyList<InstalledModuleIdentity> modules, bool enabled, CancellationToken token)
     {
-        RequireLocalMode(frontend);
+        var actions = App.Services?.GetService<ClientActionDispatcher>() ?? new ClientActionDispatcher();
+        return frontend.BackendMutations.RunAsync(actions, "client.module.enablement", async cancellationToken =>
+        {
+            RequireLocalMode(frontend);
+            await ConfigureCoreAsync(frontend, root, modules, enabled,
+                "client.module.enablement", cancellationToken).ConfigureAwait(false);
+        }, token);
+    }
+
+    internal static Task InstallAsync(FrontendInstanceService frontend, BackendProcessManager backend,
+        GatewayProcessManager? gateway, SharpClawApiClient api, ClientActionDispatcher actions,
+        ModulePackageStore store, PreparedModulePackage candidate, CancellationToken cancellationToken) =>
+        frontend.BackendMutations.RunAsync(actions, "client.module.install", async token =>
+        {
+            using var targetGuard = api.HoldTarget(new Uri(backend.ApiUrl));
+            RequireLocalMode(frontend);
+            BundledBackendProcesses.RequireOwnedTarget(backend, api);
+            await store.CommitAsync(candidate,
+                Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"),
+                ct => BundledBackendProcesses.StopAsync(backend, gateway, api, ct),
+                (root, modules, ct) => ConfigureCoreAsync(frontend, root, modules, true,
+                    "client.module.install", ct), token).ConfigureAwait(false);
+            candidate.MarkInstalled();
+            using var settlement = new CancellationTokenSource(BundledBackendProcesses.StartupTimeout);
+            await frontend.BackendMutations.CheckpointAsync("client.module.install",
+                BundledBackendMutationStage.Committed, settlement.Token).ConfigureAwait(false);
+            await BundledBackendProcesses.StartAsync(backend, gateway, api, settlement.Token).ConfigureAwait(false);
+        }, cancellationToken);
+
+    internal static Task SetEnabledAsync(FrontendInstanceService frontend, BackendProcessManager backend,
+        GatewayProcessManager? gateway, SharpClawApiClient api, ClientActionDispatcher actions,
+        ModulePackageStore store, InstalledModuleIdentity module, bool enabled, CancellationToken cancellationToken) =>
+        frontend.BackendMutations.RunAsync(actions, "client.module.enablement", async token =>
+        {
+            using var targetGuard = api.HoldTarget(new Uri(backend.ApiUrl));
+            RequireLocalMode(frontend);
+            BundledBackendProcesses.RequireOwnedTarget(backend, api);
+            await ConfigureCoreAsync(frontend, store.ActiveRoot, [module], enabled,
+                "client.module.enablement", token).ConfigureAwait(false);
+            using var settlement = new CancellationTokenSource(BundledBackendProcesses.StartupTimeout);
+            await frontend.BackendMutations.CheckpointAsync("client.module.enablement",
+                BundledBackendMutationStage.Committed, settlement.Token).ConfigureAwait(false);
+            await BundledBackendProcesses.StopAsync(backend, gateway, api, settlement.Token).ConfigureAwait(false);
+            if (HasEnabledModules(frontend, backend, store))
+                await BundledBackendProcesses.StartAsync(backend, gateway, api, settlement.Token).ConfigureAwait(false);
+        }, cancellationToken);
+
+    private static async Task ConfigureCoreAsync(FrontendInstanceService frontend, string root,
+        IReadOnlyList<InstalledModuleIdentity> modules, bool enabled, string operation, CancellationToken token)
+    {
         var paths = BackendPaths(frontend);
         var store = new SupprocomSecretFileStore(LocalEnvironment.CreateSecretsOptions(
             paths.ConfigDirectory, isDevelopment: false, paths));
+        await frontend.BackendMutations.CheckpointAsync(operation,
+            BundledBackendMutationStage.BeforeCommit, token).ConfigureAwait(false);
         await store.UpdateDocumentAsync(settings => UpdateSettings(settings, root, modules, enabled), token).ConfigureAwait(false);
+    }
+
+    internal static bool HasEnabledModules(FrontendInstanceService frontend, BackendProcessManager backend,
+        ModulePackageStore store) => store.ReadInstalled().Concat(ModulePackageStore.ReadIdentities(
+            Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"), true))
+        .Any(module => IsEnabled(frontend, module.Id, module.DefaultEnabled));
+
+    internal static void RequireLocalMode(IReadOnlyList<SupprocomSecretSetting> settings)
+    {
+        foreach (var setting in settings)
+        {
+            if (string.Equals(setting.Key, "RemoteBackend:Enabled", StringComparison.OrdinalIgnoreCase) &&
+                (!bool.TryParse(setting.Value, out var enabled) || enabled))
+                throw new InvalidOperationException("Disconnect the remote backend before configuring or activating local modules and providers.");
+        }
     }
 
     internal static IReadOnlyList<SupprocomSecretSetting> UpdateSettings(
         IReadOnlyList<SupprocomSecretSetting> settings, string root, IReadOnlyList<InstalledModuleIdentity> modules, bool enabled)
     {
+        RequireLocalMode(settings);
         if (!Path.IsPathFullyQualified(root) || !Directory.Exists(root))
             throw new InvalidDataException("The installed registration root must exist and be absolute.");
         var values = settings.ToDictionary(setting => setting.Key, setting => setting.Value, StringComparer.OrdinalIgnoreCase);

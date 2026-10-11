@@ -216,6 +216,7 @@ public sealed class BackendProcessManager : IDisposable
                 "SharpClaw API is not reachable and no bundled backend was found. " +
                 "Start the API project manually or publish with /p:BundleBackend=true.");
 
+        ct.ThrowIfCancellationRequested();
         Start();
     }
 

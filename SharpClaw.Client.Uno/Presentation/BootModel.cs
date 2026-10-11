@@ -50,15 +50,14 @@ public sealed class BootModel
         {
             var url = customUrl.Trim();
             if (KeepPairedLocalTarget(url)) return;
-            await _actions.RunCommandAsync(
+            await RunBackendChangeAsync(
                 "client.boot.url",
                 async token =>
                 {
-                    if (KeepPairedLocalTarget(url)) return true;
-                    await _api.UpdateBaseUrlAsync(url, token).ConfigureAwait(true);
+                    if (KeepPairedLocalTarget(url)) return;
+                    await _api.UpdateBaseUrlAsync(url, token).ConfigureAwait(false);
                     _backend.UpdateApiUrl(url);
                     _gateway.UpdateBackendBaseUrl(url);
-                    return true;
                 },
                 cancellationToken).ConfigureAwait(true);
         }
@@ -84,9 +83,18 @@ public sealed class BootModel
     {
         try
         {
-            await _actions.RunCommandAsync(
+            await RunBackendChangeAsync(
                 "client.backend.start",
-                token => new ValueTask(_backend.EnsureStartedAsync(token)),
+                async token =>
+                {
+                    using var targetGuard = _api.HoldTarget(new Uri(_backend.ApiUrl));
+                    // Read the current protected mode after shared admission; the
+                    // owned Runtime then starts that graph without a local fallback.
+                    if (_frontendInstance is not null)
+                        _ = RemoteBackendConnectionService.IsProxyConfigured(_frontendInstance);
+                    token.ThrowIfCancellationRequested();
+                    await _backend.EnsureStartedAsync(token).ConfigureAwait(false);
+                },
                 ct).ConfigureAwait(true);
 
             var mode = _backend.IsExternal ? "external" : "bundled";
@@ -225,13 +233,17 @@ public sealed class BootModel
 
         try
         {
-            await _actions.RunCommandAsync(
+            await RunBackendChangeAsync(
                 "client.gateway.start",
-                token =>
+                async token =>
                 {
+                    using var targetGuard = _api.HoldTarget(new Uri(_backend.ApiUrl));
+                    if (_frontendInstance is not null)
+                        _ = RemoteBackendConnectionService.IsProxyConfigured(_frontendInstance);
+                    token.ThrowIfCancellationRequested();
                     // Forward the verified API key inside the gateway action.
                     _gateway.ApiKey = _api.CachedApiKey;
-                    return new ValueTask(_gateway.EnsureStartedAsync(token));
+                    await _gateway.EnsureStartedAsync(token).ConfigureAwait(false);
                 },
                 ct).ConfigureAwait(true);
 
@@ -247,6 +259,11 @@ public sealed class BootModel
             return new(false, new("Gateway", ex.Message, true));
         }
     }
+
+    private Task RunBackendChangeAsync(string operation, Func<CancellationToken, Task> change,
+        CancellationToken cancellationToken) => _frontendInstance is { } frontend
+        ? frontend.BackendMutations.RunAsync(_actions, operation, change, cancellationToken)
+        : _actions.RunCommandAsync(operation, token => new ValueTask(change(token)), cancellationToken).AsTask();
 
     /// <summary>
     /// Produces a single-line summary from the diagnostic log,

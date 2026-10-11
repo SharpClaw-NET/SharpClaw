@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text.Json;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Contracts.Kernel;
@@ -1198,7 +1200,18 @@ internal sealed class ClientActionBoundaryTests
         var moduleSettingsSource = File.ReadAllText(
             Path.Combine(clientRoot, "Presentation", "SettingsPage.ModuleSettings.cs"));
         moduleSettingsSource.Should().Contain("Actions.RunCommandAsync");
-        moduleSettingsSource.Should().Contain("client.module.enablement");
+        moduleSettingsSource.Should().Contain("await BundledModuleSetup.SetEnabledAsync(frontend, backend, Gateway, Api, Actions,");
+        var moduleSetupSource = File.ReadAllText(Path.Combine(clientRoot, "Services", "BundledModuleSetup.cs"));
+        var enablementMethods = CSharpSyntaxTree.ParseText(moduleSetupSource).GetRoot().DescendantNodes()
+            .OfType<MethodDeclarationSyntax>().Where(method => string.Equals(method.Identifier.ValueText,
+                "SetEnabledAsync", StringComparison.Ordinal)).ToArray();
+        var enablement = enablementMethods.Should().ContainSingle().Which.ToFullString();
+        enablement.Should().Contain("frontend.BackendMutations.RunAsync(actions, \"client.module.enablement\"");
+        enablement.Should().Contain("api.HoldTarget");
+        enablement.Should().Contain("await ConfigureCoreAsync(");
+        enablement.Should().Contain("await BundledBackendProcesses.StopAsync(");
+        File.ReadAllText(Path.Combine(clientRoot, "Services", "BundledBackendMutationCoordinator.cs"))
+            .Should().Contain("await actions.RunCommandAsync(operation, token =>");
         File.ReadAllText(Path.Combine(clientRoot, "Services", "ModuleSettingsClient.cs"))
             .Should().Contain("ConsumeStreamAsync");
     }
@@ -1347,6 +1360,10 @@ internal sealed class ClientActionBoundaryTests
     {
         ["App.xaml.cs"] = [
                 "ClientActionDispatcher.CreateProduction",
+                "_startup.CloseAsync",
+            ],
+        [Path.Combine("Services", "ClientShutdownCoordinator.cs")] = [
+                "actions.RunCommandAsync",
                 "client.app.close",
             ],
         [Path.Combine("Presentation", "BootModel.cs")] = [
@@ -1370,7 +1387,7 @@ internal sealed class ClientActionBoundaryTests
         [Path.Combine("Presentation", "BootPage.Modules.cs")] = [
                 "NavigateRouteAsync(this, \"Main\"",
                 "Actions.RunCommandAsync",
-                "client.module.install",
+                "BundledModuleSetup.InstallAsync",
             ],
         [Path.Combine("Presentation", "SettingsPage.xaml.cs")] = [
                 "actions.RunCommandAsync",
@@ -1378,7 +1395,21 @@ internal sealed class ClientActionBoundaryTests
             ],
         [Path.Combine("Presentation", "SettingsPage.ModuleSettings.cs")] = [
                 "Actions.RunCommandAsync",
+                "BundledModuleSetup.SetEnabledAsync",
+            ],
+        [Path.Combine("Services", "BundledModuleSetup.cs")] = [
+                "frontend.BackendMutations.RunAsync",
+                "client.module.install",
                 "client.module.enablement",
+                "api.HoldTarget",
+            ],
+        [Path.Combine("Services", "BundledProviderSetup.cs")] = [
+                "frontend.BackendMutations.RunAsync",
+                "client.provider.configure",
+                "api.HoldTarget",
+            ],
+        [Path.Combine("Services", "BundledBackendMutationCoordinator.cs")] = [
+                "actions.RunCommandAsync",
             ],
         [Path.Combine("Services", "SharpClawApiClient.cs")] = [
                 "_clientActions.RunCommandAsync",

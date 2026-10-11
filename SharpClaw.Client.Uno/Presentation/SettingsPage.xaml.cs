@@ -385,7 +385,7 @@ public sealed partial class SettingsPage : Page
         try
         {
             await BundledProviderSetup.ApplyAsync(App.Services!.GetRequiredService<FrontendInstanceService>(), backend,
-                Gateway, Actions, selected, model.Text, endpoint.Text, credential.Password, token).ConfigureAwait(true);
+                Gateway, Api, Actions, selected, model.Text, endpoint.Text, credential.Password, token).ConfigureAwait(true);
             credential.Password = string.Empty;
             await App.Services!.GetRequiredService<ClientNavigationService>()
                 .NavigateRouteAsync(this, "Boot", Qualifiers.ClearBackStack, token).ConfigureAwait(true);
@@ -421,18 +421,27 @@ public sealed partial class SettingsPage : Page
         FrontendInstanceService? frontendInstance,
         CancellationToken cancellationToken)
     {
-        if (frontendInstance is not null) BundledModuleSetup.RequireLocalMode(frontendInstance);
-        await actions.RunCommandAsync(
-            "client.runtime.target",
-            async token =>
+        if (frontendInstance is not null)
+        {
+            BundledModuleSetup.RequireLocalMode(frontendInstance);
+            await frontendInstance.BackendMutations.RunAsync(actions, "client.runtime.target", async token =>
             {
-                // Recheck at the admitted transition, including queued UI work.
-                if (frontendInstance is not null) BundledModuleSetup.RequireLocalMode(frontendInstance);
-                await api.UpdateBaseUrlAsync(target, token).ConfigureAwait(true);
+                BundledModuleSetup.RequireLocalMode(frontendInstance);
+                await api.UpdateBaseUrlAsync(target, token).ConfigureAwait(false);
                 backend?.UpdateApiUrl(target);
                 gateway?.UpdateBackendBaseUrl(target);
-            },
-            cancellationToken).ConfigureAwait(true);
+                using var targetGuard = api.HoldTarget(new Uri(target));
+                await api.WaitForReadyAsync(readinessTimeout, token).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(true);
+            return;
+        }
+
+        await actions.RunCommandAsync("client.runtime.target", async token =>
+        {
+            await api.UpdateBaseUrlAsync(target, token).ConfigureAwait(true);
+            backend?.UpdateApiUrl(target);
+            gateway?.UpdateBackendBaseUrl(target);
+        }, cancellationToken).ConfigureAwait(true);
         await api.WaitForReadyAsync(readinessTimeout, cancellationToken).ConfigureAwait(true);
     }
 

@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SharpClaw.Presentation;
 
 namespace SharpClaw.Tests.ClientUno;
@@ -9,6 +11,41 @@ namespace SharpClaw.Tests.ClientUno;
 [TestFixture]
 internal sealed class BaseClientFeatureOwnershipTests
 {
+    [Test]
+    public void AppAttachesCloseBeforeNavigationAndActivationAndUsesTrackedOwnersForCleanup()
+    {
+        var source = File.ReadAllText(Path.Combine(FindSourceRoot(), "SharpClaw.Client.Uno", "App.xaml.cs"));
+        var launch = MethodBody(source, "LaunchAsync");
+        AssertSourceOrder(launch, "_startup.SetMutationOwner", "CreateApplicationBuilder");
+        AssertSourceOrder(launch, "AttachWindow(builder.Window)", "builder.NavigateAsync");
+        AssertSourceOrder(launch, "AttachWindow(builder.Window)", "window.Activate()");
+        MethodBody(source, "AttachWindow").Should().Contain("MainWindow.Closed += OnWindowClosed");
+        MethodBody(source, "OnLaunched").Should().Contain("if (_startup.IsClosed) return;");
+        launch.Should().Contain("navigation.ConfigureAwait(false)");
+        launch.Should().Contain("_startup.TryPublishOwned(host");
+        launch.Should().Contain("RetireHostAsync(host)");
+        var cleanup = MethodBody(source, "CloseResourcesAsync");
+        cleanup.Should().Contain("_startup.GetOwned<SharpClawApiClient>");
+        cleanup.Should().NotContain("GetService<");
+        cleanup.Should().NotContain("GetRequiredService<");
+    }
+
+    private static string MethodBody(string source, string name)
+    {
+        var root = CSharpSyntaxTree.ParseText(source, cancellationToken: TestContext.CurrentContext.CancellationToken)
+            .GetRoot(TestContext.CurrentContext.CancellationToken);
+        var method = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Where(method => string.Equals(method.Identifier.ValueText, name, StringComparison.Ordinal)).Should().ContainSingle().Which;
+        return method.Body?.ToFullString() ?? throw new AssertionException("The authored App method must have a body.");
+    }
+
+    private static void AssertSourceOrder(string body, string before, string after)
+    {
+        var first = body.IndexOf(before, StringComparison.Ordinal);
+        first.Should().BeGreaterThanOrEqualTo(0);
+        body.IndexOf(after, StringComparison.Ordinal).Should().BeGreaterThan(first);
+    }
+
     [Test]
     public void Base_client_does_not_define_permission_metadata_controls_or_endpoint_reader()
     {

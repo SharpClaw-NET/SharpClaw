@@ -22,6 +22,8 @@ internal sealed class PreparedModulePackage : IDisposable
     internal string Root { get; }
     public IReadOnlyList<InstalledModuleIdentity> Modules { get; }
     internal IReadOnlyList<ModulePayloadFile> Files { get; }
+    internal bool IsInstalled { get; private set; }
+    internal void MarkInstalled() => IsInstalled = true;
     public void Dispose()
     {
         if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);

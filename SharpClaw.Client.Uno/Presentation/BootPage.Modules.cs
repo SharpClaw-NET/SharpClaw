@@ -206,7 +206,6 @@ public sealed partial class BootPage
         var services = App.Services!;
         var backend = services.GetRequiredService<BackendProcessManager>();
         var frontend = services.GetRequiredService<FrontendInstanceService>();
-        var committed = false;
         var connectionClaimed = false;
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         try
@@ -216,20 +215,21 @@ public sealed partial class BootPage
             connectionClaimed = true;
             BundledModuleSetup.RequireLocalMode(frontend);
             BundledModuleSetup.RequireOwnedTarget(backend);
-            await ExecuteConfirmedInstallAsync(candidate, backend, frontend, services,
-                () => committed = true, deadline.Token).ConfigureAwait(true);
-            if (!committed) throw new InvalidOperationException("Installation was suppressed.");
-            _connectionGate.Release();
-            connectionClaimed = false;
-            await RestartAfterInstallationAsync(candidate).ConfigureAwait(true);
+            await BundledModuleSetup.InstallAsync(frontend, backend, services.GetService<GatewayProcessManager>(),
+                services.GetRequiredService<SharpClawApiClient>(), Actions, ModuleStore, candidate,
+                deadline.Token).ConfigureAwait(true);
+            if (!_isActive) return;
+            ShowInstalledRuntimeReady();
         }
         catch (Exception exception)
         {
             ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
-            candidate.Dispose();
+            if (!_isActive) return;
             _moduleCandidate = null;
             ModuleConfirmButton.Visibility = Visibility.Collapsed;
-            ModuleInstallStatus.Text = committed
+            ModuleInstallStatus.Text = candidate.IsInstalled && deadline.IsCancellationRequested
+                ? "The module is installed and enabled. Open Boot to check the current Runtime status."
+                : candidate.IsInstalled
                 ? "The module was installed and enabled, but the new Runtime did not become ready. Open Settings to disable it or inspect Boot diagnostics."
                 : "Installation was not completed. Inspect again after checking compatibility, duplicate identities and bundled Runtime ownership. Existing installations were not overwritten.";
         }
@@ -237,39 +237,23 @@ public sealed partial class BootPage
         {
             if (connectionClaimed) _connectionGate.Release();
             _moduleInstalling = false;
-            SetModuleBusy(false);
-            ModuleConfirmButton.IsEnabled = true;
+            _moduleBusy = false;
+            if (_isActive)
+            {
+                SetModuleBusy(false);
+                ModuleConfirmButton.IsEnabled = true;
+            }
         }
     });
-    private static async Task ExecuteConfirmedInstallAsync(
-        PreparedModulePackage candidate, BackendProcessManager backend,
-        FrontendInstanceService frontend, IServiceProvider services,
-        Action onCommitted, CancellationToken cancellationToken)
-    {
-        var invoked = 0;
-        await Actions.RunCommandAsync("client.module.install", async token =>
-        {
-            if (Interlocked.Exchange(ref invoked, 1) != 0)
-                throw new InvalidOperationException("The confirmed installation may run only once.");
-            await ModuleStore.CommitAsync(candidate,
-                Path.Combine(Path.GetDirectoryName(backend.ExecutablePath)!, "contributions"),
-                ct => BundledModuleSetup.StopAsync(backend, services.GetService<GatewayProcessManager>(), frontend, ct),
-                (root, modules, ct) => BundledModuleSetup.ConfigureAsync(frontend, root, modules, true, ct), token).ConfigureAwait(true);
-            onCommitted();
-        }, cancellationToken).ConfigureAwait(true);
-    }
 
-    private async Task RestartAfterInstallationAsync(PreparedModulePackage candidate)
+    private void ShowInstalledRuntimeReady()
     {
-        candidate.Dispose();
-        if (!_isActive) return;
         _moduleCandidate = null;
         ModuleConfirmButton.Visibility = Visibility.Collapsed;
         ModuleGitHubToken.Password = string.Empty;
-        ModuleInstallStatus.Text = "Installed. Starting a new Runtime graph through the normal module loader.";
-        _retryCts?.Dispose();
-        _retryCts = new CancellationTokenSource();
-        await RunConnectionFlowAsync(null, _retryCts.Token).ConfigureAwait(true);
+        ModuleInstallStatus.Text = "Installed. The new Runtime graph is ready.";
+        Cursor.SetCommand("Runtime ready. Open Settings or stateless chat.");
+        ShowFinalStatus("✓", GreenColor, "Runtime ready", GreenColor);
     }
 
 }
