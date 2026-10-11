@@ -313,11 +313,9 @@ public partial class App : Application
         failure = await AttemptShutdownStepAsync(
             () => _startup.GetOwned<RemoteBackendConnectionService>()?.DisposeAsync() ?? ValueTask.CompletedTask,
             failure).ConfigureAwait(false);
-        failure = await AttemptShutdownStepAsync(() =>
-        {
-            _startup.GetOwned<ModulePackageStore>()?.Dispose();
-            return ValueTask.CompletedTask;
-        }, failure).ConfigureAwait(false);
+        failure = await AttemptShutdownStepAsync(
+            () => _startup.GetOwned<ModulePackageStore>()?.DisposeAsync() ?? ValueTask.CompletedTask,
+            failure).ConfigureAwait(false);
         failure = await AttemptShutdownStepAsync(
             () => _startup.GetOwned<IHost>() is { } host ? RetireHostAsync(host) : ValueTask.CompletedTask,
             failure).ConfigureAwait(false);

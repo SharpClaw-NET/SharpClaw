@@ -12,22 +12,26 @@ using SharpClaw.Shared.Instances;
 namespace SharpClaw.Services;
 
 /// <summary>Imports data only. Activation always goes through ExternalRegistrations and the production loader.</summary>
-internal sealed class ModulePackageStore : IDisposable
+internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
 {
     public const long MaximumArchiveBytes = 256L * 1024 * 1024;
     private const long MaximumExpandedBytes = 512L * 1024 * 1024;
     private const int MaximumFiles = 5_000;
     private readonly ModulePackageSources _sources;
     private readonly string _root;
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2213",
+        Justification = "The cached context-free shutdown closes admission and joins all physical operations, including semaphore holders/waiters, before disposing this gate in its dependency cleanup loop. The analyzer cannot trace that Task.Run/ValueTask and array ownership; earlier disposal permits a late Release on a disposed gate.")]
     private readonly SemaphoreSlim _gate = new(1, 1);
     internal string ActiveRoot => Path.Combine(_root, "registrations");
 
     public ModulePackageStore(FrontendInstanceService frontend)
         : this(Path.Combine(frontend.Paths.DataDirectory, "modules"), new ModulePackageSources()) { }
 
-    internal ModulePackageStore(string root, ModulePackageSources sources)
+    internal ModulePackageStore(string root, ModulePackageSources sources,
+        Func<PreparedModulePackage, CancellationToken, Task>? beforeTransfer = null)
     {
         _sources = sources;
+        _beforeTransfer = beforeTransfer;
         try
         {
             _root = Path.GetFullPath(root);
@@ -35,14 +39,19 @@ internal sealed class ModulePackageStore : IDisposable
             RequireNoLinks(_root);
             Directory.CreateDirectory(ActiveRoot);
         }
-        catch { _sources.Dispose(); throw; }
+        catch { _sources.Dispose(); _lifetime.Dispose(); _gate.Dispose(); throw; }
     }
 
     public Task<IReadOnlyList<ModulePackageSource>> ResolveAsync(
         string source, string? githubToken, CancellationToken cancellationToken) =>
-        _sources.ResolveAsync(source, githubToken, cancellationToken);
+        RunOwnedAsync(token => _sources.ResolveAsync(source, githubToken, token), cancellationToken);
 
-    public async Task<PreparedModulePackage> PrepareAsync(
+    public Task<PreparedModulePackage> PrepareAsync(
+        ModulePackageSource source, string? githubToken, CancellationToken cancellationToken) =>
+        RunOwnedAsync(token => PrepareCoreAsync(source, githubToken, token), cancellationToken,
+            static candidate => candidate.Dispose(), _beforeTransfer);
+
+    private async Task<PreparedModulePackage> PrepareCoreAsync(
         ModulePackageSource source, string? githubToken, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -90,7 +99,14 @@ internal sealed class ModulePackageStore : IDisposable
         finally { _gate.Release(); }
     }
 
-    internal async Task<string> CommitAsync(PreparedModulePackage candidate, string bundledRoot,
+    internal Task<string> CommitAsync(PreparedModulePackage candidate, string bundledRoot,
+        Func<CancellationToken, Task> stopOwnedRuntime,
+        Func<string, IReadOnlyList<InstalledModuleIdentity>, CancellationToken, Task> configure,
+        CancellationToken cancellationToken) =>
+        RunOwnedAsync(token => CommitCoreAsync(candidate, bundledRoot, stopOwnedRuntime, configure, token),
+            cancellationToken, inspection: false);
+
+    private async Task<string> CommitCoreAsync(PreparedModulePackage candidate, string bundledRoot,
         Func<CancellationToken, Task> stopOwnedRuntime,
         Func<string, IReadOnlyList<InstalledModuleIdentity>, CancellationToken, Task> configure,
         CancellationToken cancellationToken)
@@ -330,5 +346,4 @@ internal sealed class ModulePackageStore : IDisposable
         }
     }
 
-    public void Dispose() { _sources.Dispose(); _gate.Dispose(); }
 }

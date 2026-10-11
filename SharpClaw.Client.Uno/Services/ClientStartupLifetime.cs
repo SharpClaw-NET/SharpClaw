@@ -48,7 +48,11 @@ internal sealed class ClientStartupLifetime
         try
         {
             var resource = factory();
-            lock (_gate) _owned.Add(resource);
+            lock (_gate)
+            {
+                _owned.Add(resource);
+                if (_closed && resource is ModulePackageStore modules) modules.CloseAdmission();
+            }
             return resource;
         }
         finally { EndCreation(); }
@@ -64,6 +68,7 @@ internal sealed class ClientStartupLifetime
         lock (_gate)
         {
             _closed = true;
+            _owned.OfType<ModulePackageStore>().LastOrDefault()?.CloseAdmission();
             var creations = _creationsSettled?.Task ?? Task.CompletedTask;
             // This is the private factory-count signal, completed only after
             // adoption. Its retained cleanup join has no UI navigation dependency.

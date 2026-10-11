@@ -120,7 +120,7 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
         await Service.DisposeAsync().ConfigureAwait(false);
         await Api.DisposeAsync().ConfigureAwait(false);
         _http.Dispose();
-        Modules.Dispose();
+        await Modules.DisposeAsync().ConfigureAwait(false);
         _sources.Dispose();
         Gateway.Dispose();
         Backend.Dispose();

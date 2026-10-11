@@ -26,6 +26,9 @@ internal sealed class BaseClientFeatureOwnershipTests
         launch.Should().Contain("RetireHostAsync(host)");
         var cleanup = MethodBody(source, "CloseResourcesAsync");
         cleanup.Should().Contain("_startup.GetOwned<SharpClawApiClient>");
+        cleanup.Should().Contain("_startup.GetOwned<ModulePackageStore>()?.DisposeAsync()");
+        var lifetime = File.ReadAllText(Path.Combine(FindSourceRoot(), "SharpClaw.Client.Uno", "Services", "ClientStartupLifetime.cs"));
+        AssertSourceOrder(MethodBody(lifetime, "CloseAsync"), "CloseAdmission()", "_shutdown.ShutdownAsync");
         cleanup.Should().NotContain("GetService<");
         cleanup.Should().NotContain("GetRequiredService<");
     }

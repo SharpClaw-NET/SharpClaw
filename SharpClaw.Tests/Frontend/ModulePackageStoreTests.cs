@@ -29,7 +29,8 @@ internal sealed class ModulePackageStoreTests
     public async Task LocalPayloadIsCopiedWithoutExecutingAndExplicitCommitUsesOneExternalRootAsync()
     {
         using var workspace = new Workspace();
-        using var store = workspace.Store();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
         var source = workspace.CreatePayload();
         using var inspected = await store.PrepareAsync(new("local", LocalPath: source), null, default).ConfigureAwait(false);
         inspected.Modules.Should().ContainSingle().Which.Id.Should().Be("frontend_fixture");
@@ -54,7 +55,8 @@ internal sealed class ModulePackageStoreTests
     public async Task FailedScratchCreationReleasesAdmissionForTheNextInspectionAsync()
     {
         using var workspace = new Workspace();
-        using var store = workspace.Store();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
         var source = new ModulePackageSource("local", LocalPath: workspace.CreatePayload());
         var storeRoot = workspace.Path("store");
         var retiredRoot = workspace.Path("store-retired-for-test");
@@ -84,7 +86,8 @@ internal sealed class ModulePackageStoreTests
     public async Task ModifiedInspectedBytesCannotCommitOrStopRuntimeAsync()
     {
         using var workspace = new Workspace();
-        using var store = workspace.Store();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
         using var inspected = await store.PrepareAsync(new("local", LocalPath: workspace.CreatePayload()), null, default).ConfigureAwait(false);
         await File.AppendAllTextAsync(System.IO.Path.Combine(inspected.Root, "payload", "LICENSE.md"), "changed").ConfigureAwait(false);
         var stopped = false;
@@ -99,7 +102,8 @@ internal sealed class ModulePackageStoreTests
     public async Task ExistingIdentityIsNotOverwrittenAsync()
     {
         using var workspace = new Workspace();
-        using var store = workspace.Store();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
         var source = workspace.CreatePayload();
         using var first = await store.PrepareAsync(new("local", LocalPath: source), null, default).ConfigureAwait(false);
         await store.CommitAsync(first, workspace.Path("bundled"), _ => Task.CompletedTask,
@@ -115,7 +119,8 @@ internal sealed class ModulePackageStoreTests
     public async Task FailedConfigurationRemovesOnlyNewDestinationAsync()
     {
         using var workspace = new Workspace();
-        using var store = workspace.Store();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
         using var inspected = await store.PrepareAsync(new("local", LocalPath: workspace.CreatePayload()), null, default).ConfigureAwait(false);
         Func<Task> install = async () => await store.CommitAsync(inspected, workspace.Path("bundled"), _ => Task.CompletedTask,
             (_, _, _) => throw new InvalidOperationException("test failure"), default).ConfigureAwait(false);
@@ -128,7 +133,8 @@ internal sealed class ModulePackageStoreTests
     public async Task ArchiveTraversalCollisionAndLinksLeaveNoScratchAsync()
     {
         using var workspace = new Workspace();
-        using var store = workspace.Store();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
         foreach (var shape in new[] { "traversal", "collision", "link" })
         {
             var path = workspace.Path(shape + ".zip");
@@ -148,7 +154,8 @@ internal sealed class ModulePackageStoreTests
     public async Task LocalLinkIsNeverFollowedAsync()
     {
         using var workspace = new Workspace();
-        using var store = workspace.Store();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
         var source = workspace.CreatePayload();
         if (OperatingSystem.IsWindows())
         {
@@ -233,7 +240,8 @@ internal sealed class ModulePackageStoreTests
     public async Task NupkgMissingOrMismatchedIdentityCannotBecomeAnInspectedCandidateAsync()
     {
         using var workspace = new Workspace();
-        using var store = workspace.Store();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
         var source = workspace.CreatePayload();
         var noSpec = workspace.Path("missing.nupkg");
         await ZipFile.CreateFromDirectoryAsync(source, noSpec, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);

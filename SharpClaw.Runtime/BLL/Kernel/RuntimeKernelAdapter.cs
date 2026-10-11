@@ -1029,16 +1029,9 @@ public sealed class RuntimeKernelAdapter :
         CancellationToken cancellationToken)
     {
         var executionContext = CreateHostExecutionContext();
-        var prepareInvoked = false;
-        var completionInvoked = false;
-        var prepare = CreateStopPreparation(onPrepare ?? (static _ => ValueTask.CompletedTask),
-            () => prepareInvoked = true);
-        var completion = onComplete ?? (static _ => ValueTask.CompletedTask);
-        ValueTask CompleteHostAsync(CancellationToken _)
-        {
-            completionInvoked = true;
-            return completion(CancellationToken.None);
-        }
+        var prepare = new RuntimeShutdownWork(CreateStopPreparation(
+            onPrepare ?? (static _ => ValueTask.CompletedTask)));
+        var completion = new RuntimeShutdownWork(onComplete ?? (static _ => ValueTask.CompletedTask));
         ExceptionDispatchInfo? failure = null;
         try
         {
@@ -1046,40 +1039,37 @@ public sealed class RuntimeKernelAdapter :
             {
                 failure = await CaptureShutdownFailureAsync(
                     () => RunRuntimeLifecycleActionCoreAsync(RuntimeLifecycleActionCatalog.StopPrepare,
-                        null, executionContext, prepare, cancellationToken), failure).ConfigureAwait(false);
+                        null, executionContext, prepare.RunAsync, cancellationToken), failure).ConfigureAwait(false);
             }
             finally
             {
-                if (!prepareInvoked)
-                    failure = await CaptureShutdownFailureAsync(
-                        () => prepare(CancellationToken.None), failure).ConfigureAwait(false);
-                _started = false;
+                // A Core receipt can settle before its terminal. Join the cached
+                // physical preparation (or start the required fallback) first.
+                failure = await CaptureShutdownFailureAsync(
+                    () => prepare.RunAsync(CancellationToken.None), failure).ConfigureAwait(false);
+                lock (_stopGate) _started = false;
                 failure = await CaptureShutdownFailureAsync(
                     () => RunRuntimeLifecycleActionCoreAsync(RuntimeLifecycleActionCatalog.StopComplete,
-                        null, executionContext, CompleteHostAsync, CancellationToken.None), failure).ConfigureAwait(false);
+                        null, executionContext, completion.RunAsync, CancellationToken.None), failure).ConfigureAwait(false);
             }
         }
         finally
         {
-            if (!completionInvoked)
-                failure = await CaptureShutdownFailureAsync(
-                    () => completion(CancellationToken.None), failure).ConfigureAwait(false);
+            failure = await CaptureShutdownFailureAsync(
+                () => completion.RunAsync(CancellationToken.None), failure).ConfigureAwait(false);
         }
         failure?.Throw();
     }
 
     private Func<CancellationToken, ValueTask> CreateStopPreparation(
-        Func<CancellationToken, ValueTask> prepare, Action markPreparationInvoked)
+        Func<CancellationToken, ValueTask> prepare)
     {
-        var participantStopInvoked = 0;
         async ValueTask PrepareHostAndParticipantsAsync(CancellationToken _)
         {
-            markPreparationInvoked();
             var failure = await CaptureShutdownFailureAsync(
                 () => prepare(CancellationToken.None), null).ConfigureAwait(false);
-            if (Interlocked.Exchange(ref participantStopInvoked, 1) == 0)
-                failure = await CaptureShutdownFailureAsync(
-                    () => StopParticipantsAsync(CancellationToken.None), failure).ConfigureAwait(false);
+            failure = await CaptureShutdownFailureAsync(
+                () => StopParticipantsAsync(CancellationToken.None), failure).ConfigureAwait(false);
             failure?.Throw();
         }
         return PrepareHostAndParticipantsAsync;

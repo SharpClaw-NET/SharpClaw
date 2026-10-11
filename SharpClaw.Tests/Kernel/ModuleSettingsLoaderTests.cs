@@ -29,14 +29,10 @@ internal sealed class ModuleSettingsLoaderTests
     public async Task ImportedIndependentPackageUsesProductionLoaderAndItsOwnSettingsEndpointsAsync(string mode)
     {
         using var workspace = new Workspace();
-        var source = workspace.CreatePayload(mode);
-        var archive = workspace.Path("fixture.nupkg");
-        await File.WriteAllTextAsync(System.IO.Path.Combine(source, "Fixture.nuspec"), """
-            <?xml version="1.0"?><package><metadata><id>External.Frontend</id><version>1.0.0</version></metadata></package>
-            """, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
-        await ZipFile.CreateFromDirectoryAsync(source, archive, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        var archive = await CreateModuleArchiveAsync(workspace, mode).ConfigureAwait(false);
         using var sources = new ModulePackageSources();
-        using var store = new ModulePackageStore(workspace.Path("store"), sources);
+        var store = new ModulePackageStore(workspace.Path("store"), sources);
+        await using var storeDisposal = store.ConfigureAwait(false);
         using var candidate = await store.PrepareAsync(new("fixture.nupkg", LocalPath: archive), null, default).ConfigureAwait(false);
         await store.CommitAsync(candidate, workspace.Path("empty"), _ => Task.CompletedTask,
             (_, _, _) => Task.CompletedTask, default).ConfigureAwait(false);
@@ -77,6 +73,17 @@ internal sealed class ModuleSettingsLoaderTests
             await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
             await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
+    }
+
+    private static async Task<string> CreateModuleArchiveAsync(Workspace workspace, string mode)
+    {
+        var source = workspace.CreatePayload(mode);
+        var archive = workspace.Path("fixture.nupkg");
+        await File.WriteAllTextAsync(System.IO.Path.Combine(source, "Fixture.nuspec"), """
+            <?xml version="1.0"?><package><metadata><id>External.Frontend</id><version>1.0.0</version></metadata></package>
+            """, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await ZipFile.CreateFromDirectoryAsync(source, archive, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        return archive;
     }
 
     [Test]
