@@ -3,9 +3,10 @@ using System.Runtime.ExceptionServices;
 namespace SharpClaw.Services;
 
 /// <summary>Owns required resource teardown independently of the close-action receipt.</summary>
-internal sealed class ClientShutdownCoordinator
+internal sealed class ClientShutdownCoordinator(ClientStartupDiagnostics? diagnostics = null)
 {
     private readonly Lock _gate = new();
+    private readonly ClientStartupDiagnostics? _diagnostics = diagnostics;
     private Task? _shutdown;
 
     internal Task ShutdownAsync(BundledBackendMutationCoordinator? mutations,
@@ -19,13 +20,14 @@ internal sealed class ClientShutdownCoordinator
             // This cached mutation shutdown owns a context-free Task.Run drain;
             // retain it across the shutdown task and join it before resource cleanup.
 #pragma warning disable VSTHRD003
-            _shutdown = Task.Run(() => RunAsync(actions, drain, cleanup), CancellationToken.None);
+            _shutdown = Task.Run(() => RunAsync(actions, drain, cleanup, _diagnostics), CancellationToken.None);
 #pragma warning restore VSTHRD003
             return _shutdown;
         }
     }
 
-    private static async Task RunAsync(ClientActionDispatcher? actions, Task drain, Func<Task> cleanup)
+    private static async Task RunAsync(ClientActionDispatcher? actions, Task drain, Func<Task> cleanup,
+        ClientStartupDiagnostics? diagnostics)
     {
         var gate = new Lock();
         Task? cleanupWork = null;
@@ -36,7 +38,7 @@ internal sealed class ClientShutdownCoordinator
                 // The captured drain is the same owned mutation shutdown above.
                 // The retained cleanup task joins it before disposing any owner.
 #pragma warning disable VSTHRD003
-                return cleanupWork ??= Task.Run(() => DrainThenCleanupAsync(drain, cleanup), CancellationToken.None);
+                return cleanupWork ??= Task.Run(() => DrainThenCleanupAsync(drain, cleanup, diagnostics), CancellationToken.None);
 #pragma warning restore VSTHRD003
             }
         }
@@ -53,13 +55,14 @@ internal sealed class ClientShutdownCoordinator
         {
             // Rejected/skipped/late close terminals cannot abandon required teardown.
             // Its retained task starts once and joins the shared mutation drain first.
-            await ObserveCleanupAsync(StartCleanupAsync()).ConfigureAwait(false);
+            await ObserveCleanupAsync(StartCleanupAsync(), diagnostics).ConfigureAwait(false);
         }
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
         Justification = "Required cleanup runs even if the shared mutation drain faults; secondary cleanup failures are journalled and the first failure keeps its original stack.")]
-    private static async Task DrainThenCleanupAsync(Task drain, Func<Task> cleanup)
+    private static async Task DrainThenCleanupAsync(Task drain, Func<Task> cleanup,
+        ClientStartupDiagnostics? diagnostics)
     {
         ExceptionDispatchInfo? failure = null;
         try
@@ -75,7 +78,7 @@ internal sealed class ClientShutdownCoordinator
         catch (Exception exception)
         {
             if (failure is null) failure = ExceptionDispatchInfo.Capture(exception);
-            else ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            else (diagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.UnhandledException, exception);
         }
         failure?.Throw();
     }
@@ -91,7 +94,7 @@ internal sealed class ClientShutdownCoordinator
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
         Justification = "Physical cleanup is joined even after a close receipt fault; secondary cleanup failure is observed without replacing the original receipt fault or cancellation.")]
-    private static async Task ObserveCleanupAsync(Task cleanup)
+    private static async Task ObserveCleanupAsync(Task cleanup, ClientStartupDiagnostics? diagnostics)
     {
         try
         {
@@ -103,7 +106,21 @@ internal sealed class ClientShutdownCoordinator
         }
         catch (Exception exception)
         {
-            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            (diagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.UnhandledException, exception);
         }
+    }
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "Every required shutdown step is attempted. The first action/cleanup failure retains its original exception and stack; secondary failures are observed through the best-effort diagnostic sinks.")]
+    internal static async Task<ExceptionDispatchInfo?> AttemptStepAsync(Func<ValueTask> step,
+        ExceptionDispatchInfo? firstFailure, ClientStartupDiagnostics? diagnostics = null)
+    {
+        try { await step().ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            if (firstFailure is null) return ExceptionDispatchInfo.Capture(exception);
+            (diagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.UnhandledException, exception);
+        }
+        return firstFailure;
     }
 }

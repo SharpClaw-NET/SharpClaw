@@ -71,7 +71,7 @@ public sealed partial class SharpClawApiClient
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
         Justification = "This finally join observes the one retained physical probe after its receipt failed or was cancelled. The original receipt remains primary; a successful receipt already awaits physical success. Only bounded exception metadata is journalled.")]
-    private static async Task ObserveReadinessSettlementAsync(Task<bool> physical)
+    private async Task ObserveReadinessSettlementAsync(Task<bool> physical)
     {
         try
         {
@@ -79,6 +79,6 @@ public sealed partial class SharpClawApiClient
             await physical.ConfigureAwait(false);
 #pragma warning restore VSTHRD003
         }
-        catch (Exception failure) { ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, failure); }
+        catch (Exception failure) { (_startupDiagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.UnhandledException, failure); }
     }
 }

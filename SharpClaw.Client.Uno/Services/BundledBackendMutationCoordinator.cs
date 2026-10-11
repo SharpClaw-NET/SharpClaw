@@ -8,13 +8,16 @@ internal sealed class BundledBackendMutationCoordinator : IAsyncDisposable
         Justification = "The cached context-free DisposeAsync task cancels this source, joins the retained mutation and physical terminal, then disposes this source in finally. The analyzer cannot trace that Task.Run/ValueTask ownership path; disposal must follow the active-work join.")]
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Func<string, BundledBackendMutationStage, CancellationToken, Task>? _observer;
+    private readonly ClientStartupDiagnostics? _diagnostics;
     private Task? _active;
     private Task? _shutdown;
 
     internal BundledBackendMutationCoordinator(
-        Func<string, BundledBackendMutationStage, CancellationToken, Task>? observer = null)
+        Func<string, BundledBackendMutationStage, CancellationToken, Task>? observer = null,
+        ClientStartupDiagnostics? diagnostics = null)
     {
         _observer = observer;
+        _diagnostics = diagnostics;
     }
 
     internal Task RunAsync(ClientActionDispatcher actions, string operation,
@@ -104,7 +107,7 @@ internal sealed class BundledBackendMutationCoordinator : IAsyncDisposable
         try { await _lifetime.CancelAsync().ConfigureAwait(false); }
         catch (Exception exception)
         {
-            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            (_diagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.UnhandledException, exception);
         }
         finally
         {
@@ -117,7 +120,7 @@ internal sealed class BundledBackendMutationCoordinator : IAsyncDisposable
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
         Justification = "The retained physical task is joined after receipt settlement. Secondary failure metadata is observed without replacing the original receipt fault/cancellation.")]
-    private static async Task ObserveSettlementAsync(Task work)
+    private async Task ObserveSettlementAsync(Task work)
     {
         try
         {
@@ -129,7 +132,7 @@ internal sealed class BundledBackendMutationCoordinator : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            (_diagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.UnhandledException, exception);
         }
     }
 }

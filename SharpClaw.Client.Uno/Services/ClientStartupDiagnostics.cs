@@ -11,9 +11,11 @@ namespace SharpClaw.Services;
 internal sealed class ClientStartupDiagnostics
 {
     private readonly Lock _gate = new();
+    private readonly Action<string> _fallback;
 
-    internal ClientStartupDiagnostics(string directory)
+    internal ClientStartupDiagnostics(string directory, Action<string>? fallback = null)
     {
+        _fallback = fallback ?? (message => Console.Error.WriteLine(message));
         JournalPath = Path.Combine(Path.GetFullPath(directory),
             $"startup-{DateTime.UtcNow:yyyyMMddTHHmmssfff}-{Environment.ProcessId}.jsonl");
     }
@@ -47,7 +49,17 @@ internal sealed class ClientStartupDiagnostics
         catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
         {
             // A journal failure must not replace the original startup failure.
-            Console.Error.WriteLine($"SharpClaw startup journal unavailable ({failure.GetType().Name}).");
+            RecordFallback(failure);
+        }
+    }
+
+    private void RecordFallback(Exception journalFailure)
+    {
+        try { _fallback($"SharpClaw startup journal unavailable ({journalFailure.GetType().Name})."); }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        {
+            // Both sinks are best-effort. An ordinary unavailable/disposed stderr
+            // must not replace an action fault or interrupt remaining cleanup.
         }
     }
 }

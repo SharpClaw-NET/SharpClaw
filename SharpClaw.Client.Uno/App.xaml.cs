@@ -102,7 +102,7 @@ public partial class App : Application
 #if DEBUG
         window.UseStudio();
 #endif
-        var navigation = builder.NavigateAsync<Shell>
+        var navigation = _startup.AcquireOwnedAsync(() => builder.NavigateAsync<Shell>
             (initialNavigate: async (services, navigator) =>
             {
                 ClientStartupDiagnostics.Current.Record(ClientStartupStage.InitialNavigationStarting);
@@ -115,7 +115,16 @@ public partial class App : Application
                 // retaining the same client action boundary as later navigation.
                 await new ClientNavigationService(navigator, services.GetRequiredService<ClientActionDispatcher>())
                     .NavigateRouteAsync(this, "Boot", Qualifiers.Nested).ConfigureAwait(true);
-            });
+            }), host =>
+            {
+                Host = host;
+                ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationReady);
+            }, RetireHostAsync);
+        if (_startup.IsClosed)
+        {
+            await navigation.ConfigureAwait(false);
+            return;
+        }
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationScheduled);
         // NavigateAsync installs the Shell synchronously before yielding. The
         // toolkit otherwise defers activation when its native splash is disabled,
@@ -123,16 +132,10 @@ public partial class App : Application
         // Activate the installed shell BEFORE awaiting host/navigation completion.
         window.Activate();
         ClientStartupDiagnostics.Current.Record(ClientStartupStage.WindowActivated);
-        SetWindowIconFromFile(window);
-        // Once the UI has been activated, host adoption/retirement must continue
-        // even when a closed window can no longer dispatch UI continuations.
-        var host = await navigation.ConfigureAwait(false);
-        if (!_startup.TryPublishOwned(host, value => Host = value))
-        {
-            await RetireHostAsync(host).ConfigureAwait(false);
-            return;
-        }
-        ClientStartupDiagnostics.Current.Record(ClientStartupStage.NavigationReady);
+        if (!_startup.IsClosed) SetWindowIconFromFile(window);
+        // The retained operation owns Host adoption/retirement independently of
+        // this launch continuation and of a closed window's dispatcher.
+        await navigation.ConfigureAwait(false);
     }
 
     private Window AttachWindow(Window window)
@@ -329,19 +332,9 @@ public partial class App : Application
         failure?.Throw();
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
-        Justification = "Each owned shutdown step is attempted even if an earlier step failed. Secondary faults are journalled using bounded metadata and the first fault retains its original stack for the final shutdown boundary.")]
-    private static async Task<ExceptionDispatchInfo?> AttemptShutdownStepAsync(
-        Func<ValueTask> step, ExceptionDispatchInfo? firstFailure)
-    {
-        try { await step().ConfigureAwait(false); }
-        catch (Exception exception)
-        {
-            if (firstFailure is null) return ExceptionDispatchInfo.Capture(exception);
-            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
-        }
-        return firstFailure;
-    }
+    private static Task<ExceptionDispatchInfo?> AttemptShutdownStepAsync(
+        Func<ValueTask> step, ExceptionDispatchInfo? firstFailure) =>
+        ClientShutdownCoordinator.AttemptStepAsync(step, firstFailure);
 
     private static void RegisterGlobalExceptionLogging(Serilog.ILogger logger)
     {

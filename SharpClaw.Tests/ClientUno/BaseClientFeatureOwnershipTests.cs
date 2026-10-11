@@ -22,8 +22,8 @@ internal sealed class BaseClientFeatureOwnershipTests
         MethodBody(source, "AttachWindow").Should().Contain("MainWindow.Closed += OnWindowClosed");
         MethodBody(source, "OnLaunched").Should().Contain("if (_startup.IsClosed) return;");
         launch.Should().Contain("navigation.ConfigureAwait(false)");
-        launch.Should().Contain("_startup.TryPublishOwned(host");
-        launch.Should().Contain("RetireHostAsync(host)");
+        AssertSourceOrder(launch, "_startup.AcquireOwnedAsync", "builder.NavigateAsync");
+        launch.Should().Contain("}, RetireHostAsync)");
         var cleanup = MethodBody(source, "CloseResourcesAsync");
         cleanup.Should().Contain("_startup.GetOwned<SharpClawApiClient>");
         cleanup.Should().Contain("_startup.GetOwned<ModulePackageStore>()?.DisposeAsync()");

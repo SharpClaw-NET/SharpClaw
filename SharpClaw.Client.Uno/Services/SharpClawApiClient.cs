@@ -20,6 +20,7 @@ public sealed partial class SharpClawApiClient : IDisposable, IAsyncDisposable
     private readonly FrontendInstanceService? _frontendInstance;
     private readonly ILogger<SharpClawApiClient> _logger;
     private readonly ClientActionDispatcher _clientActions;
+    private readonly ClientStartupDiagnostics? _startupDiagnostics;
     private readonly bool _ownsHttp;
     private readonly string? _fixedApiKey;
     private Uri _targetBaseUri;
@@ -76,11 +77,13 @@ public sealed partial class SharpClawApiClient : IDisposable, IAsyncDisposable
         ClientActionDispatcher clientActions,
         string? fixedApiKey = null,
         FrontendInstanceService? frontendInstance = null,
-        bool ownsHttp = false)
+        bool ownsHttp = false,
+        ClientStartupDiagnostics? startupDiagnostics = null)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
+        _startupDiagnostics = startupDiagnostics;
         _frontendInstance = frontendInstance;
         // Ownership transfers only after this constructor successfully validates
         // the supplied transport; existing internal callers keep borrowing it.
@@ -214,7 +217,7 @@ public sealed partial class SharpClawApiClient : IDisposable, IAsyncDisposable
         }
         catch (Exception exception)
         {
-            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            (_startupDiagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.UnhandledException, exception);
         }
         return null;
     }
@@ -434,7 +437,7 @@ public sealed partial class SharpClawApiClient : IDisposable, IAsyncDisposable
         try { await DisposeOwnedHttpAsync().ConfigureAwait(false); }
         catch (Exception exception)
         {
-            ClientStartupDiagnostics.Current.Record(ClientStartupStage.UnhandledException, exception);
+            (_startupDiagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.UnhandledException, exception);
         }
     }
 
