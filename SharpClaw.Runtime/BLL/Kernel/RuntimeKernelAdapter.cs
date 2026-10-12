@@ -585,6 +585,11 @@ public sealed class RuntimeKernelAdapter :
         if (failure is not null)
             CloseBootstrapAdmission();
         failure?.Throw();
+        if (actionKey == RuntimeLifecycleActionCatalog.StartBind && !physical.WasInvoked)
+        {
+            CloseBootstrapAdmission();
+            throw new KernelActionExecutionException("Runtime binding did not execute its required terminal.");
+        }
     }
 
     private void CloseBootstrapAdmission()

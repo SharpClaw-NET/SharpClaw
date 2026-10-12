@@ -13,6 +13,8 @@ internal sealed class RemoteProxyActionBoundary
     private static readonly SharpClawActionKey ValidatePairing = new("security.remote_pairing.validate");
     private readonly KernelGraph _graph;
     private readonly KernelActionDispatcher _dispatcher;
+    private readonly Lock _publicationGate = new();
+    private bool _startupClosed;
 
     public RemoteProxyActionBoundary(KernelGraph graph, KernelActionDispatcher dispatcher)
     {
@@ -70,13 +72,43 @@ internal sealed class RemoteProxyActionBoundary
         ArgumentNullException.ThrowIfNull(terminal);
         if (!RuntimeLifecycleActionCatalog.Contains(key))
             throw new ArgumentException("The action is not a published Runtime lifecycle action.", nameof(key));
-        var completed = await RunActionAsync(executionContext, key, invocation, async (_, token) =>
+        if (key == RuntimeLifecycleActionCatalog.StopPrepare)
+            CloseStartupPublication();
+        try
         {
-            await terminal(token).ConfigureAwait(false);
+            var completed = await RunActionAsync(executionContext, key, invocation, async (_, token) =>
+            {
+                await terminal(token).ConfigureAwait(false);
+                return true;
+            }, cancellationToken).ConfigureAwait(false);
+            if (!completed)
+                throw new KernelActionExecutionException($"Remote proxy lifecycle action '{key.Value}' did not authorize completion.");
+        }
+        catch
+        {
+            CloseStartupPublication();
+            throw;
+        }
+    }
+
+    internal bool TryPublishStartup(Action publish, CancellationToken callerCancellation,
+        CancellationToken applicationStopping)
+    {
+        lock (_publicationGate)
+        {
+            if (callerCancellation.IsCancellationRequested || applicationStopping.IsCancellationRequested)
+                _startupClosed = true;
+            callerCancellation.ThrowIfCancellationRequested();
+            if (_startupClosed)
+                return false;
+            publish();
             return true;
-        }, cancellationToken).ConfigureAwait(false);
-        if (!completed)
-            throw new KernelActionExecutionException($"Remote proxy lifecycle action '{key.Value}' did not authorize completion.");
+        }
+    }
+
+    private void CloseStartupPublication()
+    {
+        lock (_publicationGate) _startupClosed = true;
     }
 
     private async ValueTask<bool> RunDecisionAsync(

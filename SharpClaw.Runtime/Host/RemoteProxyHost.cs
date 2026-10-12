@@ -53,8 +53,10 @@ internal static class RemoteProxyHost
                 {
                     startAttempted = true;
                     await app.StartAsync(token).ConfigureAwait(false);
-                    instancePaths.PublishDiscoveryEntry(app.Urls.First());
                 }, cancellationToken).ConfigureAwait(false);
+            if (!actions.TryPublishStartup(() => instancePaths.PublishDiscoveryEntry(app.Urls.First()),
+                    cancellationToken, app.Lifetime.ApplicationStopping))
+                return;
             await WaitForStoppingAsync(app.Lifetime, cancellationToken).ConfigureAwait(false);
         }
 #pragma warning disable CA1031 // Preserve the startup/request failure while listener, discovery and local keys are all cleaned up; rethrow below.

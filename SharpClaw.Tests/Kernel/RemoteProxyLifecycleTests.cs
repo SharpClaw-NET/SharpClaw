@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
@@ -32,6 +33,7 @@ internal sealed class RemoteProxyLifecycleTests
         await using var rigDisposal = rig.ConfigureAwait(false);
         var run = rig.StartAsync();
         await ObserveAsync(probe.BindCompleted).ConfigureAwait(false);
+        await rig.WaitForPublicationAsync().ConfigureAwait(false);
         rig.StartedCount.Should().Be(1);
         probe.Actions.Where(static action => string.Equals(action.Key, "runtime.start.bind", StringComparison.Ordinal))
             .Select(static action => action.Attempt).Should().Equal(1, 2);
@@ -77,6 +79,7 @@ internal sealed class RemoteProxyLifecycleTests
         await using var rigDisposal = rig.ConfigureAwait(false);
         _ = rig.StartAsync();
         await ObserveAsync(probe.BindCompleted).ConfigureAwait(false);
+        await rig.WaitForPublicationAsync().ConfigureAwait(false);
         using var client = rig.CreateClient();
         using var response = await client.GetAsync(new Uri("/echo", UriKind.Relative),
             TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
@@ -157,6 +160,75 @@ internal sealed class RemoteProxyLifecycleTests
         }
     }
 
+    [TestCase(0, false), TestCase(0, true)]
+    [TestCase(1, false), TestCase(1, true)]
+    [TestCase(2, false), TestCase(2, true)]
+    public async Task InterruptedPairedBindingCannotPublishDuringLateStartupOrCleanupAsync(int interruption, bool lateFault)
+    {
+        var probe = new LifecycleProbe("runtime.start.bind", "observe", interruption == 1);
+        var rig = new LifecycleRig(probe, holdStartup: true, lateFault);
+        await using var rigDisposal = rig.ConfigureAwait(false);
+        var held = rig.App.Services.GetRequiredService<HeldLifecycle>();
+        var running = rig.StartAsync();
+        Task<Exception?> stopping = Task.FromResult<Exception?>(null);
+        Task<Exception?> repeated = Task.FromResult<Exception?>(null);
+        Exception? failure;
+        Exception? firstStop;
+        Exception? repeatedStop;
+        try
+        {
+            await held.Start.WaitForEntryAsync().ConfigureAwait(false);
+            if (interruption == 0) await rig.RequestCancellationAsync().ConfigureAwait(false);
+            if (interruption == 2) rig.App.Lifetime.StopApplication();
+            else await ObserveAsync(probe.ReceiptObserved).ConfigureAwait(false);
+            AssertUnpublishedOwnedProxy(rig, held, running);
+            held.Start.Release();
+            await held.Stop.WaitForEntryAsync().ConfigureAwait(false);
+            stopping = rig.StopAndJoinAsync();
+            repeated = rig.StopAndJoinAsync();
+            AssertUnpublishedOwnedProxy(rig, held, running);
+            stopping.IsCompleted.Should().BeFalse();
+            repeated.IsCompleted.Should().BeFalse();
+        }
+        finally
+        {
+            held.Start.Release(); held.Stop.Release();
+            failure = await CaptureOutcomeAsync(running, CancellationToken.None).ConfigureAwait(false);
+            firstStop = await stopping.ConfigureAwait(false);
+            repeatedStop = await repeated.ConfigureAwait(false);
+        }
+        AssertShutdownOutcome(interruption, lateFault, failure, firstStop, repeatedStop);
+        held.Start.Calls.Should().Be(1);
+        held.Stop.Calls.Should().Be(1);
+        rig.StoppedCount.Should().Be(1);
+        AssertSessionFilesRemoved(rig.Paths);
+    }
+
+    private static void AssertShutdownOutcome(int interruption, bool lateFault,
+        Exception? failure, Exception? firstStop, Exception? repeatedStop)
+    {
+        if (interruption == 2 && !lateFault)
+        {
+            failure.Should().BeNull(); firstStop.Should().BeNull(); repeatedStop.Should().BeNull();
+        }
+        else
+        {
+            var primary = failure.Should().BeOfType<KernelActionFailedException>().Which;
+            primary.Error.Code.Should().Be(interruption == 2 ? "ACTION_TERMINAL_FAILED" : "ACTION_CONTINUATION_DENIED");
+            firstStop.Should().BeSameAs(primary);
+            repeatedStop.Should().BeSameAs(primary);
+        }
+    }
+
+    private static void AssertUnpublishedOwnedProxy(LifecycleRig rig, HeldLifecycle held, Task running)
+    {
+        running.IsCompleted.Should().BeFalse();
+        File.Exists(rig.Paths.DiscoveryEntryPath).Should().BeFalse();
+        File.Exists(rig.Paths.ApiKeyFilePath).Should().BeTrue();
+        held.Touch();
+        held.AssertResourceHeld();
+    }
+
     private static async ValueTask RunPhysicalTerminalAsync(LifecycleProbe probe, CancellationToken cancellationToken)
     {
         await using var registration = cancellationToken.Register(() => probe.TerminalCancellation.TrySetResult()).ConfigureAwait(false);
@@ -227,7 +299,7 @@ internal sealed class RemoteProxyLifecycleTests
         private int _startedCount;
         private int _stoppedCount;
 
-        public LifecycleRig(LifecycleProbe probe)
+        public LifecycleRig(LifecycleProbe probe, bool holdStartup = false, bool lateFault = false)
         {
             _probe = probe;
             Paths = new SharpClawInstancePaths(SharpClawInstanceKind.Backend, Path.Combine(_root, "backend"), _root);
@@ -235,7 +307,15 @@ internal sealed class RemoteProxyLifecycleTests
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(
                 new Dictionary<string, string?>(StringComparer.Ordinal) { ["ASPNETCORE_URLS"] = "http://127.0.0.1:0" }).Build();
             App = RemoteProxyHost.BuildApplication([], configuration, Paths,
-                RemoteGatewayConnection.Create(new Uri("https://example.invalid"), null), services => RegisterHooks(services, probe));
+                RemoteGatewayConnection.Create(new Uri("https://example.invalid"), null), services =>
+                {
+                    RegisterHooks(services, probe);
+                    if (holdStartup)
+                    {
+                        services.AddSingleton(_ => new HeldLifecycle(Path.Combine(_root, "held-resource"), lateFault));
+                        services.AddHostedService(provider => provider.GetRequiredService<HeldLifecycle>());
+                    }
+                });
             _stopping = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CurrentContext.CancellationToken);
             _startedRegistration = App.Lifetime.ApplicationStarted.Register(() => Interlocked.Increment(ref _startedCount));
             _stoppedRegistration = App.Lifetime.ApplicationStopped.Register(() => Interlocked.Increment(ref _stoppedCount));
@@ -247,6 +327,16 @@ internal sealed class RemoteProxyLifecycleTests
         public int StoppedCount => Volatile.Read(ref _stoppedCount);
 
         public Task StartAsync() => _run ??= RemoteProxyHost.RunApplicationAsync(App, Paths, _stopping.Token);
+
+        public Task RequestCancellationAsync() => _stopping.CancelAsync();
+
+        public async Task WaitForPublicationAsync()
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CurrentContext.CancellationToken);
+            budget.CancelAfter(ObservationBudget);
+            while (!File.Exists(Paths.DiscoveryEntryPath))
+                await Task.Delay(TimeSpan.FromMilliseconds(10), budget.Token).ConfigureAwait(false);
+        }
 
         public HttpClient CreateClient() => new()
         {
@@ -267,6 +357,8 @@ internal sealed class RemoteProxyLifecycleTests
 
         public async ValueTask DisposeAsync()
         {
+            var held = App.Services.GetService<HeldLifecycle>();
+            held?.Start.Release(); held?.Stop.Release();
             try
             {
                 await StopAndJoinAsync().ConfigureAwait(false);
@@ -295,7 +387,9 @@ internal sealed class RemoteProxyLifecycleTests
         services.AddScoped<LifecycleHook>();
         foreach (var name in ActionNames)
             services.AddSingleton(new ActionHookBinding(SourceId, BehaviorTargetKind.Exact, new SharpClawActionKey(name),
-                null, typeof(LifecycleHook), false, new HookOrdering("observe-" + name), typeof(LifecycleHook).AssemblyQualifiedName!));
+                null, typeof(LifecycleHook), false, new HookOrdering("observe-" + name,
+                    Timeout: probe.Deadline && name.Equals("runtime.start.bind", StringComparison.Ordinal)
+                        ? TimeSpan.FromSeconds(1) : ObservationBudget), typeof(LifecycleHook).AssemblyQualifiedName!));
         services.AddSingleton(static provider => CreateObservedGraph(provider));
         services.AddSingleton(static provider => new KernelActionDispatcher(provider.GetRequiredService<KernelGraph>(),
             CreateExecutionContext(), repeatEvidenceAuthority: new MatchingRepeatEvidenceAuthority()));
@@ -324,10 +418,12 @@ internal sealed class RemoteProxyLifecycleTests
         });
     }
 
-    private sealed class LifecycleProbe(string key, string operation)
+    private sealed class LifecycleProbe(string key, string operation, bool deadline = false)
     {
         public string Key { get; } = key;
         public string Operation { get; } = operation;
+        public bool Deadline { get; } = deadline;
+        public TaskCompletionSource ReceiptObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ConcurrentQueue<(string Key, int Attempt)> Actions { get; } = new();
         public ConcurrentQueue<Task> OwnedTasks { get; } = new();
         public TaskCompletionSource BindCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -383,7 +479,13 @@ internal sealed class RemoteProxyLifecycleTests
                     return await late.ConfigureAwait(false);
                 }
             }
-            var result = await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
+            IActionOutcome<object> result;
+            try { result = await control.ProceedAsync(cancellationToken).ConfigureAwait(false); }
+            finally
+            {
+                if (context.ActionKey == new SharpClawActionKey("runtime.start.bind"))
+                    probe.ReceiptObserved.TrySetResult();
+            }
             if (string.Equals(context.ActionKey.Value, "runtime.start.bind", StringComparison.Ordinal))
                 probe.BindCompleted.TrySetResult();
             return result;
@@ -402,6 +504,30 @@ internal sealed class RemoteProxyLifecycleTests
                 probe.HookSettled.TrySetResult();
             }
         }
+    }
+
+    private sealed class HeldLifecycle(string path, bool lateFault) : IHostedLifecycleService, IAsyncDisposable
+    {
+        private readonly FileStream _resource = new(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+        public ControlledOperationGate Start { get; } = new(lateFault ? new IOException("Late paired startup fault.") : null);
+        public ControlledOperationGate Stop { get; } = new();
+        public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public async Task StartedAsync(CancellationToken cancellationToken)
+        {
+            try { await Start.RunAsync().ConfigureAwait(false); }
+            finally { Touch(); }
+        }
+        public Task StoppingAsync(CancellationToken cancellationToken) => Stop.RunAsync().AsTask();
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public void Touch() => _resource.WriteByte(1);
+        public void AssertResourceHeld()
+        {
+            Action open = () => { using var stream = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None); };
+            open.Should().Throw<IOException>();
+        }
+        public ValueTask DisposeAsync() => _resource.DisposeAsync();
     }
 
     private sealed class MatchingRepeatEvidenceAuthority : IKernelActionRepeatEvidenceAuthority

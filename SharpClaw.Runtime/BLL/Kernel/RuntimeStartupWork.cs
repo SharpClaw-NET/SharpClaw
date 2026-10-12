@@ -7,6 +7,11 @@ internal sealed class RuntimeStartupWork(Func<CancellationToken, ValueTask> oper
     private Task? _work;
     private bool _closed;
 
+    internal bool WasInvoked
+    {
+        get { lock (_gate) return _work is not null; }
+    }
+
     internal ValueTask RunAsync(CancellationToken cancellationToken)
     {
         lock (_gate)

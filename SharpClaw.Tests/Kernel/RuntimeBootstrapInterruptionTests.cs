@@ -111,6 +111,41 @@ internal sealed class RuntimeBootstrapInterruptionTests
         workspace.AssertFilesAvailable();
     }
 
+    [TestCase(true), TestCase(false)]
+    public async Task AuthorizedBindReplacementCannotPublishWithoutPhysicalStartupAsync(bool replacement)
+    {
+        var workspace = new Workspace(false, false, false, false, replacement);
+        await using var disposal = workspace.ConfigureAwait(false);
+        var running = workspace.RunAsync(CancellationToken.None);
+        Task stopping = Task.CompletedTask;
+        Task repeated = Task.CompletedTask;
+        Exception?[] outcomes;
+        try
+        {
+            await workspace.CleanupGate.WaitForEntryAsync().ConfigureAwait(false);
+            stopping = workspace.StopAsync();
+            repeated = workspace.StopAsync();
+            AssertPending(workspace, running, stopping, repeated);
+            workspace.Physical.Calls.Should().Be(0);
+            workspace.ListenerStarted.Should().BeFalse();
+        }
+        finally
+        {
+            workspace.Physical.Release(); workspace.CleanupGate.Release();
+            outcomes = await TestTaskOutcome.JoinAsync(running, stopping, repeated).ConfigureAwait(false);
+        }
+        var primary = outcomes[0].Should().BeOfType<KernelActionExecutionException>().Which;
+        primary.Message.Should().Be("Runtime binding did not execute its required terminal.");
+        outcomes[1].Should().BeSameAs(primary);
+        outcomes[2].Should().BeSameAs(primary);
+        workspace.ListenerStops.Should().Be(0);
+        workspace.CredentialCleanups.Should().Be(1);
+        workspace.Root.Disposed.Should().BeTrue();
+        workspace.AssertFilesAvailable();
+        workspace.Readiness.IsReady.Should().BeFalse();
+        File.Exists(workspace.Paths.DiscoveryEntryPath).Should().BeFalse();
+    }
+
     private static void AssertPending(Workspace workspace, params Task[] operations)
     {
         operations.Should().OnlyContain(task => !task.IsCompleted);
@@ -122,10 +157,11 @@ internal sealed class RuntimeBootstrapInterruptionTests
         workspace.AssertRootFileHeld();
     }
 
-    private sealed class BootstrapProbe(bool initialize, bool deadline) : ISharpClawModule
+    private sealed class BootstrapProbe(bool initialize, bool deadline, bool? replacement) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } = new("bootstrap-held", "Held bootstrap", "test");
         public TaskCompletionSource ReceiptObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool? Replacement { get; } = replacement;
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddSingleton(this);
@@ -159,6 +195,8 @@ internal sealed class RuntimeBootstrapInterruptionTests
         public async ValueTask<IActionOutcome<object>> InvokeAsync(ActionContext<KernelActionEnvelope> context,
             IActionControl<KernelActionEnvelope, object> control, CancellationToken cancellationToken)
         {
+            if (probe.Replacement is { } replacement)
+                return control.ReplaceResult(replacement, "Authorized bind replacement without terminal execution.");
             try { return await control.ProceedAsync(cancellationToken).ConfigureAwait(false); }
             finally { probe.ReceiptObserved.TrySetResult(); }
         }
@@ -231,8 +269,9 @@ internal sealed class RuntimeBootstrapInterruptionTests
         public bool DiscoveryAtBindingReturn { get; private set; }
         public int ListenerStops { get; private set; }
         public int CredentialCleanups { get; private set; }
+        public bool ListenerStarted => _app.Lifetime.ApplicationStarted.IsCancellationRequested;
 
-        public Workspace(bool initialize, bool deadline, bool lateFault, bool cleanupFault)
+        public Workspace(bool initialize, bool deadline, bool lateFault, bool cleanupFault, bool? replacement = null)
         {
             WebApplication? constructing = null;
             try
@@ -242,7 +281,7 @@ internal sealed class RuntimeBootstrapInterruptionTests
                 Paths.EnsureDirectories();
                 Physical = new(lateFault ? new IOException("late bootstrap failure") : null);
                 CleanupGate = new(cleanupFault ? new IOException("late listener cleanup failure") : null);
-                Probe = new(initialize, deadline);
+                Probe = new(initialize, deadline, replacement);
                 var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Production" });
                 builder.Logging.ClearProviders();
                 builder.Configuration.Sources.Clear();
