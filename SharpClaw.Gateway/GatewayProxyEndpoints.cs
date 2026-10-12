@@ -59,7 +59,7 @@ internal static class GatewayProxyEndpoints
             request.Content = new StreamContent(context.Request.Body);
             if (!string.IsNullOrWhiteSpace(context.Request.ContentType))
                 request.Content.Headers.ContentType =
-                    new System.Net.Http.Headers.MediaTypeHeaderValue(context.Request.ContentType);
+                    System.Net.Http.Headers.MediaTypeHeaderValue.Parse(context.Request.ContentType);
         }
 
         using var response = await client.SendRawAsync(request, cancellationToken).ConfigureAwait(false);

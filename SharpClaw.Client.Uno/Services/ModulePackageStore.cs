@@ -19,6 +19,8 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
     private const int MaximumFiles = 5_000;
     private readonly ModulePackageSources _sources;
     private readonly string _root;
+    private readonly Action<string> _deleteDirectory;
+    private readonly ClientStartupDiagnostics? _diagnostics;
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2213",
         Justification = "The cached context-free shutdown closes admission and joins all physical operations, including semaphore holders/waiters, before disposing this gate in its dependency cleanup loop. The analyzer cannot trace that Task.Run/ValueTask and array ownership; earlier disposal permits a late Release on a disposed gate.")]
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -28,10 +30,13 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
         : this(Path.Combine(frontend.Paths.DataDirectory, "modules"), new ModulePackageSources()) { }
 
     internal ModulePackageStore(string root, ModulePackageSources sources,
-        Func<PreparedModulePackage, CancellationToken, Task>? beforeTransfer = null)
+        Func<PreparedModulePackage, CancellationToken, Task>? beforeTransfer = null,
+        Action<string>? deleteDirectory = null, ClientStartupDiagnostics? diagnostics = null)
     {
         _sources = sources;
         _beforeTransfer = beforeTransfer;
+        _deleteDirectory = deleteDirectory ?? (path => Directory.Delete(path, recursive: true));
+        _diagnostics = diagnostics;
         try
         {
             _root = Path.GetFullPath(root);
@@ -176,11 +181,18 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
     {
         // A changed ancestry does not give this operation ownership of the redirected path.
         // Keep the original operation failure; do not traverse a link during compensation.
-        try { RequireRegistrationDestination(destination); }
+        try
+        {
+            RequireRegistrationDestination(destination);
+            if (Directory.Exists(destination)) _deleteDirectory(destination);
+        }
         catch (InvalidDataException) { return; }
         catch (DirectoryNotFoundException) { return; }
         catch (FileNotFoundException) { return; }
-        if (Directory.Exists(destination)) Directory.Delete(destination, recursive: true);
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            (_diagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.ModuleInstallationCleanupFailed, failure);
+        }
     }
 
     internal static IReadOnlyList<InstalledModuleIdentity> ReadIdentities(string root, bool bundled)

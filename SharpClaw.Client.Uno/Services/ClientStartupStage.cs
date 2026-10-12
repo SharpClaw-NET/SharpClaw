@@ -22,4 +22,5 @@ internal enum ClientStartupStage
     StartupFailed,
     UnhandledException,
     DesktopHostStopped,
+    ModuleInstallationCleanupFailed,
 }

@@ -126,6 +126,8 @@ internal sealed class RemoteProxyTestRig : IAsyncDisposable
             await next(context).ConfigureAwait(false);
         });
         app.Map("/fixture/echo", EchoAsync);
+        app.Map("/chat", EchoAsync);
+        app.Map("/modules/fixture/settings", EchoAsync);
         app.Map("/api/moduleliteral", EchoAsync);
         app.Map("/fixture/stream", StreamAsync);
         app.Map("/fixture/cancel", CancelAsync);
@@ -154,7 +156,7 @@ internal sealed class RemoteProxyTestRig : IAsyncDisposable
             GatewayRequests.Enqueue(new GatewayRequest(context.Request.Path.Value + context.Request.QueryString.Value,
                 context.Request.Headers.Authorization.ToString(), context.Request.Headers.ContainsKey("X-Api-Key"),
                 context.Request.Headers.ContainsKey("X-Gateway-Token"), context.Request.Headers.ContainsKey("Cookie"),
-                context.Request.Headers.ContainsKey("X-SharpClaw-Proxy-Hop")));
+                context.Request.Headers.ContainsKey("X-SharpClaw-Proxy-Hop"), context.Request.ContentType));
             if (SocketFailureStatus is { } socketStatus && context.Request.Path == "/api/fixture/socket")
             {
                 context.Response.StatusCode = socketStatus;
@@ -234,7 +236,7 @@ internal sealed class RemoteProxyTestRig : IAsyncDisposable
         RuntimeRequests.Enqueue(new RuntimeRequest(context.Request.Method,
             context.Request.Path.Value + context.Request.QueryString.Value, bytes,
             context.Request.Headers["X-Api-Key"].ToString(), context.Request.Headers["X-Gateway-Token"].ToString(),
-            context.Request.Headers.Authorization.ToString()));
+            context.Request.Headers.Authorization.ToString(), context.Request.ContentType));
         context.Response.StatusCode = StatusCodes.Status202Accepted;
         context.Response.ContentType = "application/octet-stream";
         context.Response.Headers["X-Fixture"] = "remote-response";
@@ -246,6 +248,12 @@ internal sealed class RemoteProxyTestRig : IAsyncDisposable
     {
         try
         {
+            using var body = new MemoryStream();
+            await context.Request.Body.CopyToAsync(body, context.RequestAborted).ConfigureAwait(false);
+            RuntimeRequests.Enqueue(new RuntimeRequest(context.Request.Method,
+                context.Request.Path.Value + context.Request.QueryString.Value, body.ToArray(),
+                context.Request.Headers["X-Api-Key"].ToString(), context.Request.Headers["X-Gateway-Token"].ToString(),
+                context.Request.Headers.Authorization.ToString(), context.Request.ContentType));
             context.Response.ContentType = "text/event-stream";
             await context.Response.WriteAsync("data: first\n\n", context.RequestAborted).ConfigureAwait(false);
             await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
@@ -297,8 +305,8 @@ internal sealed class RemoteProxyTestRig : IAsyncDisposable
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 
-    internal sealed record GatewayRequest(string Target, string Authorization, bool HasApiKey, bool HasGatewayToken, bool HasCookie, bool HasProxyHop);
-    internal sealed record RuntimeRequest(string Method, string Target, byte[] Body, string ApiKey, string GatewayToken, string Authorization);
+    internal sealed record GatewayRequest(string Target, string Authorization, bool HasApiKey, bool HasGatewayToken, bool HasCookie, bool HasProxyHop, string? ContentType);
+    internal sealed record RuntimeRequest(string Method, string Target, byte[] Body, string ApiKey, string GatewayToken, string Authorization, string? ContentType);
 
     private sealed class ActionObserver(RemoteProxyTestRig rig) : IActionInterceptor<KernelActionEnvelope, object>
     {

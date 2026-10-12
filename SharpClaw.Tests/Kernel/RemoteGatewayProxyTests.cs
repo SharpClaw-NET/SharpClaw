@@ -65,6 +65,42 @@ internal sealed class RemoteGatewayProxyTests
         rig.Actions.Should().Equal("security.api_key.resolve");
     }
 
+    [TestCase("/chat"), TestCase("/modules/fixture/settings")]
+    public async Task PairedJsonPostPreservesContentTypeBodyAndCredentialAuthorityAsync(string path)
+    {
+        var rig = await RemoteProxyTestRig.CreateAsync("peer-access").ConfigureAwait(false);
+        await using var rigDisposal = rig.ConfigureAwait(false);
+        using var client = rig.CreateClient();
+        const string json = "{\"message\":\"hello β\",\"enabled\":true}";
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "local-caller-credential");
+        request.Headers.Add("X-Gateway-Token", "local-gateway-credential");
+        using var response = await client.SendAsync(request, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await response.Content.ReadAsStringAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().Be(json);
+        AssertJsonPost(rig, path, json);
+    }
+
+    private static void AssertJsonPost(RemoteProxyTestRig rig, string path, string json)
+    {
+        var gateway = rig.GatewayRequests.Should().ContainSingle().Which;
+        gateway.Target.Should().Be("/api" + path);
+        gateway.ContentType.Should().Be("application/json; charset=utf-8");
+        gateway.Authorization.Should().Be("Bearer peer-access");
+        gateway.HasApiKey.Should().BeFalse();
+        gateway.HasGatewayToken.Should().BeFalse();
+        var runtime = rig.RuntimeRequests.Should().ContainSingle().Which;
+        runtime.Method.Should().Be("POST");
+        runtime.Target.Should().Be(path);
+        runtime.ContentType.Should().Be(gateway.ContentType);
+        runtime.Body.Should().Equal(Encoding.UTF8.GetBytes(json));
+        runtime.ApiKey.Should().Be("remote-runtime-key");
+        runtime.GatewayToken.Should().Be("remote-gateway-token");
+        runtime.Authorization.Should().Be("Bearer peer-access");
+        rig.LocalFallbackAttempts.Should().Be(0);
+    }
+
     [TestCase("/env/core"), TestCase("/internal/storage"), TestCase("/configuration/options")]
     public async Task PrivateHostPathsCannotBeForwardedAsync(string path)
     {
@@ -137,12 +173,20 @@ internal sealed class RemoteGatewayProxyTests
     }
 
     [Test]
-    public async Task FirstStreamChunkArrivesWhileRemoteCompletionIsStillGatedAsync()
+    public Task FirstStreamChunkArrivesWhileRemoteCompletionIsStillGatedAsync() => AssertStreamingAsync(post: false);
+
+    [Test]
+    public Task PairedJsonPostStreamsBeforeRemoteCompletionAndJoinsOwnedWorkAsync() => AssertStreamingAsync(post: true);
+
+    private static async Task AssertStreamingAsync(bool post)
     {
-        var rig = await RemoteProxyTestRig.CreateAsync(null).ConfigureAwait(false);
+        var rig = await RemoteProxyTestRig.CreateAsync("peer-access").ConfigureAwait(false);
         await using var rigDisposal = rig.ConfigureAwait(false);
         using var client = rig.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/fixture/stream");
+        const string json = "{\"message\":\"stream β\"}";
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+        using var request = new HttpRequestMessage(post ? HttpMethod.Post : HttpMethod.Get, "/fixture/stream");
+        if (post) request.Content = content;
         using var caller = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CurrentContext.CancellationToken);
         // The nested finally cancels and directly joins this request before its
         // message/client/token owners are disposed, even if cancellation faults.
@@ -162,6 +206,7 @@ internal sealed class RemoteGatewayProxyTests
             await stream.ReadExactlyAsync(first, chunkDeadline.Token).ConfigureAwait(false);
             Encoding.UTF8.GetString(first).Should().Be("data: first\n\n");
             rig.StreamSettled.Task.IsCompleted.Should().BeFalse();
+            if (post) AssertJsonPost(rig, "/fixture/stream", json);
             rig.StreamRelease.TrySetResult();
             using var remainder = new MemoryStream();
             await stream.CopyToAsync(remainder, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);

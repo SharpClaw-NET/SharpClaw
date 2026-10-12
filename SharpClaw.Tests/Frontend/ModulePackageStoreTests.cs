@@ -129,6 +129,39 @@ internal sealed class ModulePackageStoreTests
         File.Exists(System.IO.Path.Combine(inspected.Root, "payload", "package.json")).Should().BeFalse();
     }
 
+    [TestCase(false, false), TestCase(false, true)]
+    [TestCase(true, false), TestCase(true, true)]
+    public async Task CleanupFailureIsObservedWithoutReplacingTheInstallFailureAsync(bool cancelled, bool accessDenied)
+    {
+        using var workspace = new Workspace();
+        var diagnostics = new ClientStartupDiagnostics(workspace.Path("diagnostics"));
+        Exception cleanupFailure = accessDenied ? new UnauthorizedAccessException("Controlled deletion denial.")
+            : new IOException("Controlled deletion IO failure.");
+        var attempted = new List<string>();
+        var store = workspace.Store(path => { attempted.Add(path); throw cleanupFailure; }, diagnostics);
+        await using var storeDisposal = store.ConfigureAwait(false);
+        using var inspected = await store.PrepareAsync(new("local", LocalPath: workspace.CreatePayload()), null,
+            CancellationToken.None).ConfigureAwait(false);
+        var foreign = workspace.Path("foreign");
+        Directory.CreateDirectory(foreign);
+        var sentinel = System.IO.Path.Combine(foreign, "sentinel");
+        await File.WriteAllTextAsync(sentinel, "foreign-owned", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        Exception primary = cancelled ? new OperationCanceledException("Controlled configuration cancellation.")
+            : new InvalidOperationException("Controlled configuration failure.");
+        Func<Task> install = async () => await store.CommitAsync(inspected, workspace.Path("bundled"),
+            _ => Task.CompletedTask, (_, _, _) => throw primary, CancellationToken.None).ConfigureAwait(false);
+        var failure = await install.Should().ThrowAsync<Exception>().ConfigureAwait(false);
+        failure.Which.Should().BeSameAs(primary);
+        attempted.Should().ContainSingle().Which.Should().Be(Directory.GetDirectories(store.ActiveRoot).Should().ContainSingle().Which);
+        File.Exists(System.IO.Path.Combine(attempted[0], "sharpclaw-module-installation.json")).Should().BeTrue();
+        (await File.ReadAllTextAsync(sentinel, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().Be("foreign-owned");
+        Directory.GetFileSystemEntries(foreign).Should().Equal(sentinel);
+        using var entry = JsonDocument.Parse(await File.ReadAllTextAsync(diagnostics.JournalPath,
+            TestContext.CurrentContext.CancellationToken).ConfigureAwait(false));
+        entry.RootElement.GetProperty("Stage").GetString().Should().Be(nameof(ClientStartupStage.ModuleInstallationCleanupFailed));
+        entry.RootElement.GetProperty("FailureType").GetString().Should().Be(cleanupFailure.GetType().FullName);
+    }
+
     [Test]
     public async Task ArchiveTraversalCollisionAndLinksLeaveNoScratchAsync()
     {
@@ -452,7 +485,9 @@ internal sealed class ModulePackageStoreTests
         public string Path(string name) => System.IO.Path.Combine(_root, name);
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2000",
             Justification = "ModulePackageStore owns ModulePackageSources, which owns HttpClient and its handler; the returned store is disposed by each test and constructor failure disposes its sources.")]
-        public ModulePackageStore Store() => new(Path("store"), new ModulePackageSources(new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected network")))));
+        public ModulePackageStore Store(Action<string>? deleteDirectory = null, ClientStartupDiagnostics? diagnostics = null) =>
+            new(Path("store"), new ModulePackageSources(new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected network")))),
+                deleteDirectory: deleteDirectory, diagnostics: diagnostics);
         public string CreatePayload()
         {
             var source = Path("source");

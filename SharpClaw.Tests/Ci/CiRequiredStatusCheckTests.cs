@@ -125,6 +125,8 @@ internal sealed partial class CiRequiredStatusCheckTests
             "SharpClaw.Tests.Kernel.RemoteProxyLifecycleTests",
             "SharpClaw.Tests.Kernel.RuntimeProviderModelCatalogTests",
             "SharpClaw.Tests.Gateway.GatewayPrivateConfigurationTests",
+            "SharpClaw.Tests.Kernel.RemoteGatewayProxyTests",
+            "SharpClaw.Tests.Frontend.ModulePackageStoreTests",
             "SharpClaw.Tests.Persistence.InstanceLockOwnershipTests",
         })
             workflow.Should().Contain("FullyQualifiedName~" + fixture);
