@@ -104,6 +104,7 @@ internal sealed class RuntimeHostCompositionTests
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = CreateHarnessConfiguration();
+        await TestContext.Progress.WriteLineAsync("Jobs phase: load registrations").ConfigureAwait(false);
         using var registrationSet = PackagedDotNetRegistrationSet.Load(
             [
                 Path.Combine(AppContext.BaseDirectory, "contributions"),
@@ -112,40 +113,53 @@ internal sealed class RuntimeHostCompositionTests
             configuration);
         var jobCapture = new JobProbeCapture();
         var jobRegistration = new JobProbeRegistration(jobCapture);
+        await TestContext.Progress.WriteLineAsync("Jobs phase: build application").ConfigureAwait(false);
         var app = CreateJobsApplication(workspace, configuration, registrationSet, jobRegistration);
         await using var appAsyncDisposal_ = app.ConfigureAwait(false);
+        await TestContext.Progress.WriteLineAsync("Jobs phase: resolve adapter and scoped coordinator").ConfigureAwait(false);
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
         AssertJobsCoordinatorResolvesInScope(app.Services);
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
-        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
-        await adapter.StartAsync("jobs-http-test", cancellationToken: TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        await ObserveJobsPhaseAsync("database readiness", () => app.Services.GetRequiredService<RuntimeDatabaseReadiness>()
+            .ValidateAsync(TestContext.CurrentContext.CancellationToken)).ConfigureAwait(false);
+        await ObserveJobsPhaseAsync("participant startup", () => adapter.StartAsync("jobs-http-test",
+            cancellationToken: TestContext.CurrentContext.CancellationToken).AsTask()).ConfigureAwait(false);
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
         app.MapHandlers(typeof(KernelJobsHandlers).Assembly);
 
         try
         {
-            await app.StartAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await ObserveJobsPhaseAsync("listener startup", () => app.StartAsync(TestContext.CurrentContext.CancellationToken)).ConfigureAwait(false);
             using var client = new HttpClient
             {
                 BaseAddress = new Uri(app.Urls.Should().ContainSingle().Which),
             };
+            await TestContext.Progress.WriteLineAsync("Jobs phase: submit and dispatch").ConfigureAwait(false);
             var jobId = await SubmitAndDispatchProbeJobAsync(client, jobCapture).ConfigureAwait(false);
 
-            await AssertJobReadbackAsync(client, jobId).ConfigureAwait(false);
+            await ObserveJobsPhaseAsync("readback", () => AssertJobReadbackAsync(client, jobId)).ConfigureAwait(false);
 
-            await AssertJobRecoveryAndReplayAsync(client, jobId, jobCapture).ConfigureAwait(false);
+            await ObserveJobsPhaseAsync("recover and replay", () => AssertJobRecoveryAndReplayAsync(client, jobId, jobCapture)).ConfigureAwait(false);
 
-            await AssertSecondJobOwnsItsExecutionScopeAsync(client, jobCapture).ConfigureAwait(false);
+            await ObserveJobsPhaseAsync("second job scope", () => AssertSecondJobOwnsItsExecutionScopeAsync(client, jobCapture)).ConfigureAwait(false);
 
-            await AssertJobDeletionReleasesHandlersAsync(client, jobId, jobCapture).ConfigureAwait(false);
+            await ObserveJobsPhaseAsync("delete and release handlers", () => AssertJobDeletionReleasesHandlersAsync(client, jobId, jobCapture)).ConfigureAwait(false);
         }
         finally
         {
             readiness.MarkNotReady();
-            await adapter.StopAsync(CancellationToken.None).ConfigureAwait(false);
-            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await ObserveJobsPhaseAsync("participant shutdown", () => adapter.StopAsync(CancellationToken.None).AsTask()).ConfigureAwait(false);
+            await ObserveJobsPhaseAsync("listener shutdown", () => app.StopAsync(CancellationToken.None)).ConfigureAwait(false);
         }
+        await TestContext.Progress.WriteLineAsync("Jobs phase: leaving body for owned application/registration retirement").ConfigureAwait(false);
+    }
+
+    private static async Task ObserveJobsPhaseAsync(string phase, Func<Task> operation)
+    {
+        await TestContext.Progress.WriteLineAsync($"Jobs phase: {phase} entered").ConfigureAwait(false);
+        await operation().ConfigureAwait(false);
+        await TestContext.Progress.WriteLineAsync($"Jobs phase: {phase} completed").ConfigureAwait(false);
     }
 
     [Test]

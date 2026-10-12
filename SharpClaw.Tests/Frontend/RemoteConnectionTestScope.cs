@@ -60,6 +60,7 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
     internal ConcurrentQueue<PeerHandler> PeerHandlers { get; } = new();
     internal TaskCompletionSource PeerEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal TaskCompletionSource PeerCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal TaskCompletionSource PeerExited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal TaskCompletionSource PeerRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal string ProtectedFile => Path.Combine(BackendPaths.ConfigDirectory, ".env");
 
@@ -143,13 +144,17 @@ internal sealed class RemoteConnectionTestScope : IAsyncDisposable
                 await scope.PeerRelease.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             if (scope.BlockPeer)
             {
-                try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false); }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                try
                 {
-                    scope.PeerCancelled.TrySetResult();
-                    await scope.PeerRelease.Task.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
-                    throw;
+                    try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        scope.PeerCancelled.TrySetResult();
+                        await scope.PeerRelease.Task.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
+                        throw;
+                    }
                 }
+                finally { scope.PeerExited.TrySetResult(); }
             }
             var json = request.RequestUri!.AbsolutePath.EndsWith("gateway/status", StringComparison.Ordinal)
                 ? "{\"status\":\"ready\",\"runtime\":\"https://remote-runtime.example/\"}"

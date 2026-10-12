@@ -128,14 +128,18 @@ internal sealed class RemoteConnectionSettingsTests
         await scope.Backend.EnsureStartedAsync(TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         var before = await File.ReadAllBytesAsync(scope.ProtectedFile, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         scope.BlockPeer = true;
+        await TestContext.Progress.WriteLineAsync("Peer cancellation phase: connect admitted").ConfigureAwait(false);
         using var caller = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CurrentContext.CancellationToken);
         var connect = scope.Service.ConnectAsync(RemoteConnectionTestScope.PeerAddress, "peer-secret", caller.Token);
         Exception? failure = null;
         try
         {
             await scope.PeerEntered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await TestContext.Progress.WriteLineAsync("Peer cancellation phase: transport entered").ConfigureAwait(false);
             await caller.CancelAsync().ConfigureAwait(false);
             await scope.PeerCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await TestContext.Progress.WriteLineAsync("Peer cancellation phase: cancellation observed, transport held").ConfigureAwait(false);
+            scope.PeerExited.Task.IsCompleted.Should().BeFalse();
             connect.IsCompleted.Should().BeFalse("the physical peer transport is still settling");
         }
         finally
@@ -232,15 +236,19 @@ internal sealed class RemoteConnectionSettingsTests
         await using var scopeDisposal = scope.ConfigureAwait(false);
         await scope.SaveConnectionAsync(null).ConfigureAwait(false);
         scope.BlockPeer = true;
+        await TestContext.Progress.WriteLineAsync("Peer shutdown phase: connect admitted").ConfigureAwait(false);
         var connect = scope.Service.ConnectAsync(RemoteConnectionTestScope.PeerAddress, "peer-secret", TestContext.CurrentContext.CancellationToken);
         Task first = Task.CompletedTask;
         Task second = Task.CompletedTask;
         try
         {
             await scope.PeerEntered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await TestContext.Progress.WriteLineAsync("Peer shutdown phase: transport entered").ConfigureAwait(false);
             first = scope.Service.DisposeAsync().AsTask();
             second = scope.Service.DisposeAsync().AsTask();
             await scope.PeerCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await TestContext.Progress.WriteLineAsync("Peer shutdown phase: cancellation observed, transport held").ConfigureAwait(false);
+            scope.PeerExited.Task.IsCompleted.Should().BeFalse();
             first.IsCompleted.Should().BeFalse();
             second.IsCompleted.Should().BeFalse();
             connect.IsCompleted.Should().BeFalse();
@@ -248,8 +256,12 @@ internal sealed class RemoteConnectionSettingsTests
         finally
         {
             scope.PeerRelease.TrySetResult();
+            await TestContext.Progress.WriteLineAsync("Peer shutdown phase: transport released, joining connect").ConfigureAwait(false);
             _ = await TestTaskOutcome.CaptureAsync(connect).ConfigureAwait(false);
+            scope.PeerExited.Task.IsCompleted.Should().BeTrue();
+            await TestContext.Progress.WriteLineAsync("Peer shutdown phase: connect joined, joining repeated shutdown").ConfigureAwait(false);
             await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5), TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+            await TestContext.Progress.WriteLineAsync("Peer shutdown phase: repeated shutdown joined").ConfigureAwait(false);
         }
         scope.BackendStarts.Should().Be(0);
         scope.Service.IsProxyConfigured().Should().BeFalse();
