@@ -15,17 +15,16 @@ namespace SharpClaw.Services;
 /// <summary>An inspected, non-executed candidate whose owned scratch is retired when the view leaves.</summary>
 internal sealed class PreparedModulePackage : IDisposable
 {
-    internal PreparedModulePackage(string root, IReadOnlyList<InstalledModuleIdentity> modules,
-        IReadOnlyList<ModulePayloadFile> files)
-    { Root = root; Modules = modules; Files = files; }
+    private readonly ModuleInspectionScratch _scratch;
 
-    internal string Root { get; }
+    internal PreparedModulePackage(ModuleInspectionScratch scratch, IReadOnlyList<InstalledModuleIdentity> modules,
+        IReadOnlyList<ModulePayloadFile> files)
+    { _scratch = scratch; Modules = modules; Files = files; }
+
+    internal string Root => _scratch.Path;
     public IReadOnlyList<InstalledModuleIdentity> Modules { get; }
     internal IReadOnlyList<ModulePayloadFile> Files { get; }
     internal bool IsInstalled { get; private set; }
     internal void MarkInstalled() => IsInstalled = true;
-    public void Dispose()
-    {
-        if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
-    }
+    public void Dispose() => _scratch.Retire();
 }

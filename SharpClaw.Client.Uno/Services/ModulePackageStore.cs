@@ -20,6 +20,7 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
     private readonly ModulePackageSources _sources;
     private readonly string _root;
     private readonly Action<string> _deleteDirectory;
+    private readonly Action<string> _deleteInspectionDirectory;
     private readonly ClientStartupDiagnostics? _diagnostics;
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2213",
         Justification = "The cached context-free shutdown closes admission and joins all physical operations, including semaphore holders/waiters, before disposing this gate in its dependency cleanup loop. The analyzer cannot trace that Task.Run/ValueTask and array ownership; earlier disposal permits a late Release on a disposed gate.")]
@@ -31,11 +32,13 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
 
     internal ModulePackageStore(string root, ModulePackageSources sources,
         Func<PreparedModulePackage, CancellationToken, Task>? beforeTransfer = null,
-        Action<string>? deleteDirectory = null, ClientStartupDiagnostics? diagnostics = null)
+        Action<string>? deleteDirectory = null, ClientStartupDiagnostics? diagnostics = null,
+        Action<string>? deleteInspectionDirectory = null)
     {
         _sources = sources;
         _beforeTransfer = beforeTransfer;
         _deleteDirectory = deleteDirectory ?? (path => Directory.Delete(path, recursive: true));
+        _deleteInspectionDirectory = deleteInspectionDirectory ?? (path => Directory.Delete(path, recursive: true));
         _diagnostics = diagnostics;
         try
         {
@@ -64,10 +67,13 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         var stage = Path.Combine(_root, "inspection-" + Guid.NewGuid().ToString("N"));
+        ModuleInspectionScratch? scratch = null;
         try
         {
             RequireRegistrationRoot();
             Directory.CreateDirectory(stage);
+            scratch = new ModuleInspectionScratch(_root, stage, _deleteInspectionDirectory);
+            RequireNoLinks(stage);
             var payload = Path.Combine(stage, "payload");
             Directory.CreateDirectory(payload);
             if (source.LocalPath is { } local && Directory.Exists(local))
@@ -98,14 +104,25 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
             }
             var modules = ValidateModules(payload);
             var files = await HashFilesAsync(payload, cancellationToken).ConfigureAwait(false);
-            return new PreparedModulePackage(stage, modules, files);
+            return new PreparedModulePackage(scratch, modules, files);
         }
         catch
         {
-            if (Directory.Exists(stage)) Directory.Delete(stage, recursive: true);
+            RetireFailedInspection(scratch);
             throw;
         }
         finally { _gate.Release(); }
+    }
+
+    private void RetireFailedInspection(ModuleInspectionScratch? scratch)
+    {
+        try { scratch?.Retire(); }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            // Cleanup cannot replace the preparation fault or cancellation.
+            // Bounded diagnostics report failure without claiming removal.
+            (_diagnostics ?? ClientStartupDiagnostics.Current).Record(ClientStartupStage.ModuleInspectionCleanupFailed, failure);
+        }
     }
 
     internal Task<string> CommitAsync(PreparedModulePackage candidate, string bundledRoot,
@@ -378,7 +395,7 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
                 name[3] is >= '0' and <= '9');
     }
 
-    private static void RequireContained(string root, string path)
+    internal static void RequireContained(string root, string path)
     {
         if (!Path.GetFullPath(path).StartsWith(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) +
             Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))

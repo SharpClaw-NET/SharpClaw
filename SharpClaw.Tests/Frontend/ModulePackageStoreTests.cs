@@ -13,6 +13,120 @@ namespace SharpClaw.Tests.Frontend;
 [TestFixture]
 internal sealed class ModulePackageStoreTests
 {
+    [TestCase(false), TestCase(true)]
+    public async Task FailedPreparationCannotRetireRedirectedScratchAsync(bool cancelled)
+    {
+        using var workspace = new Workspace();
+        Exception primary = cancelled ? new OperationCanceledException("Controlled download cancellation.")
+            : new IOException("Controlled download failure.");
+        var gate = new ControlledOperationGate(primary);
+        using var handler = new AsyncHandler(async _ =>
+        {
+            await gate.RunAsync().ConfigureAwait(false);
+            throw new AssertionException("The controlled failure must terminate download.");
+        });
+        var store = workspace.Store(handler: handler);
+        await using var storeDisposal = store.ConfigureAwait(false);
+        var preparation = store.PrepareAsync(new("fixture.zip", Download: new Uri(
+            "https://github.com/owner/repo/releases/download/v1/fixture.zip")), null, CancellationToken.None);
+        string? sentinel = null;
+        var redirected = false;
+        try
+        {
+            await gate.WaitForEntryAsync().ConfigureAwait(false);
+            var scratch = Directory.GetDirectories(workspace.Path("store"), "inspection-*").Should().ContainSingle().Which;
+            sentinel = await RedirectScratchAsync(workspace, scratch).ConfigureAwait(false);
+            redirected = true;
+            preparation.IsCompleted.Should().BeFalse();
+        }
+        finally
+        {
+            gate.Release();
+            try
+            {
+                Exception? failure;
+                try { using var unexpected = await preparation.ConfigureAwait(false); failure = null; }
+#pragma warning disable CA1031 // The actual retained preparation is joined here; transport its original outcome for identity and forbidden-effect assertions.
+                catch (Exception exception) { failure = exception; }
+#pragma warning restore CA1031
+                failure.Should().BeSameAs(primary);
+                if (sentinel is not null)
+                    (await File.ReadAllTextAsync(sentinel, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false))
+                        .Should().Be("foreign inspection bytes");
+            }
+            finally { if (redirected) RemoveDirectoryLink(workspace.Path("store")); }
+        }
+    }
+
+    [TestCase(false), TestCase(true)]
+    public async Task TransferredCandidateCannotRetireRedirectedScratchAsync(bool closeStore)
+    {
+        using var workspace = new Workspace();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
+        using var candidate = await store.PrepareAsync(new("local", LocalPath: workspace.CreatePayload()), null,
+            CancellationToken.None).ConfigureAwait(false);
+        if (closeStore) await store.DisposeAsync().ConfigureAwait(false);
+        var sentinel = await RedirectScratchAsync(workspace, candidate.Root).ConfigureAwait(false);
+        try
+        {
+            candidate.Dispose();
+            candidate.Dispose();
+            (await File.ReadAllTextAsync(sentinel, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false))
+                .Should().Be("foreign inspection bytes");
+            Directory.Exists(System.IO.Path.Combine(workspace.Path("retired-store"),
+                System.IO.Path.GetFileName(candidate.Root), "payload")).Should().BeTrue("the moved location is not reclaimed by pathname guessing");
+        }
+        finally { RemoveDirectoryLink(workspace.Path("store")); }
+    }
+
+    [TestCase(false, false), TestCase(false, true)]
+    [TestCase(true, false), TestCase(true, true)]
+    public async Task FailedPreparationRetainsItsOriginalFaultWhenScratchDeletionFailsAsync(bool cancelled, bool accessDenied)
+    {
+        using var workspace = new Workspace();
+        Exception primary = cancelled ? new OperationCanceledException("Controlled download cancellation.")
+            : new IOException("Controlled download failure.");
+        Exception secondary = accessDenied ? new UnauthorizedAccessException("Controlled scratch deletion denial.")
+            : new IOException("Controlled scratch deletion failure.");
+        var diagnostics = new ClientStartupDiagnostics(workspace.Path("diagnostics"));
+        var attempted = new List<string>();
+        using var handler = new AsyncHandler(_ => Task.FromException<HttpResponseMessage>(primary));
+        var store = workspace.Store(diagnostics: diagnostics,
+            handler: handler,
+            deleteInspectionDirectory: path => { attempted.Add(path); throw secondary; });
+        await using var storeDisposal = store.ConfigureAwait(false);
+        var sentinel = workspace.Path("foreign-sentinel");
+        await File.WriteAllTextAsync(sentinel, "foreign", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        var failure = await TestTaskOutcome.CaptureAsync(PrepareDownloadAsync(store)).ConfigureAwait(false);
+        failure.Should().BeSameAs(primary);
+        var scratch = Directory.GetDirectories(workspace.Path("store"), "inspection-*").Should().ContainSingle().Which;
+        attempted.Should().Equal(scratch);
+        Directory.Exists(scratch).Should().BeTrue("failed cleanup must not be certified as successful removal");
+        (await File.ReadAllTextAsync(sentinel, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().Be("foreign");
+        using var entry = JsonDocument.Parse((await File.ReadAllLinesAsync(diagnostics.JournalPath,
+            TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().ContainSingle().Which);
+        entry.RootElement.GetProperty("Stage").GetString().Should().Be(nameof(ClientStartupStage.ModuleInspectionCleanupFailed));
+        entry.RootElement.GetProperty("FailureType").GetString().Should().Be(secondary.GetType().FullName);
+    }
+
+    private static async Task PrepareDownloadAsync(ModulePackageStore store)
+    {
+        using var candidate = await store.PrepareAsync(new("fixture.zip", Download: new Uri(
+            "https://github.com/owner/repo/releases/download/v1/fixture.zip")), null, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private static async Task<string> RedirectScratchAsync(Workspace workspace, string scratch)
+    {
+        var foreign = System.IO.Path.Combine(workspace.Path("outside"), System.IO.Path.GetFileName(scratch));
+        Directory.CreateDirectory(foreign);
+        var sentinel = System.IO.Path.Combine(foreign, "sentinel");
+        await File.WriteAllTextAsync(sentinel, "foreign inspection bytes", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        Directory.Move(workspace.Path("store"), workspace.Path("retired-store"));
+        await CreateDirectoryLinkAsync(workspace.Path("store"), workspace.Path("outside")).ConfigureAwait(false);
+        return sentinel;
+    }
+
     [TestCase("../escape.dll")]
     [TestCase("/escape.dll")]
     [TestCase("C:/escape.dll")]
@@ -472,6 +586,12 @@ internal sealed class ModulePackageStoreTests
     public void InvalidDownloadAuthoritiesAreRejected(string url) =>
         Assert.Throws<InvalidDataException>(() => ModulePackageSources.RequireDownloadUri(new Uri(url)));
 
+    private sealed class AsyncHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handle) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            handle(request);
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> handle) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
@@ -484,10 +604,11 @@ internal sealed class ModulePackageStoreTests
         public Workspace() => Directory.CreateDirectory(_root);
         public string Path(string name) => System.IO.Path.Combine(_root, name);
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2000",
-            Justification = "ModulePackageStore owns ModulePackageSources, which owns HttpClient and its handler; the returned store is disposed by each test and constructor failure disposes its sources.")]
-        public ModulePackageStore Store(Action<string>? deleteDirectory = null, ClientStartupDiagnostics? diagnostics = null) =>
-            new(Path("store"), new ModulePackageSources(new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected network")))),
-                deleteDirectory: deleteDirectory, diagnostics: diagnostics);
+            Justification = "ModulePackageStore owns sources and HttpClient plus its default handler; injected handlers are borrowed from explicit test using owners. The returned store is disposed by each test and constructor failure disposes its sources.")]
+        public ModulePackageStore Store(Action<string>? deleteDirectory = null, ClientStartupDiagnostics? diagnostics = null,
+            HttpMessageHandler? handler = null, Action<string>? deleteInspectionDirectory = null) =>
+            new(Path("store"), new ModulePackageSources(new HttpClient(handler ?? new Handler(_ => throw new InvalidOperationException("Unexpected network")), disposeHandler: handler is null)),
+                deleteDirectory: deleteDirectory, diagnostics: diagnostics, deleteInspectionDirectory: deleteInspectionDirectory);
         public string CreatePayload()
         {
             var source = Path("source");

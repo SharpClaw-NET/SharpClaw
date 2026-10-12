@@ -1,5 +1,5 @@
 PRIVACY POLICY — SharpClaw
-Last updated: 2025-07-12
+Last updated: 2026-10-12
 
 1.  INTRODUCTION
 
@@ -32,23 +32,21 @@ Last updated: 2025-07-12
 
 3.  DATA WE COLLECT AND PROCESS
 
-    SharpClaw does NOT operate any remote backend server, cloud
-    service, or remote database. The Application runs a local-only
-    service process on your device (bound to localhost) to manage its
-    data; this process does not accept connections from the network
-    and is not accessible to other devices.
+    The Application supports a local backend and a paired remote backend.
+    In local mode, the configured Gateway/Runtime runs on your device.
+    In paired mode, the local service forwards requests to the remote
+    Gateway/Runtime you select, which can run on another device.
 
-    ALL data generated or entered while using the Application —
-    including but not limited to:
+    Entered chat messages and module settings are sent to the configured
+    backend for processing. Backend configuration, credentials, chat data
+    and other records can be stored where that backend runs, according
+    to its configuration and its operator's retention practices. Client
+    preferences and pairing credentials are also stored on your device.
+    Pairing does not guarantee that all entered data stays on your device.
 
-        •  user credentials and authentication tokens,
-        •  chat history and conversation threads,
-        •  agent configurations and system prompts,
-        •  API keys for third-party AI providers,
-        •  local application settings and preferences,
-
-    — is stored EXCLUSIVELY on YOUR device, in local storage (on-device
-    files and/or an in-memory database with local JSON persistence).
+    We do not operate a hosted backend service for the Application. Before
+    pairing, review who operates your chosen backend and how it handles
+    access, processing, storage and deletion of your data.
 
     We do not collect, transmit, receive, or store any personal data on
     our own servers. We have no access to your data.
@@ -61,10 +59,11 @@ Last updated: 2025-07-12
 
     When you configure a provider and send chat messages, the content of
     those messages — which may include personal data — is transmitted
-    directly from your device to the provider's servers using the API
-    key you supply.
+    through the configured Gateway/Runtime to the provider's servers,
+    using the credentials configured for that backend. In paired mode,
+    the remote backend is an intermediary that receives these requests.
 
-    SharpClaw acts solely as a local client interface in this context.
+    SharpClaw provides the client and backend interfaces in this context.
     We do not receive, store, or otherwise process this data on our own
     systems. Each third-party provider acts as an independent data
     controller for the data it receives.
@@ -86,7 +85,9 @@ Last updated: 2025-07-12
            necessary to ensure the Application functions correctly,
            including maintaining settings and preferences between
            sessions. These interests do not override your fundamental
-           rights, as all data remains under your control on your device.
+           rights. This section describes local Application processing;
+           remote backend and provider processing depend on the services
+           you configure, as described in Sections 3 and 4.
 
     We do not process personal data on our own servers.
 
@@ -94,6 +95,9 @@ Last updated: 2025-07-12
 
     SharpClaw itself does NOT transfer any personal data to us or to any
     server we control.
+
+    Pairing sends requests to the selected remote Gateway/Runtime. Its
+    location and processing practices depend on the backend you select.
 
     When you choose to connect to a third-party AI provider, data may be
     transferred to servers located outside the EU/EEA (for example, in
@@ -103,15 +107,21 @@ Last updated: 2025-07-12
 
 7.  DATA RETENTION
 
-    All data is stored locally on your device for as long as you choose
-    to keep it.
+    Local Application data is kept on your device until removed. Data
+    processed by a remote backend or AI provider is subject to that
+    service's retention practices.
 
-    You may delete any or all Application data at any time by:
+    You may remove local Application data by:
         •  using the Application's built-in settings/reset functions;
         •  deleting the Application's local data folder; or
         •  uninstalling the Application.
 
-    We retain no data, as we do not operate server-side storage.
+    Local reset, deletion, uninstalling, or disconnecting a paired backend
+    does not delete records already held by a remote Gateway/Runtime or
+    AI provider. Use the backend's deletion facilities or contact its
+    operator, and follow the provider's deletion process for provider data.
+
+    We retain no data on a hosted backend service of our own.
 
 8.  YOUR RIGHTS UNDER THE GDPR AND CROATIAN LAW
 
@@ -128,8 +138,9 @@ Last updated: 2025-07-12
 
     Because we do not have access to or store your personal data, we are
     generally not in a position to fulfill such requests directly.
-    However, you can exercise full control over your data locally on your
-    device as described in Section 7.
+    Local deletion and its limits are described in Section 7. For data
+    held by a remote backend or AI provider, contact its operator or
+    provider and use its available access and deletion procedures.
 
     If you believe your rights have been violated, you have the right to
     lodge a complaint with:
@@ -144,8 +155,8 @@ Last updated: 2025-07-12
 9.  CHILDREN'S PRIVACY
 
     The Application is not directed at children under the age of 16.
-    We do not knowingly collect personal data from children. Since all
-    data remains on the user's device, no age verification is performed.
+    We do not knowingly collect personal data from children. The
+    Application does not perform age verification.
 
 10. COOKIES AND TRACKING
 
@@ -155,9 +166,10 @@ Last updated: 2025-07-12
 
 11. SECURITY
 
-    Your data is stored locally on your device. Sensitive data such as
-    API keys is encrypted at rest using industry-standard encryption
-    methods (including AES-GCM).
+    Local protected settings, including API keys and pairing credentials,
+    are encrypted at rest using AES-GCM. In paired mode, requests also
+    pass through the selected remote Gateway/Runtime; its security and
+    storage protections depend on its configuration and operator.
 
     The security of your device — including disk encryption, operating
     system protections, and physical access — remains your
