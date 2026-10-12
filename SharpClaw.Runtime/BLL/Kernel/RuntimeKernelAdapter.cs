@@ -26,6 +26,7 @@ public sealed class RuntimeKernelAdapter :
     private readonly IKernelEventDeliverySink _eventDeliverySink;
     private readonly KernelJobsActionRunner _jobsActionRunner;
     private readonly IServiceProvider _hostServices;
+    private readonly Func<string, IProviderApiClient> _resolveProviderClient;
     private bool _started;
     private readonly Lock _stopGate = new();
     private Task? _startTask;
@@ -79,10 +80,15 @@ public sealed class RuntimeKernelAdapter :
             ?? [];
         ValidateConfiguredProviders(configuration, plugins);
         // The graph must serve first-run configuration without a default chat
-        // provider or credentials. Create clients only when a turn selects one;
+        // provider or credentials. Create clients only when chat or metadata selects one;
         // provider failures must not take down unrelated host capabilities.
         var providerClients = new System.Collections.Concurrent.ConcurrentDictionary<
             string, Lazy<IProviderApiClient>>(StringComparer.OrdinalIgnoreCase);
+        _resolveProviderClient = providerKey => providerClients.GetOrAdd(
+            providerKey,
+            static (key, state) => new Lazy<IProviderApiClient>(() =>
+                state.Factory.Create(state.Configuration, state.Plugins, key)),
+            (Factory: providerClientFactory, Configuration: configuration, Plugins: plugins)).Value;
         var conversationResolver = ResolveConversationResolver(Graph);
         var effectiveConversationStore = ResolveConversationStore(Graph);
         var profileResolver = ResolveProfileResolver(Graph, configuration);
@@ -90,12 +96,7 @@ public sealed class RuntimeKernelAdapter :
         Kernel = DirectChatKernelFactory.CreateFromGraph(
             Graph,
             _actionDispatcher,
-            new ProviderKernelTransport(providerKey =>
-                providerClients.GetOrAdd(
-                    providerKey,
-                    static (key, state) => new Lazy<IProviderApiClient>(() =>
-                        state.Factory.Create(state.Configuration, state.Plugins, key)),
-                    (Factory: providerClientFactory, Configuration: configuration, Plugins: plugins)).Value),
+            new ProviderKernelTransport(_resolveProviderClient),
             conversationResolver,
             profileResolver,
             effectiveConversationStore);
@@ -124,6 +125,10 @@ public sealed class RuntimeKernelAdapter :
     }
 
     public KernelGraph Graph { get; }
+
+    // Metadata and transport resolve clients only inside their authorized provider action terminals.
+    // The cache and provider/configuration/factory authority belong to this adapter's graph.
+    internal IProviderApiClient ResolveProviderClient(string providerKey) => _resolveProviderClient(providerKey);
 
     public DirectChatKernel Kernel { get; }
 

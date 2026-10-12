@@ -14,19 +14,18 @@ internal static class RuntimeProviderModelCatalog
 
     public static async ValueTask<SharpClawProviderModels> ReadAsync(
         KernelActionExecutionContext context, IConfiguration configuration, RuntimeKernelAdapter adapter,
-        IRuntimeProviderClientFactory factory, CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
         var setup = RuntimeProviderSetup.Describe(configuration, adapter);
         if (setup.SetupRequired || string.IsNullOrWhiteSpace(setup.ProviderKey))
             throw new InvalidOperationException(RuntimeProviderSetup.RequiredErrorMessage);
         var invocation = new ModelDiscoveryInvocation("models.list", setup.ProviderKey);
-        var plugins = (adapter.Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)?.ToArray() ?? [];
         IProviderApiClient? client = null;
         IReadOnlyList<string>? models = null;
         await RunStageAsync("provider.resolve", _ => ValueTask.CompletedTask).ConfigureAwait(false);
         await RunStageAsync("provider.client.create", _ =>
         {
-            client = factory.Create(configuration, plugins, invocation.ProviderKey);
+            client = adapter.ResolveProviderClient(invocation.ProviderKey);
             return ValueTask.CompletedTask;
         }).ConfigureAwait(false);
         await RunStageAsync("provider.request.prepare", _ => ValueTask.CompletedTask).ConfigureAwait(false);

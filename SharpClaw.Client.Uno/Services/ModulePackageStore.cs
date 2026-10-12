@@ -35,9 +35,12 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
         try
         {
             _root = Path.GetFullPath(root);
+            RequireNoLinks(_root, allowMissing: true);
             Directory.CreateDirectory(_root);
             RequireNoLinks(_root);
+            RequireNoLinks(ActiveRoot, allowMissing: true);
             Directory.CreateDirectory(ActiveRoot);
+            RequireRegistrationRoot();
         }
         catch { _sources.Dispose(); _lifetime.Dispose(); _gate.Dispose(); throw; }
     }
@@ -58,6 +61,7 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
         var stage = Path.Combine(_root, "inspection-" + Guid.NewGuid().ToString("N"));
         try
         {
+            RequireRegistrationRoot();
             Directory.CreateDirectory(stage);
             var payload = Path.Combine(stage, "payload");
             Directory.CreateDirectory(payload);
@@ -113,8 +117,10 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         var destination = Path.Combine(ActiveRoot, Guid.NewGuid().ToString("N"));
+        var destinationOwned = false;
         try
         {
+            RequireRegistrationDestination(destination);
             RequireContained(_root, candidate.Root);
             RequireNoLinks(candidate.Root);
             var payload = Path.Combine(candidate.Root, "payload");
@@ -127,23 +133,55 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
             // Stop first. Do not alter any external Runtime or activate a partially copied contribution.
             await stopOwnedRuntime(cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
+            RequireRegistrationDestination(destination);
             Directory.Move(payload, destination);
+            destinationOwned = true;
             var receipt = new InstalledModuleReceipt(1, Path.GetFileName(destination), candidate.Modules, candidate.Files);
+            RequireRegistrationDestination(destination);
             await File.WriteAllTextAsync(Path.Combine(destination, "sharpclaw-module-installation.json"),
                 JsonSerializer.Serialize(receipt), cancellationToken).ConfigureAwait(false);
+            RequireRegistrationDestination(destination);
             await configure(ActiveRoot, candidate.Modules, cancellationToken).ConfigureAwait(false);
             return destination;
         }
         catch
         {
             // This GUID destination was created by this operation, never a pre-existing installation.
-            if (Directory.Exists(destination)) Directory.Delete(destination, recursive: true);
+            if (destinationOwned) RemoveOwnedDestination(destination);
             throw;
         }
         finally { _gate.Release(); }
     }
 
-    internal IReadOnlyList<InstalledModuleIdentity> ReadInstalled() => ReadIdentities(ActiveRoot, false);
+    internal IReadOnlyList<InstalledModuleIdentity> ReadInstalled()
+    {
+        RequireRegistrationRoot();
+        return ReadIdentities(ActiveRoot, false);
+    }
+
+    private void RequireRegistrationRoot()
+    {
+        RequireContained(_root, ActiveRoot);
+        RequireNoLinks(ActiveRoot);
+    }
+
+    private void RequireRegistrationDestination(string destination)
+    {
+        RequireRegistrationRoot();
+        RequireContained(ActiveRoot, destination);
+        if (Directory.Exists(destination)) RequireNoLinks(destination);
+    }
+
+    private void RemoveOwnedDestination(string destination)
+    {
+        // A changed ancestry does not give this operation ownership of the redirected path.
+        // Keep the original operation failure; do not traverse a link during compensation.
+        try { RequireRegistrationDestination(destination); }
+        catch (InvalidDataException) { return; }
+        catch (DirectoryNotFoundException) { return; }
+        catch (FileNotFoundException) { return; }
+        if (Directory.Exists(destination)) Directory.Delete(destination, recursive: true);
+    }
 
     internal static IReadOnlyList<InstalledModuleIdentity> ReadIdentities(string root, bool bundled)
     {
@@ -335,15 +373,24 @@ internal sealed partial class ModulePackageStore : IDisposable, IAsyncDisposable
             throw new InvalidDataException("Module path escapes its owned root.");
     }
 
-    internal static void RequireNoLinks(string path)
+    internal static void RequireNoLinks(string path, bool allowMissing = false)
     {
         var current = Path.GetFullPath(path);
         while (!string.IsNullOrEmpty(current))
         {
-            if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+            var attributes = allowMissing ? ReadAttributesIfPresent(current) : File.GetAttributes(current);
+            if (attributes is { } existing && existing.HasFlag(FileAttributes.ReparsePoint))
                 throw new InvalidDataException("Module paths cannot traverse symbolic links or reparse points.");
             current = Path.GetDirectoryName(current);
         }
+    }
+
+    private static FileAttributes? ReadAttributesIfPresent(string path)
+    {
+        // Creation can have missing descendants, but every existing ancestor still must be checked.
+        try { return File.GetAttributes(path); }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
     }
 
 }

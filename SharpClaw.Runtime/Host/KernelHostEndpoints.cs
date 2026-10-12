@@ -33,11 +33,11 @@ internal static class KernelHostEndpoints
                 (_, _) => ValueTask.FromResult(RuntimeProviderSetup.Describe(configuration, adapter)),
                 cancellationToken).ConfigureAwait(false)));
         app.MapGet("/setup/models", async (HttpContext context, IConfiguration configuration,
-            RuntimeKernelAdapter adapter, IRuntimeProviderClientFactory factory, CancellationToken cancellationToken) =>
+            RuntimeKernelAdapter adapter, CancellationToken cancellationToken) =>
             Results.Ok(await adapter.RunRequestAsync(
                 CreateExecutionContext(context), "/setup/models",
                 (_, token) => RuntimeProviderModelCatalog.ReadAsync(CreateExecutionContext(context),
-                    configuration, adapter, factory, token), cancellationToken).ConfigureAwait(false)));
+                    configuration, adapter, token), cancellationToken).ConfigureAwait(false)));
         app.MapGet("/env/core", ReadEnvironmentAsync);
         app.MapPost("/chat", RunChatAsync);
         app.MapPost("/chat/stream", StreamChatAsync);

@@ -26,7 +26,7 @@ internal sealed class RuntimeKernelAdapterTests
         var adapter = RuntimeKernelAdapterTestFactory.Create(configuration, [new ProviderModule(provider)],
             workspace.CreateInstancePaths(), factory);
         var models = await RuntimeProviderModelCatalog.ReadAsync(new(RequestPrincipal.Anonymous,
-            ExtensionFeatureSet.Empty, Guid.NewGuid(), Guid.NewGuid()), configuration, adapter, factory, default).ConfigureAwait(false);
+            ExtensionFeatureSet.Empty, Guid.NewGuid(), Guid.NewGuid()), configuration, adapter, default).ConfigureAwait(false);
         models.ProviderKey.Should().Be("test");
         models.Models.Should().Equal("test-model");
         provider.Messages.Should().BeEmpty();

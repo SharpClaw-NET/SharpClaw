@@ -123,6 +123,7 @@ internal sealed partial class CiRequiredStatusCheckTests
             "SharpClaw.Tests.Kernel.RuntimeStartupInterruptionTests",
             "SharpClaw.Tests.Kernel.RuntimeBootstrapInterruptionTests",
             "SharpClaw.Tests.Kernel.RemoteProxyLifecycleTests",
+            "SharpClaw.Tests.Kernel.RuntimeProviderModelCatalogTests",
             "SharpClaw.Tests.Gateway.GatewayPrivateConfigurationTests",
             "SharpClaw.Tests.Persistence.InstanceLockOwnershipTests",
         })

@@ -173,6 +173,140 @@ internal sealed class ModulePackageStoreTests
         await inspect.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
     }
 
+    [TestCase(true), TestCase(false)]
+    public async Task PreexistingLinkedRegistrationRootIsRefusedWithoutOutsideEffectsAsync(bool targetExists)
+    {
+        using var workspace = new Workspace();
+        var root = workspace.Path("store");
+        Directory.CreateDirectory(root);
+        var outside = workspace.Path("outside");
+        var sentinel = System.IO.Path.Combine(outside, "sentinel");
+        if (targetExists)
+        {
+            Directory.CreateDirectory(outside);
+            await File.WriteAllTextAsync(sentinel, "outside-owned", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        }
+        var link = System.IO.Path.Combine(root, "registrations");
+        await CreateDirectoryLinkAsync(link, outside).ConfigureAwait(false);
+        try
+        {
+            Action construct = () => { using var store = workspace.Store(); };
+            construct.Should().Throw<InvalidDataException>().WithMessage("*symbolic links*");
+            Directory.Exists(outside).Should().Be(targetExists);
+            if (targetExists)
+            {
+                (await File.ReadAllTextAsync(sentinel, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false))
+                    .Should().Be("outside-owned");
+                Directory.GetFileSystemEntries(outside).Should().Equal(sentinel);
+            }
+        }
+        finally { RemoveDirectoryLink(link); }
+    }
+
+    [TestCase(0), TestCase(1), TestCase(2)]
+    public async Task ChangedRegistrationAncestryCannotRedirectCommitOrCompensationAsync(int changeAt)
+    {
+        using var workspace = new Workspace();
+        var store = workspace.Store();
+        await using var storeDisposal = store.ConfigureAwait(false);
+        using var inspected = await store.PrepareAsync(new("local", LocalPath: workspace.CreatePayload()), null, default).ConfigureAwait(false);
+        var outside = workspace.Path("outside");
+        Directory.CreateDirectory(outside);
+        var sentinel = System.IO.Path.Combine(outside, "sentinel");
+        await File.WriteAllTextAsync(sentinel, "outside-owned", TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+        var stop = new ControlledOperationGate();
+        var configured = false;
+        var primary = new InvalidOperationException("Controlled configuration failure after ancestry replacement.");
+        string? redirectedDestination = null;
+        Exception? outcome;
+        if (changeAt == 0) await RedirectAsync().ConfigureAwait(false);
+#pragma warning disable CA2025 // This retained typed install is directly awaited in finally before all using owners retire; held-work controls verify that join. The analyzer cannot follow the asynchronous closure/resource provenance.
+        var install = store.CommitAsync(inspected, workspace.Path("bundled"), _ => stop.RunAsync().AsTask(),
+            async (_, _, _) =>
+            {
+                configured = true;
+                var owned = Directory.GetDirectories(store.ActiveRoot).Should().ContainSingle().Which;
+                redirectedDestination = System.IO.Path.Combine(outside, System.IO.Path.GetFileName(owned));
+                Directory.CreateDirectory(redirectedDestination);
+                await File.WriteAllTextAsync(System.IO.Path.Combine(redirectedDestination, "sentinel"), "do-not-delete",
+                    TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
+                await RedirectAsync().ConfigureAwait(false);
+                throw primary;
+            }, CancellationToken.None);
+#pragma warning restore CA2025
+        try
+        {
+            if (changeAt != 0)
+            {
+                await stop.WaitForEntryAsync().ConfigureAwait(false);
+                if (changeAt == 1) await RedirectAsync().ConfigureAwait(false);
+                install.IsCompleted.Should().BeFalse();
+            }
+        }
+        finally
+        {
+            stop.Release();
+            try { await install.ConfigureAwait(false); outcome = null; }
+#pragma warning disable CA1031 // The actual owned install has settled; transport its original failure for identity/effect assertions below.
+            catch (Exception exception) { outcome = exception; }
+#pragma warning restore CA1031
+        }
+        try
+        {
+            AssertRedirectedCommitOutcome(changeAt, outcome, primary, stop, configured);
+            await AssertOutsideUnchangedAsync(store, outside, sentinel, redirectedDestination).ConfigureAwait(false);
+        }
+        finally { RemoveDirectoryLink(store.ActiveRoot); }
+
+        async Task RedirectAsync()
+        {
+            Directory.Move(store.ActiveRoot, workspace.Path("retired-registrations"));
+            await CreateDirectoryLinkAsync(store.ActiveRoot, outside).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task AssertOutsideUnchangedAsync(ModulePackageStore store, string outside,
+        string sentinel, string? redirectedDestination)
+    {
+        (await File.ReadAllTextAsync(sentinel, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false))
+            .Should().Be("outside-owned");
+        Directory.GetDirectories(outside).Should().Equal(redirectedDestination is null ? [] : [redirectedDestination]);
+        if (redirectedDestination is not null)
+            (await File.ReadAllTextAsync(System.IO.Path.Combine(redirectedDestination, "sentinel"),
+                TestContext.CurrentContext.CancellationToken).ConfigureAwait(false)).Should().Be("do-not-delete");
+        Action read = () => store.ReadInstalled();
+        read.Should().Throw<InvalidDataException>().WithMessage("*symbolic links*");
+    }
+
+    private static void AssertRedirectedCommitOutcome(int changeAt, Exception? outcome, Exception primary,
+        ControlledOperationGate stop, bool configured)
+    {
+        if (changeAt == 2) outcome.Should().BeSameAs(primary);
+        else outcome.Should().BeOfType<InvalidDataException>().Which.Message.Should().Contain("symbolic links");
+        stop.Calls.Should().Be(changeAt == 0 ? 0 : 1);
+        configured.Should().Be(changeAt == 2);
+    }
+
+    private static async Task CreateDirectoryLinkAsync(string link, string target)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return;
+        }
+        var start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in new[] { "/c", "mklink", "/J", link, target }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start owned junction creation.");
+        await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+        process.ExitCode.Should().Be(0);
+    }
+
+    private static void RemoveDirectoryLink(string link)
+    {
+        if (OperatingSystem.IsWindows()) Directory.Delete(link);
+        else File.Delete(link); // Unlink the fixture entry, including a dangling directory symlink.
+    }
+
     [Test]
     public async Task NuGetGalleryAndDownloadLinksSelectExactFeedIdentityAsync()
     {
