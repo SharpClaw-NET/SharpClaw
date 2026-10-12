@@ -84,15 +84,20 @@ internal static class KernelHostEndpoints
             CreateExecutionContext(context),
             new SharpClawActionKey("security.secret.read"),
             new RuntimeSecurityActionInvocation("read", "/env/core"),
-            static (_, _) => ValueTask.FromResult(true),
+            (_, _) => ValueTask.FromResult(context.User.Identity?.IsAuthenticated == true
+                && context.User.IsInRole("admin")),
             cancellationToken).ConfigureAwait(false);
         if (!allowed)
             return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-        return Results.Ok(configuration.AsEnumerable()
-            .Where(static pair => pair.Value is not null)
-            .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
-            .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal));
+        // Even an authorized caller receives a fixed status shape, never arbitrary
+        // configuration values (including provider credentials and connection strings).
+        return Results.Ok(new
+        {
+            status = "available",
+            providerConfigured = !string.IsNullOrWhiteSpace(configuration["Provider:Key"] ?? configuration["Providers:Default"]),
+            modelConfigured = !string.IsNullOrWhiteSpace(configuration["Provider:Model"]),
+        });
     }
 
     private static async Task StreamChatAsync(

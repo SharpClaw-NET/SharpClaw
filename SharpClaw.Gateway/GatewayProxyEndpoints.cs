@@ -29,6 +29,12 @@ internal static class GatewayProxyEndpoints
         string? path,
         CancellationToken cancellationToken)
     {
+        if (!GatewayForwardingRoutePolicy.IsAllowed(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+
         var targetPath = string.IsNullOrEmpty(path) ? "/" : "/" + path;
         var pathAndQuery = targetPath + context.Request.QueryString;
 

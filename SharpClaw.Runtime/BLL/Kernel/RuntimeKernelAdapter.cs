@@ -29,6 +29,8 @@ public sealed class RuntimeKernelAdapter :
     private bool _started;
     private readonly Lock _stopGate = new();
     private Task? _startTask;
+    private readonly List<Task> _bootstrapTasks = [];
+    private bool _bootstrapClosed;
     private Task? _stopTask;
     private static readonly JsonSerializerOptions EventActionJsonOptions =
         new(JsonSerializerDefaults.General)
@@ -537,9 +539,12 @@ public sealed class RuntimeKernelAdapter :
                 nameof(actionKey));
         }
 
-        if (actionKey == RuntimeLifecycleActionCatalog.StartPrepare)
+        if (actionKey == RuntimeLifecycleActionCatalog.StartPrepare || actionKey == RuntimeLifecycleActionCatalog.StartConfigure
+            || actionKey == RuntimeLifecycleActionCatalog.StartBind)
         {
-            return PrepareRuntimeStartAsync(payload, terminal, cancellationToken);
+            lock (_stopGate)
+                return new ValueTask(AdmitBootstrapCoreAsync(() => RunBootstrapTerminalAsync(
+                    actionKey, payload, terminal, cancellationToken)));
         }
 
         return RunRuntimeLifecycleActionCoreAsync(
@@ -548,6 +553,57 @@ public sealed class RuntimeKernelAdapter :
             CreateHostExecutionContext(),
             terminal,
             cancellationToken);
+    }
+
+    private Task AdmitBootstrapCoreAsync(Func<Task> operation)
+    {
+        if (_stopTask is { IsCompleted: false } || (_bootstrapClosed && _stopTask is null))
+            throw new InvalidOperationException("Runtime bootstrap admission has closed.");
+        if (_stopTask is { IsCompleted: true })
+        {
+            _bootstrapTasks.Clear();
+            _stopTask = null;
+            _startTask = null;
+            _bootstrapClosed = false;
+        }
+        var work = Task.Run(operation, CancellationToken.None);
+        _bootstrapTasks.Add(work);
+        return work;
+    }
+
+    private async Task RunBootstrapTerminalAsync(SharpClawActionKey actionKey, object? payload,
+        Func<CancellationToken, ValueTask> terminal, CancellationToken cancellationToken)
+    {
+        var physical = new RuntimeStartupWork(terminal);
+        var failure = await CaptureLifecycleFailureAsync(() => actionKey == RuntimeLifecycleActionCatalog.StartPrepare
+            ? PrepareRuntimeStartAsync(payload, physical.RunAsync, cancellationToken)
+            : RunRuntimeLifecycleActionCoreAsync(actionKey, payload, CreateHostExecutionContext(),
+                physical.RunAsync, cancellationToken), null).ConfigureAwait(false);
+        if (failure is not null)
+            CloseBootstrapAdmission();
+        failure = await CaptureLifecycleFailureAsync(physical.JoinAsync, failure).ConfigureAwait(false);
+        if (failure is not null)
+            CloseBootstrapAdmission();
+        failure?.Throw();
+    }
+
+    private void CloseBootstrapAdmission()
+    {
+        lock (_stopGate) _bootstrapClosed = true;
+    }
+
+    internal bool TryPublishBootstrap(Action publish, CancellationToken applicationStopping = default)
+    {
+        ArgumentNullException.ThrowIfNull(publish);
+        lock (_stopGate)
+        {
+            if (applicationStopping.IsCancellationRequested)
+                _bootstrapClosed = true;
+            if (_bootstrapClosed)
+                return false;
+            publish();
+            return true;
+        }
     }
 
     private async ValueTask PrepareRuntimeStartAsync(
@@ -989,11 +1045,10 @@ public sealed class RuntimeKernelAdapter :
                 throw new InvalidOperationException("The Runtime kernel is still starting.");
             if (_stopTask is { IsCompleted: false })
                 throw new InvalidOperationException("The Runtime kernel is still stopping.");
-            _stopTask = null;
             // Publish ownership before context-free startup can invoke a participant.
-            starting = _startTask = Task.Run(() => StartCoreAsync(hostVersion,
+            starting = _startTask = AdmitBootstrapCoreAsync(() => StartCoreAsync(hostVersion,
                 caller ?? RequestPrincipal.Anonymous, features ?? ExtensionFeatureSet.Empty,
-                cancellationToken), CancellationToken.None);
+                cancellationToken));
         }
         await starting.ConfigureAwait(false);
     }
@@ -1006,6 +1061,8 @@ public sealed class RuntimeKernelAdapter :
         var failure = await CaptureLifecycleFailureAsync(
             () => RunRuntimeLifecycleActionCoreAsync(RuntimeLifecycleActionCatalog.StartConfigure,
                 hostVersion, executionContext, startup.RunAsync, cancellationToken), null).ConfigureAwait(false);
+        if (failure is not null)
+            CloseBootstrapAdmission();
         // Receipt cancellation/deadline does not settle physical participant startup.
         failure = await CaptureLifecycleFailureAsync(startup.JoinAsync, failure).ConfigureAwait(false);
         if (failure is not null)
@@ -1030,14 +1087,16 @@ public sealed class RuntimeKernelAdapter :
         {
             if (_stopTask is { } stopping)
                 return new ValueTask(stopping);
-            if (_startTask is null)
+            _bootstrapClosed = true;
+            if (_bootstrapTasks.Count == 0)
                 return ValueTask.CompletedTask;
-            _stopTask = StopCoreAsync(onPrepare, onComplete, cancellationToken);
+            _stopTask = StopCoreAsync(Task.WhenAll(_bootstrapTasks), onPrepare, onComplete, cancellationToken);
             return new ValueTask(_stopTask);
         }
     }
 
     private async Task StopCoreAsync(
+        Task bootstrap,
         Func<CancellationToken, ValueTask>? onPrepare,
         Func<CancellationToken, ValueTask>? onComplete,
         CancellationToken cancellationToken)
@@ -1046,9 +1105,9 @@ public sealed class RuntimeKernelAdapter :
         var prepare = new RuntimeShutdownWork(CreateStopPreparation(
             onPrepare ?? (static _ => ValueTask.CompletedTask)));
         var completion = new RuntimeShutdownWork(onComplete ?? (static _ => ValueTask.CompletedTask));
-        // Startup owns its compensation; shutdown joins it before host preparation.
+        // All bootstrap terminals retain their work; shutdown joins them before host preparation.
         var failure = await CaptureLifecycleFailureAsync(
-            () => _startTask is { } starting ? new ValueTask(starting) : ValueTask.CompletedTask,
+            () => new ValueTask(bootstrap),
             null).ConfigureAwait(false);
         try
         {

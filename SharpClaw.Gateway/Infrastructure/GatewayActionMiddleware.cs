@@ -16,6 +16,12 @@ internal sealed class GatewayActionMiddleware(
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        if (!GatewayForwardingRoutePolicy.IsAllowed(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+
         var invocation = CreateInvocation(context, "receive");
         var executionContext = CreateExecutionContext(context);
         try

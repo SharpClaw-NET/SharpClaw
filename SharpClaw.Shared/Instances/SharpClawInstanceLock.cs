@@ -56,15 +56,8 @@ public sealed class SharpClawInstanceLock : IDisposable
             return;
 
         _lockStream.Dispose();
-
-        try
-        {
-            if (File.Exists(LockFilePath))
-                File.Delete(LockFilePath);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        // Keep the pathname bound to the same inode. A new owner may acquire
+        // this file as soon as our handle closes, before Dispose returns.
     }
 
     private void WriteOwnershipMetadata()

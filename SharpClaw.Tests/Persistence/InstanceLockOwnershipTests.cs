@@ -46,6 +46,43 @@ internal sealed class InstanceLockOwnershipTests
         acquireAgain.Should().NotThrow("the failed acquisition must release its exclusive path lease");
     }
 
+    [Test]
+    public void ReacquisitionDuringReleaseKeepsTheSamePathLeaseAndExcludesAThirdOwner()
+    {
+        var paths = new SharpClawInstancePaths(SharpClawInstanceKind.Backend, CreateRoot());
+        paths.EnsureDirectories();
+        SharpClawInstanceLock? second = null;
+        using var stream = new ReacquisitionStream(Path.Combine(paths.InstanceRoot, ".instance.lock"),
+            () => second = new SharpClawInstanceLock(paths));
+        using var first = new SharpClawInstanceLock(paths, _ => stream);
+        try
+        {
+            first.Dispose();
+            second.Should().NotBeNull("the second owner acquired the original inode before release returned");
+            File.Exists(first.LockFilePath).Should().BeTrue();
+            Action third = () => { using var lease = new SharpClawInstanceLock(paths); };
+            third.Should().Throw<InvalidOperationException>().WithMessage("*already in use*");
+            second?.Dispose();
+            using var next = new SharpClawInstanceLock(paths);
+            File.Exists(next.LockFilePath).Should().BeTrue();
+            first.Dispose();
+            third.Should().Throw<InvalidOperationException>();
+        }
+        finally { second?.Dispose(); }
+    }
+
+    private sealed class ReacquisitionStream(string path, Action acquiredAfterRelease)
+        : FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)
+    {
+        private int _released;
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing && Interlocked.Exchange(ref _released, 1) == 0)
+                acquiredAfterRelease();
+        }
+    }
+
     private string CreateRoot()
     {
         var root = Path.Combine(Path.GetTempPath(), "sharpclaw-lock-" + Guid.NewGuid().ToString("N"));

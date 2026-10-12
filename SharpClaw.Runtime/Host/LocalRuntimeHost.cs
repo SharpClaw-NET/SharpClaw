@@ -180,6 +180,17 @@ internal static class LocalRuntimeHost
         registrationSet.Application.MapEndpoints(app, kernel);
         app.MapHandlers();
 
+        if (!await BindApplicationAsync(app, kernel, readiness, instancePaths, runtimeBaseUrl,
+                markListenerStartAttempted, cancellationToken).ConfigureAwait(false))
+            return;
+
+        await app.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task<bool> BindApplicationAsync(WebApplication app, RuntimeKernelAdapter kernel,
+        RuntimeReadinessState readiness, SharpClawInstancePaths instancePaths, string runtimeBaseUrl,
+        Action markListenerStartAttempted, CancellationToken cancellationToken)
+    {
         await kernel.RunRuntimeLifecycleActionAsync(
             RuntimeLifecycleActionCatalog.StartBind,
             runtimeBaseUrl,
@@ -187,11 +198,15 @@ internal static class LocalRuntimeHost
             {
                 markListenerStartAttempted();
                 await app.StartAsync(ct).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
+        if (!kernel.TryPublishBootstrap(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 readiness.MarkReady();
                 instancePaths.PublishDiscoveryEntry(runtimeBaseUrl);
-            }, cancellationToken).ConfigureAwait(false);
-
-        await app.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
+            }, app.Lifetime.ApplicationStopping))
+            return false;
+        return true;
     }
 
     internal static async Task<ExceptionDispatchInfo?> StopAndCleanUpAsync(

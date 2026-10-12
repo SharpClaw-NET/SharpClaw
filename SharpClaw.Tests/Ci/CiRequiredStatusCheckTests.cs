@@ -114,6 +114,20 @@ internal sealed partial class CiRequiredStatusCheckTests
             "FullyQualifiedName~SharpClaw.Tests.Kernel.DefaultModuleSetHostGateTests|FullyQualifiedName~SharpClaw.Tests.Kernel.PackagedSidecarReadinessTests");
     }
 
+    [Test]
+    public void OwnershipAndPrivateIngressRegressionsRemainInCorrectnessMatrix()
+    {
+        var workflow = File.ReadAllText(Path.Combine(ResolveRepoRoot(), ".github", "workflows", "ci.yml"));
+        foreach (var fixture in new[]
+        {
+            "SharpClaw.Tests.Kernel.RuntimeStartupInterruptionTests",
+            "SharpClaw.Tests.Kernel.RuntimeBootstrapInterruptionTests",
+            "SharpClaw.Tests.Gateway.GatewayPrivateConfigurationTests",
+            "SharpClaw.Tests.Persistence.InstanceLockOwnershipTests",
+        })
+            workflow.Should().Contain("FullyQualifiedName~" + fixture);
+    }
+
     private static List<string> ExtractWorkflowContexts(string workflowPath)
     {
         File.Exists(workflowPath).Should().BeTrue();
