@@ -1,4 +1,5 @@
 using SharpClaw.Gateway.Infrastructure;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace SharpClaw.Gateway.Security;
 
@@ -39,6 +40,36 @@ internal sealed class AntiSpamMiddleware(
             return;
         }
 
-        await next(context).ConfigureAwait(false);
+        if (context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody != true &&
+            context.Request.ContentLength is not > 0)
+        {
+            await next(context).ConfigureAwait(false);
+            return;
+        }
+
+        // Admit at most64KiB before forwarding. The original request stream is
+        // borrowed; only this bounded buffer is ours to retire after next settles.
+        using var admitted = new MemoryStream();
+        var buffer = new byte[8192];
+        var original = context.Request.Body;
+        while (true)
+        {
+            var remaining = (int)(MaxBodySizeBytes + 1 - admitted.Length);
+            var read = await original.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, remaining)), context.RequestAborted).ConfigureAwait(false);
+            if (read == 0) break;
+            await admitted.WriteAsync(buffer.AsMemory(0, read), context.RequestAborted).ConfigureAwait(false);
+            if (admitted.Length > MaxBodySizeBytes)
+            {
+                GatewayLog.OversizedBody(logger, ip, admitted.Length);
+                banService.RecordViolation(ip);
+                await GatewayErrors.WriteAsync(context, StatusCodes.Status413PayloadTooLarge,
+                    "Request body too large.", GatewayErrors.PayloadTooLarge).ConfigureAwait(false);
+                return;
+            }
+        }
+        admitted.Position = 0;
+        context.Request.Body = admitted;
+        try { await next(context).ConfigureAwait(false); }
+        finally { context.Request.Body = original; }
     }
 }

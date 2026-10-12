@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using SharpClaw.Gateway.Infrastructure;
+using SharpClaw.Gateway.Security;
 
 namespace SharpClaw.Gateway;
 
@@ -13,14 +14,16 @@ internal static class GatewayProxyEndpoints
 
     public static void MapGatewayProxyEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }));
+        app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" })).RequireRateLimiting(RateLimiterConfiguration.GlobalPolicy);
         app.MapGet("/api/gateway/status", (IConfiguration configuration) => Results.Ok(new
         {
             status = "ready",
             runtime = configuration[$"{InternalApiOptions.SectionName}:BaseUrl"]
                 ?? "http://127.0.0.1:48923",
-        }));
-        app.Map("/api/{**path}", ForwardAsync);
+        })).RequireRateLimiting(RateLimiterConfiguration.GlobalPolicy);
+        app.Map("/api/chat", ForwardAsync).RequireRateLimiting(RateLimiterConfiguration.ChatPolicy);
+        app.Map("/api/chat/{**path}", ForwardAsync).RequireRateLimiting(RateLimiterConfiguration.ChatPolicy);
+        app.Map("/api/{**path}", ForwardAsync).RequireRateLimiting(RateLimiterConfiguration.GlobalPolicy);
     }
 
     private static async Task ForwardAsync(
@@ -35,7 +38,10 @@ internal static class GatewayProxyEndpoints
             return;
         }
 
-        var targetPath = string.IsNullOrEmpty(path) ? "/" : "/" + path;
+        // Catch-all binding is required for both route shapes; preserve the full chat prefix.
+        _ = path;
+        context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase, out var target);
+        var targetPath = target.HasValue ? target.Value : "/";
         var pathAndQuery = targetPath + context.Request.QueryString;
 
         if (context.WebSockets.IsWebSocketRequest)

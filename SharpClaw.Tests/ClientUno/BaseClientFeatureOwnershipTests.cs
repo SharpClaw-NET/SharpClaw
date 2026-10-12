@@ -12,6 +12,23 @@ namespace SharpClaw.Tests.ClientUno;
 internal sealed class BaseClientFeatureOwnershipTests
 {
     [Test]
+    public void InspectionControlsRestoreAdmissionWhenPreviousScratchRetirementFails()
+    {
+        var source = File.ReadAllText(Path.Combine(FindSourceRoot(), "SharpClaw.Client.Uno", "Presentation", "BootPage.Modules.cs"));
+        var root = CSharpSyntaxTree.ParseText(source, cancellationToken: TestContext.CurrentContext.CancellationToken)
+            .GetRoot(TestContext.CurrentContext.CancellationToken);
+        var method = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Where(item => string.Equals(item.Identifier.ValueText, "OnInspectModuleClick", StringComparison.Ordinal)).Should().ContainSingle().Which;
+        var retirement = method.DescendantNodes().OfType<ExpressionStatementSyntax>()
+            .Where(item => string.Equals(item.ToString(), "_moduleCandidate?.Dispose();", StringComparison.Ordinal)).Should().ContainSingle().Which;
+        var cleanup = retirement.Ancestors().OfType<TryStatementSyntax>().FirstOrDefault(item => item.Finally is not null);
+        cleanup.Should().NotBeNull("ordinary candidate retirement failures must restore cached page controls");
+        cleanup!.Finally!.ToString().Should().Contain("SetModuleBusy(false)");
+        var guarded = cleanup.Block.ToString();
+        AssertSourceOrder(guarded, "_moduleCandidate?.Dispose()", "_moduleCandidate = null");
+    }
+
+    [Test]
     public void AppAttachesCloseBeforeNavigationAndActivationAndUsesTrackedOwnersForCleanup()
     {
         var source = File.ReadAllText(Path.Combine(FindSourceRoot(), "SharpClaw.Client.Uno", "App.xaml.cs"));

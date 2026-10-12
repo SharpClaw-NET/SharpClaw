@@ -8,7 +8,9 @@ namespace SharpClaw.Runtime.INF.Persistence;
 
 
 public readonly record struct RuntimeTransactionActionResult(
-    IDbContextTransaction? Transaction)
+    [property: System.Text.Json.Serialization.JsonIgnore] IDbContextTransaction? Transaction)
 {
+    public bool BeganTransaction { get; init; }
+
     public static RuntimeTransactionActionResult Completed => new(null);
 }

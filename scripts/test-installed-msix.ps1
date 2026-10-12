@@ -18,6 +18,34 @@ param(
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$TestProviderEndpoint,
     [ValidateRange(10, 600)][int]$StartupTimeoutSeconds = 60
 )
+# Delegates below are supplied only after exact test ownership is established.
+# This step owner also supports isolated, non-operational failure controls.
+function Invoke-TestOwnedRetirement {
+    param([scriptblock]$Snapshot, [scriptblock]$StopOwned, [scriptblock]$VerifyStopped,
+        [scriptblock]$RetireState, [scriptblock]$RetireTrust,
+        [Collections.Generic.List[string]]$Failures)
+    $ownedProcesses = $null
+    $settled = $false
+    try { $ownedProcesses = @(& $Snapshot) }
+    catch { $Failures.Add('Test process snapshot failed: ' + $_.Exception.Message) }
+    if ($null -ne $ownedProcesses) {
+        foreach ($ownedProcess in $ownedProcesses) {
+            try { & $StopOwned $ownedProcess }
+            catch { $Failures.Add('Test process cleanup failed: ' + $_.Exception.Message) }
+        }
+        try { & $VerifyStopped; $settled = $true }
+        catch { $Failures.Add('Test process exit verification failed: ' + $_.Exception.Message) }
+    }
+    if ($settled) {
+        try { & $RetireState }
+        catch { $Failures.Add('Test package/state cleanup failed: ' + $_.Exception.Message) }
+    } else {
+        $Failures.Add('Package/state cleanup refused: test process settlement was not proven.')
+    }
+    try { & $RetireTrust }
+    catch { $Failures.Add('Temporary guest signer trust removal failed: ' + $_.Exception.Message) }
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Windows is required.' }
@@ -912,49 +940,47 @@ try {
             Get-TestPackageProcesses | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath |
                 ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $ReportDirectory 'processes.json')
         } catch { $cleanupFailures.Add('Evidence capture failed: ' + $_.Exception.Message) }
-        foreach ($process in Get-TestPackageProcesses) {
-            try { Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop }
-            catch { $cleanupFailures.Add('Test process cleanup failed: ' + $_.Exception.Message) }
-        }
-        try { Wait-TestPackageProcessesStopped }
-        catch { $cleanupFailures.Add('Test process exit verification failed: ' + $_.Exception.Message) }
-        # Also recover a successful registration if a later metadata query failed.
-        $registered = @(Get-AppxPackage -Name 'com.mkn8rn.SharpClaw')
-        foreach ($installed in $registered) {
-            if ($installed.Version.ToString() -ne $published.InstallerVersion) {
-                $cleanupFailures.Add('Unexpected package version during cleanup; not removing it.')
-                continue
+        Invoke-TestOwnedRetirement -Snapshot { Get-TestPackageProcesses } -StopOwned {
+            param($ownedProcess)
+            Stop-Process -Id $ownedProcess.ProcessId -Force -ErrorAction Stop
+        } -VerifyStopped { Wait-TestPackageProcessesStopped } -RetireState {
+            # Also recover a successful registration if a later metadata query failed.
+            $registered = @(Get-AppxPackage -Name 'com.mkn8rn.SharpClaw')
+            foreach ($installed in $registered) {
+                if ($installed.Version.ToString() -ne $published.InstallerVersion) {
+                    $cleanupFailures.Add('Unexpected package version during cleanup; not removing it.')
+                    continue
+                }
+                try { Remove-AppxPackage -Package $installed.PackageFullName }
+                catch { $cleanupFailures.Add('Test uninstall failed: ' + $_.Exception.Message) }
             }
-            try { Remove-AppxPackage -Package $installed.PackageFullName }
-            catch { $cleanupFailures.Add('Test uninstall failed: ' + $_.Exception.Message) }
-        }
-        $removalDeadline = [DateTime]::UtcNow.AddSeconds(20)
-        do {
-            $registrationRemains = $null -ne (Get-AppxPackage -Name 'com.mkn8rn.SharpClaw')
-            $startEntryRemains = $result.Aumid -and @(Get-StartApps | Where-Object AppID -eq $result.Aumid).Count -ne 0
-            if (-not ($registrationRemains -or $startEntryRemains)) { break }
-            Start-Sleep -Milliseconds 250
-        } while ([DateTime]::UtcNow -lt $removalDeadline)
-        if ($registrationRemains) { $cleanupFailures.Add('Package registration survived uninstall.') }
-        if ($result.Aumid -and @(Get-StartApps | Where-Object AppID -eq $result.Aumid).Count -ne 0) {
-            $cleanupFailures.Add('Registered Start entry survived uninstall.')
-        }
-        if (@(Get-TestPackageProcesses).Count -ne 0) { $cleanupFailures.Add('Installed processes survived cleanup.') }
-        if ($null -ne $package) {
-            $packageState = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) "Packages/$($package.PackageFamilyName)"
-            if (Test-Path -LiteralPath $packageState) { $cleanupFailures.Add('Package-local state survived uninstall.') }
-        }
-        # Exact validated dedicated-user state only; never a broad profile or home.
-        try { if (Test-Path -LiteralPath $profileRoot) { Remove-Item -LiteralPath $profileRoot -Recurse -Force } }
-        catch { $cleanupFailures.Add('Test state cleanup failed: ' + $_.Exception.Message) }
-        try {
+            $removalDeadline = [DateTime]::UtcNow.AddSeconds(20)
+            do {
+                $registrationRemains = $null -ne (Get-AppxPackage -Name 'com.mkn8rn.SharpClaw')
+                $startEntryRemains = $result.Aumid -and @(Get-StartApps | Where-Object AppID -eq $result.Aumid).Count -ne 0
+                if (-not ($registrationRemains -or $startEntryRemains)) { break }
+                Start-Sleep -Milliseconds 250
+            } while ([DateTime]::UtcNow -lt $removalDeadline)
+            if ($registrationRemains) { $cleanupFailures.Add('Package registration survived uninstall.') }
+            if ($result.Aumid -and @(Get-StartApps | Where-Object AppID -eq $result.Aumid).Count -ne 0) {
+                $cleanupFailures.Add('Registered Start entry survived uninstall.')
+            }
+            if (@(Get-TestPackageProcesses).Count -ne 0) { $cleanupFailures.Add('Installed processes survived cleanup.') }
+            if ($null -ne $package) {
+                $packageState = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) "Packages/$($package.PackageFamilyName)"
+                if (Test-Path -LiteralPath $packageState) { $cleanupFailures.Add('Package-local state survived uninstall.') }
+            }
+            # Exact validated dedicated-user state only; never a broad profile or home.
+            try { if (Test-Path -LiteralPath $profileRoot) { Remove-Item -LiteralPath $profileRoot -Recurse -Force } }
+            catch { $cleanupFailures.Add('Test state cleanup failed: ' + $_.Exception.Message) }
+        } -RetireTrust {
             if ($trustOwnedByTest) {
                 [SharpClawInstalledProbe]::RemoveGuestTrust($certificate)
             }
             if ($trustOwnedByTest -and [SharpClawInstalledProbe]::HasGuestTrust($certificate)) {
                 $cleanupFailures.Add('Temporary guest signer trust survived cleanup.')
             }
-        } catch { $cleanupFailures.Add('Temporary guest signer trust removal failed: ' + $_.Exception.Message) }
+        } -Failures $cleanupFailures
         $result.CleanupVerified = $cleanupFailures.Count -eq 0
         if (-not $result.CleanupVerified) {
             $result.Success = $false

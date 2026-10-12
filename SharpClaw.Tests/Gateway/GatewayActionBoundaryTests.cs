@@ -17,6 +17,56 @@ namespace SharpClaw.Tests.Gateway;
 [TestFixture]
 internal sealed class GatewayActionBoundaryTests
 {
+    [TestCase(false, false), TestCase(false, true)]
+    [TestCase(true, false), TestCase(true, true)]
+    public async Task InterruptedForwardingJoinsPhysicalWorkBeforeRestoringResponseOwnershipAsync(bool deadline, bool lateFault)
+    {
+        var probe = new GatewayProbe { ForwardTimeout = deadline ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromSeconds(5) };
+        var boundary = CreateBoundary(probe);
+        using var cancellation = new CancellationTokenSource();
+        var gate = new ControlledOperationGate(lateFault ? new IOException("controlled late forwarding failure") : null);
+        var context = CreateContext("GET", "/api/chat/stream", "owner", "owned-interruption", "text/event-stream");
+        using var original = (MemoryStream)context.Response.Body;
+        context.RequestAborted = cancellation.Token;
+        var originalToken = context.RequestAborted;
+        CancellationToken authorized = default;
+        var retirement = 0;
+        Stream? actualBody = null;
+        var middleware = CreateMiddleware(boundary, async active =>
+        {
+            authorized = active.RequestAborted;
+            actualBody = active.Response.Body;
+            try { await gate.RunAsync().ConfigureAwait(false); }
+            finally
+            {
+                active.Response.Body.Should().BeSameAs(actualBody, "the actual forwarding task still owns its wrapper");
+                Interlocked.Increment(ref retirement);
+            }
+        });
+        var forwarding = middleware.InvokeAsync(context);
+        Exception? failure;
+        try
+        {
+            await gate.WaitForEntryAsync().ConfigureAwait(false);
+            if (!deadline) await cancellation.CancelAsync().ConfigureAwait(false);
+            await probe.ForwardReceiptObserved.Task.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
+            forwarding.IsCompleted.Should().BeFalse();
+            retirement.Should().Be(0);
+            context.Response.Body.Should().NotBeSameAs(original);
+            authorized.IsCancellationRequested.Should().BeTrue();
+        }
+        finally
+        {
+            gate.Release();
+            failure = await TestTaskOutcome.CaptureAsync(forwarding).ConfigureAwait(false);
+        }
+        failure.Should().BeOfType<KernelActionFailedException>().Which.Error.Code.Should().Be("ACTION_CONTINUATION_DENIED");
+        retirement.Should().Be(1);
+        context.Response.Body.Should().BeSameAs(original);
+        context.RequestAborted.Should().Be(originalToken);
+        original.CanWrite.Should().BeTrue();
+    }
+
     [Test]
     public void Manifest_matches_the_published_gateway_action_inventory()
     {
@@ -295,6 +345,8 @@ internal sealed class GatewayActionBoundaryTests
     {
         public ConcurrentQueue<string> ActionKeys { get; } = new();
         public ConcurrentQueue<(string SubjectId, Guid TraceId, Guid IdempotencyKey)> RequestContexts { get; } = new();
+        public TimeSpan ForwardTimeout { get; init; } = TimeSpan.FromSeconds(5);
+        public TaskCompletionSource ForwardReceiptObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string? ReplaceAction { get; init; }
         public string? CancelAction { get; init; }
         public string? RestrictAction { get; init; }
@@ -318,7 +370,7 @@ internal sealed class GatewayActionBoundaryTests
                     HookPriority.Normal,
                     [],
                     [],
-                    TimeSpan.FromSeconds(5),
+                    string.Equals(key.Value, "gateway.request.forward", StringComparison.Ordinal) ? probe.ForwardTimeout : TimeSpan.FromSeconds(5),
                     HookFailurePolicy.FailAction));
             }
         }
@@ -327,7 +379,7 @@ internal sealed class GatewayActionBoundaryTests
     private sealed class GatewayProbeInterceptor(GatewayProbe probe)
         : IActionInterceptor<KernelActionEnvelope, object>
     {
-        public ValueTask<IActionOutcome<object>> InvokeAsync(
+        public async ValueTask<IActionOutcome<object>> InvokeAsync(
             ActionContext<KernelActionEnvelope> context,
             IActionControl<KernelActionEnvelope, object> control,
             CancellationToken cancellationToken)
@@ -343,13 +395,14 @@ internal sealed class GatewayActionBoundaryTests
             }
 
             if (string.Equals(probe.ReplaceAction, context.ActionKey.Value, StringComparison.Ordinal))
-                return ValueTask.FromResult(control.ReplaceResult(true, "test replacement"));
+                return control.ReplaceResult(true, "test replacement");
             if (string.Equals(probe.CancelAction, context.ActionKey.Value, StringComparison.Ordinal))
-                return ValueTask.FromResult(control.Cancel("TEST_CANCELLED", "test cancellation"));
+                return control.Cancel("TEST_CANCELLED", "test cancellation");
             if (string.Equals(probe.RestrictAction, context.ActionKey.Value, StringComparison.Ordinal))
-                return ValueTask.FromResult(control.ReplaceResult(false, "test restriction"));
+                return control.ReplaceResult(false, "test restriction");
 
-            return control.ProceedAsync(cancellationToken);
+            try { return await control.ProceedAsync(cancellationToken).ConfigureAwait(false); }
+            finally { if (string.Equals(context.ActionKey.Value, "gateway.request.forward", StringComparison.Ordinal)) probe.ForwardReceiptObserved.TrySetResult(); }
         }
     }
 }

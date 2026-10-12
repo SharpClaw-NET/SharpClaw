@@ -227,7 +227,7 @@ public sealed partial class SharpClawApiClient : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
         var targetBaseUri = GetTargetSnapshot();
-        return await _clientActions.RunCommandAsync(
+        return await RunOwnedHttpCommandAsync(
             new ClientCommandInvocation(
                 "http.send",
                 request.Method.Method,
@@ -254,7 +254,7 @@ public sealed partial class SharpClawApiClient : IDisposable, IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var targetBaseUri = GetTargetSnapshot();
-        return _clientActions.RunCommandAsync(
+        return RunOwnedHttpCommandAsync(
             new ClientCommandInvocation(
                 "http.send",
                 method,
@@ -277,7 +277,7 @@ public sealed partial class SharpClawApiClient : IDisposable, IAsyncDisposable
                         : HttpCompletionOption.ResponseContentRead,
                     actionToken).ConfigureAwait(true);
             },
-            cancellationToken).AsTask();
+            cancellationToken);
     }
 
     /// <summary>

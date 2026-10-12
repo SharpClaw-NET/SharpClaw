@@ -32,7 +32,7 @@ internal static partial class SharpClawLogRedactor
     [GeneratedRegex(@"(?<prefix>https?://[^/@\s:]+:)[^/@\s]+@", RedactionOptions, 1000)]
     private static partial Regex UriCredentials();
 
-    [GeneratedRegex(@"(?<prefix>(?:body|request[_-]?body|response[_-]?body|prompt|model[_-]?response)\s*[:=]\s*)(?:[\x22']?)[^\s,;}'\x22]+",
+    [GeneratedRegex(@"(?<prefix>(?:body|request[_-]?body|response[_-]?body|prompt|model[_-]?response)\s*[:=]\s*)[\s\S]*",
         RedactionOptions, 1000)]
     private static partial Regex SensitiveLabeledValue();
 

@@ -71,6 +71,6 @@ internal static class RateLimiterConfiguration
 
     public static int ResolveRateLimit(string path)
     {
-        return path.Contains("/chat", StringComparison.OrdinalIgnoreCase) ? 20 : 60;
+        return new PathString(path).StartsWithSegments("/api/chat", StringComparison.OrdinalIgnoreCase) ? 20 : 60;
     }
 }

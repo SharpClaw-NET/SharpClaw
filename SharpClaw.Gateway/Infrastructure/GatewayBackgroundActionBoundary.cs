@@ -20,6 +20,8 @@ internal sealed class GatewayBackgroundActionBoundary
 
     internal KernelGraph Graph => _graph;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031",
+        Justification = "Seal terminal admission and join the entire retained physical action chain before request/response retirement. Preserve the initiating Core receipt failure over late physical failure.")]
     internal async ValueTask<TResult> RunActionAsync<TPayload, TResult>(
         SharpClawActionKey actionKey,
         TPayload payload,
@@ -35,51 +37,30 @@ internal sealed class GatewayBackgroundActionBoundary
                 nameof(actionKey));
         }
 
-        var terminalState = 0;
-        var terminalResult = new TaskCompletionSource<TResult>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        var result = await _dispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
-            executionContext ?? CreateHostExecutionContext(),
-            _graph.GetStandardAction(actionKey),
-            new KernelActionEnvelope(actionKey, payload),
-            async (envelope, actionCancellationToken) =>
-            {
-                if (envelope.Action.Key != actionKey || envelope.Action.Payload is not TPayload effectivePayload)
-                {
-                    throw new KernelActionExecutionException(
-                        $"Gateway action '{actionKey.Value}' returned an invalid payload.");
-                }
-
-                if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
-                {
-                    var repeated = await terminalResult.Task.WaitAsync(actionCancellationToken).ConfigureAwait(false);
-                    return repeated!;
-                }
-
-                try
-                {
-                    var value = await terminal(effectivePayload, actionCancellationToken).ConfigureAwait(false);
-                    terminalResult.TrySetResult(value);
-                    return value!;
-                }
-                catch (Exception exception)
-                {
-                    terminalResult.TrySetException(exception);
-                    throw;
-                }
-            },
-            _graph.ActionSnapshot,
-            cancellationToken).ConfigureAwait(false);
-
-        if (Volatile.Read(ref terminalState) == 0)
+        var physical = new GatewayActionTerminal<TPayload, TResult>(terminal);
+        ExceptionDispatchInfo? failure = null;
+        object? result = null;
+        try
         {
-            throw new KernelActionExecutionException(
-                $"Gateway action '{actionKey.Value}' completed without running its terminal.");
+            result = await _dispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+                executionContext ?? CreateHostExecutionContext(), _graph.GetStandardAction(actionKey),
+                new KernelActionEnvelope(actionKey, payload), async (envelope, token) =>
+                {
+                    if (envelope.Action.Key != actionKey || envelope.Action.Payload is not TPayload effective)
+                        throw new KernelActionExecutionException($"Gateway action '{actionKey.Value}' returned an invalid payload.");
+                    return (await physical.RunAsync(effective, token).ConfigureAwait(false))!;
+                }, _graph.ActionSnapshot, cancellationToken).ConfigureAwait(false);
         }
-
-        return result is TResult typedResult
-            ? typedResult
-            : await terminalResult.Task.ConfigureAwait(false);
+        catch (Exception exception) { failure = ExceptionDispatchInfo.Capture(exception); }
+        finally
+        {
+            try { await physical.JoinAsync().ConfigureAwait(false); }
+            catch (Exception exception) { failure ??= ExceptionDispatchInfo.Capture(exception); }
+        }
+        failure?.Throw();
+        if (!physical.WasInvoked)
+            throw new KernelActionExecutionException($"Gateway action '{actionKey.Value}' completed without running its terminal.");
+        return result is TResult typedResult ? typedResult : await physical.ResultAsync().ConfigureAwait(false);
     }
 
     internal async ValueTask StartAsync(

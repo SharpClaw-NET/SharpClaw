@@ -860,8 +860,8 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             var process = Process.Start(start)
                 ?? throw new InvalidOperationException(
                     $"The sidecar process for registration '{manifest.Id}' did not start.");
-            var stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-            var stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
+            var stdout = SidecarOutputDrain.DrainAsync(process.StandardOutput);
+            var stderr = SidecarOutputDrain.DrainAsync(process.StandardError);
             var result = new PackagedSidecarProcess(process, address, token, stdout, stderr);
             try
             {

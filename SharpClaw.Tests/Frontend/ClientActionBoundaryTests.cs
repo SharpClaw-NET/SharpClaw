@@ -35,6 +35,85 @@ internal sealed class ClientActionBoundaryTests
     ];
 
     [Test]
+    public async Task InterruptedHttpSendJoinsActualTransportBeforeReturningItsFailureAsync()
+    {
+        var probe = new ClientProbe();
+        var gate = new ControlledOperationGate();
+        using var content = new ResponseDisposalContent();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        using var handler = new CapturingHandler { AsyncResponseFactory = async (_, _) =>
+        {
+            await gate.RunAsync().ConfigureAwait(false);
+            return response;
+        } };
+        using var borrowed = new HttpClient(handler, disposeHandler: false) { BaseAddress = new Uri("https://fixture.invalid") };
+        using var api = new SharpClawApiClient(borrowed, NullLogger<SharpClawApiClient>.Instance,
+            CreateDispatcher(probe), fixedApiKey: "fixture-key");
+        using var cancellation = new CancellationTokenSource();
+        var sending = api.GetAsync("/ping", cancellation.Token);
+        Exception? failure;
+        try
+        {
+            await gate.WaitForEntryAsync().ConfigureAwait(false);
+            await cancellation.CancelAsync().ConfigureAwait(false);
+            await probe.DispatchReceiptObserved.Task.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None).ConfigureAwait(false);
+            sending.IsCompleted.Should().BeFalse();
+            content.Disposals.Should().Be(0);
+        }
+        finally
+        {
+            gate.Release();
+            failure = await TestTaskOutcome.CaptureAsync(sending).ConfigureAwait(false);
+        }
+        failure.Should().BeOfType<KernelActionFailedException>().Which.Error.Code.Should().Be("ACTION_CONTINUATION_DENIED");
+        content.Disposals.Should().Be(1);
+        handler.Disposals.Should().Be(0);
+    }
+
+    [TestCase(false, false), TestCase(false, true)]
+    [TestCase(true, false), TestCase(true, true)]
+    public async Task FailedHttpCompletionRetiresOnlyItsUntransferredResponseAsync(bool suppliedRequest, bool cancelled)
+    {
+        var probe = new ClientProbe
+        {
+            FailureAction = cancelled ? null : ClientActionCatalog.CommandComplete.Value,
+            CancelAction = cancelled ? ClientActionCatalog.CommandComplete.Value : null,
+        };
+        using var content = new ResponseDisposalContent();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        using var handler = new CapturingHandler { ResponseFactory = _ => response };
+        using var borrowed = new HttpClient(handler, disposeHandler: false) { BaseAddress = new Uri("https://fixture.invalid") };
+        using var api = new SharpClawApiClient(borrowed, NullLogger<SharpClawApiClient>.Instance,
+            CreateDispatcher(probe), fixedApiKey: "fixture-key");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/ping");
+        Func<Task> operation = async () =>
+        {
+            using var unexpected = suppliedRequest ? await api.SendAsync(request).ConfigureAwait(false)
+                : await api.GetAsync("/ping").ConfigureAwait(false);
+        };
+        try
+        {
+            if (cancelled) await operation.Should().ThrowAsync<KernelActionCancelledException>().ConfigureAwait(false);
+            else await operation.Should().ThrowAsync<KernelActionFailedException>().ConfigureAwait(false);
+            content.Disposals.Should().Be(1, "the response never transferred past command completion");
+            request.Headers.TryAddWithoutValidation("X-Still-Borrowed", "yes").Should().BeTrue();
+            handler.Disposals.Should().Be(0);
+        }
+        finally { probe.FailureAction = null; probe.CancelAction = null; }
+
+    }
+
+    private sealed class ResponseDisposalContent() : StringContent("controlled response")
+    {
+        internal int Disposals { get; private set; }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) Disposals++;
+            base.Dispose(disposing);
+        }
+    }
+
+    [Test]
     public void Catalog_matches_the_published_client_action_set()
     {
         ClientActionCatalog.All.Select(static action => action.Value)
@@ -1578,6 +1657,8 @@ internal sealed class ClientActionBoundaryTests
 {
     public ConcurrentQueue<ClientObservation> Observations { get; } = new();
 
+    public TaskCompletionSource DispatchReceiptObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public string? RepeatAction { get; init; }
 
     public string? ReplaceInputAction { get; init; }
@@ -1774,6 +1855,13 @@ private sealed class TestRepeatEvidenceAuthority : IKernelActionRepeatEvidenceAu
 
 private sealed class CapturingHandler : HttpMessageHandler
 {
+    public int Disposals { get; private set; }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) Disposals++;
+        base.Dispose(disposing);
+    }
+
     public HttpRequestMessage? Request { get; private set; }
 
     public ConcurrentQueue<(string Method, string Uri, string? ApiKey)> Requests { get; } = new();
@@ -1872,7 +1960,8 @@ private sealed class ClientInterceptor(ClientProbe probe)
                     "K05 input boundary test"),
                 cancellationToken).ConfigureAwait(false);
 
-        return await control.ProceedAsync(cancellationToken).ConfigureAwait(false);
+        try { return await control.ProceedAsync(cancellationToken).ConfigureAwait(false); }
+        finally { if (context.ActionKey == ClientActionCatalog.CommandDispatch) probe.DispatchReceiptObserved.TrySetResult(); }
     }
     }
 

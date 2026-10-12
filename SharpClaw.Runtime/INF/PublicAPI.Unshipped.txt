@@ -196,3 +196,5 @@ virtual SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.Equals(SharpClaw
 virtual SharpClaw.Runtime.INF.Persistence.MigrationStatusResult.PrintMembers(System.Text.StringBuilder! builder) -> bool
 ~override SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.Equals(object obj) -> bool
 ~override SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.ToString() -> string
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.BeganTransaction.get -> bool
+SharpClaw.Runtime.INF.Persistence.RuntimeTransactionActionResult.BeganTransaction.init -> void

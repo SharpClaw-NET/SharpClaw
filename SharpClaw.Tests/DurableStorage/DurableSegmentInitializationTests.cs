@@ -20,6 +20,50 @@ internal sealed class DurableSegmentInitializationTests
         _roots.Clear();
     }
 
+    [TestCase(false), TestCase(true)]
+    public async Task IncompleteFramePoisonsFurtherReceiptsUntilReopenedRecoveryAsync(bool cancelled)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sharpclaw-partial-frame-" + Guid.NewGuid().ToString("N"));
+        _roots.Add(root);
+        var key = DurableStreamKey.Job(Guid.NewGuid());
+        Exception primary = cancelled ? new OperationCanceledException("controlled body cancellation")
+            : new IOException("controlled partial body IO failure");
+        var store = new DurableSegmentStore(new() { RootDirectory = root }, path => new PartialFrameStream(path, primary));
+        await using var storeDisposal = store.ConfigureAwait(false);
+        var failed = await TestTaskOutcome.CaptureAsync(store.AppendAsync(key, Record("failed frame"),
+            cancellationToken: CancellationToken.None).AsTask()).ConfigureAwait(false);
+        failed.Should().BeSameAs(primary);
+        var segment = Directory.GetFiles(root, "*.open", SearchOption.AllDirectories).Should().ContainSingle().Which;
+        var before = new FileInfo(segment).Length;
+        Func<Task> next = () => store.AppendAsync(key, Record("must not succeed"),
+            cancellationToken: CancellationToken.None).AsTask();
+        await next.Should().ThrowAsync<IOException>().WithMessage("*poisoned*").ConfigureAwait(false);
+        new FileInfo(segment).Length.Should().Be(before);
+        await store.DisposeAsync().ConfigureAwait(false);
+        Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories).Should().BeEmpty("incomplete frames cannot be sealed as committed");
+        var recovered = new DurableSegmentStore(new() { RootDirectory = root });
+        await using var recoveredDisposal = recovered.ConfigureAwait(false);
+        var receipt = await recovered.AppendAsync(key, Record("after verified recovery"),
+            cancellationToken: CancellationToken.None).ConfigureAwait(false);
+        receipt.Sequence.Should().Be(1);
+        receipt.RecordCount.Should().Be(1);
+    }
+
+    private sealed class PartialFrameStream(string path, Exception failure)
+        : FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read, 4096, FileOptions.Asynchronous)
+    {
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (Position == 44) // Complete40-byte segment header plus the actual4-byte frame prefix.
+            {
+                await base.WriteAsync(buffer[..Math.Min(buffer.Length, 4)], CancellationToken.None).ConfigureAwait(false);
+                await base.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+                throw failure;
+            }
+            await base.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     [TestCase(false, false)]
     [TestCase(true, false)]
     [TestCase(false, true)]

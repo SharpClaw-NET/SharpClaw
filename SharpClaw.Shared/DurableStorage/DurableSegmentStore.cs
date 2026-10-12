@@ -114,6 +114,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         DurableWriteMode writeMode,
         CancellationToken cancellationToken)
     {
+        if (state.AppendFailure is { } priorFailure)
+            throw new IOException("Durable append is poisoned; close the writer and perform verified recovery before appending again.", priorFailure);
         await EnsureInitializedAsync(state, cancellationToken).ConfigureAwait(false);
         if (record.Idempotent)
         {
@@ -198,23 +200,35 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                 .ConfigureAwait(false);
         }
 
-        await WriteInt32Async(active.Stream, frame.Length, cancellationToken)
-            .ConfigureAwait(false);
-        await active.Stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
-        active.Count++;
-        active.LastSequence = sequence;
-        if (state.FirstAvailableSequence >= state.NextSequence)
-            state.FirstAvailableSequence = sequence;
-        state.NextSequence = checked(sequence + 1);
-        state.RecordCount++;
-        state.LastTimestamp = record.Timestamp;
-        state.EncodedBytes += sizeof(int) + frame.Length;
+        try
+        {
+            await WriteInt32Async(active.Stream, frame.Length, cancellationToken)
+                .ConfigureAwait(false);
+            await active.Stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
+            active.Count++;
+            active.LastSequence = sequence;
+            if (state.FirstAvailableSequence >= state.NextSequence)
+                state.FirstAvailableSequence = sequence;
+            state.NextSequence = checked(sequence + 1);
+            state.RecordCount++;
+            state.LastTimestamp = record.Timestamp;
+            state.EncodedBytes += sizeof(int) + frame.Length;
 
-        if (writeMode == DurableWriteMode.Durable)
-            FlushToDisk(active.Stream);
+            if (writeMode == DurableWriteMode.Durable)
+                FlushToDisk(active.Stream);
 
-        if (writeMode == DurableWriteMode.Durable)
-            _lastSuccessfulFlush = DateTimeOffset.UtcNow;
+            if (writeMode == DurableWriteMode.Durable)
+                _lastSuccessfulFlush = DateTimeOffset.UtcNow;
+
+        }
+        catch (Exception failure)
+        {
+            // Even a cancelled write can have emitted a prefix or partial body.
+            // Keep the writer owned, refuse later receipts, and leave the open
+            // segment for verified recovery after this store retires its handle.
+            state.AppendFailure = failure;
+            throw;
+        }
 
     }
 
@@ -1265,7 +1279,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         await state.Gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            if (state.Initialized)
+            if (state.Initialized && state.AppendFailure is null)
                 failure = await CaptureDisposalFailureAsync(
                     () => new ValueTask(SealActiveAsync(state, CancellationToken.None)), failure).ConfigureAwait(false);
             if (state.Active is { } active)
@@ -1897,6 +1911,8 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         StreamState state,
         CancellationToken cancellationToken)
     {
+        if (state.AppendFailure is { } failure)
+            throw new IOException("An incomplete durable append cannot be sealed as committed.", failure);
         var active = state.Active;
         if (active is null)
             return;
@@ -3149,6 +3165,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         public string DirectoryPath { get; } = directoryPath;
         public SemaphoreSlim Gate { get; } = new(1, 1);
         public bool Initialized { get; set; }
+        public Exception? AppendFailure { get; set; }
         public long NextSequence { get; set; } = 1;
         public long RecordCount { get; set; }
         public long EncodedBytes { get; set; }

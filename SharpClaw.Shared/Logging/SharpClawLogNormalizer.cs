@@ -37,8 +37,12 @@ internal static class SharpClawLogNormalizer
 
     private static NormalizedText NormalizeText(LogEvent logEvent)
     {
+        var safeEvent = new LogEvent(logEvent.Timestamp, logEvent.Level, logEvent.Exception,
+            logEvent.MessageTemplate, logEvent.Properties.Select(property => new LogEventProperty(
+                property.Key, SharpClawLogRedactor.IsSecretPropertyName(property.Key)
+                    ? new ScalarValue("[REDACTED]") : property.Value)));
         var message = SharpClawLogBounds.TruncateUtf8(
-            SharpClawLogRedactor.Redact(logEvent.RenderMessage(CultureInfo.InvariantCulture)),
+            SharpClawLogRedactor.Redact(safeEvent.RenderMessage(CultureInfo.InvariantCulture)),
             SharpClawLogBounds.MessageBytes, out var originalMessageBytes);
         var template = SharpClawLogBounds.TruncateUtf8(
             SharpClawLogRedactor.Redact(logEvent.MessageTemplate.Text),

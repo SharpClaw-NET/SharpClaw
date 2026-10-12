@@ -128,6 +128,12 @@ internal sealed partial class CiRequiredStatusCheckTests
             "SharpClaw.Tests.Kernel.RemoteGatewayProxyTests",
             "SharpClaw.Tests.Frontend.ModulePackageStoreTests",
             "SharpClaw.Tests.Persistence.InstanceLockOwnershipTests",
+            "SharpClaw.Tests.Kernel.RuntimeTransactionOwnershipTests",
+            "SharpClaw.Tests.Gateway.GatewayActionBoundaryTests",
+            "SharpClaw.Tests.Gateway.GatewayIngressAdmissionTests",
+            "SharpClaw.Tests.Persistence.MigrationAdmissionTests",
+            "SharpClaw.Tests.Persistence.DiscoveryCallbackOwnershipTests",
+            "SharpClaw.Tests.Kernel.SidecarOutputDrainTests",
         })
             workflow.Should().Contain("FullyQualifiedName~" + fixture);
     }

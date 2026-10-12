@@ -131,15 +131,15 @@ jobs:
           - domain: Architecture Module Dependencies
             filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RegistrationDependencyGuardrailTests|FullyQualifiedName~SharpClaw.Tests.Architecture.ProductionRegistrationNeutralityTests'
           - domain: Runtime Composition
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.CanonicalJobsRouteBoundaryTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RuntimeHostCompositionTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RuntimeStartupInterruptionTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RuntimeBootstrapInterruptionTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RemoteProxyLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RuntimeProviderModelCatalogTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.CanonicalJobsRouteBoundaryTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RuntimeHostCompositionTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RuntimeStartupInterruptionTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RuntimeBootstrapInterruptionTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RemoteProxyLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RuntimeProviderModelCatalogTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RuntimeTransactionOwnershipTests'
           - domain: Gateway Boundaries
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayContractsIsolationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayRegistrationLoaderTests|FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests|FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayRegistrationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayPrivateConfigurationTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RemoteGatewayProxyTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayContractsIsolationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayRegistrationLoaderTests|FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests|FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayRegistrationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayPrivateConfigurationTests|FullyQualifiedName~SharpClaw.Tests.Kernel.RemoteGatewayProxyTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayActionBoundaryTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayIngressAdmissionTests'
           - domain: Persistence Provider
             filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DatabaseProviderOptionsTests|FullyQualifiedName~SharpClaw.Tests.Persistence.ExternalPersistencePackageTests'
           - domain: Persistence Environment
             filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.EnvironmentTemplateTests|FullyQualifiedName~SharpClaw.Tests.Persistence.InstallationKeyCompatibilityTests'
           - domain: Persistence Instances
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstancePathsTests|FullyQualifiedName~SharpClaw.Tests.Persistence.InstanceLockOwnershipTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstancePathsTests|FullyQualifiedName~SharpClaw.Tests.Persistence.InstanceLockOwnershipTests|FullyQualifiedName~SharpClaw.Tests.Persistence.MigrationAdmissionTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DiscoveryCallbackOwnershipTests'
           - domain: Providers
             filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.CapabilityResolverTests|FullyQualifiedName~SharpClaw.Tests.Providers.ProviderCredentialBindingTests'
           - domain: LlamaSharp
@@ -151,7 +151,7 @@ jobs:
           - domain: Client Request Authority
             filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.ClientActionBoundaryTests|FullyQualifiedName~SharpClaw.Tests.Frontend.UnoClientStateTests|FullyQualifiedName~SharpClaw.Tests.ClientUno.ClientUnoStartupSwitchTests|FullyQualifiedName~SharpClaw.Tests.ClientUno.BundledProviderSetupTests|FullyQualifiedName~SharpClaw.Tests.Frontend.ModularFrontendTests|FullyQualifiedName~SharpClaw.Tests.Frontend.ModulePackageStoreTests|FullyQualifiedName~SharpClaw.Tests.ClientUno.BaseClientPageInventoryTests|FullyQualifiedName~SharpClaw.Tests.ClientUno.BaseClientFeatureOwnershipTests'
           - domain: Production Module Graph
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.DefaultModuleSetHostGateTests|FullyQualifiedName~SharpClaw.Tests.Kernel.PackagedSidecarReadinessTests|FullyQualifiedName~SharpClaw.Tests.Kernel.ModuleSettingsLoaderTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.DefaultModuleSetHostGateTests|FullyQualifiedName~SharpClaw.Tests.Kernel.PackagedSidecarReadinessTests|FullyQualifiedName~SharpClaw.Tests.Kernel.ModuleSettingsLoaderTests|FullyQualifiedName~SharpClaw.Tests.Kernel.SidecarOutputDrainTests'
           - domain: Publishing
             filter: 'FullyQualifiedName~SharpClaw.Tests.Publishing'
           - domain: CI Guardrails

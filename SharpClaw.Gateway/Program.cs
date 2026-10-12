@@ -324,6 +324,7 @@ try
 }
 finally
 {
+    gatewayDiscoveryLease.Dispose();
     gatewayPaths.DeleteDiscoveryEntry();
 }
 

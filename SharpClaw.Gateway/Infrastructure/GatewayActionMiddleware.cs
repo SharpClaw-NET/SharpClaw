@@ -184,7 +184,7 @@ internal sealed class GatewayActionMiddleware(
                 invocation with { Operation = actionKey.Value },
                 async (_, ct) =>
                 {
-                    await next(context).ConfigureAwait(false);
+                    await ForwardWithCancellationAsync(context, ct).ConfigureAwait(false);
                     return true;
                 },
                 executionContext,
@@ -209,7 +209,7 @@ internal sealed class GatewayActionMiddleware(
                 invocation with { Operation = actionKey.Value },
                 async (_, ct) =>
                 {
-                    await next(context).ConfigureAwait(false);
+                    await ForwardWithCancellationAsync(context, ct).ConfigureAwait(false);
                     return true;
                 },
                 executionContext,
@@ -221,6 +221,15 @@ internal sealed class GatewayActionMiddleware(
         }
 
         return true;
+    }
+
+    private async Task ForwardWithCancellationAsync(HttpContext context, CancellationToken actionCancellationToken)
+    {
+        var original = context.RequestAborted;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(original, actionCancellationToken);
+        context.RequestAborted = linked.Token;
+        try { await next(context).ConfigureAwait(false); }
+        finally { context.RequestAborted = original; }
     }
 
     private static SharpClawActionKey ResolveForwardAction(HttpContext context)

@@ -107,24 +107,25 @@ public sealed partial class BootPage
     {
         if (_moduleBusy) return;
         SetModuleBusy(true);
-        var previous = _moduleInspection;
-        var inspection = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        _moduleInspection = inspection;
-        var token = inspection.Token;
-        if (previous is not null)
-        {
-            try { await previous.CancelAsync().ConfigureAwait(true); }
-            finally { previous.Dispose(); }
-        }
-        token.ThrowIfCancellationRequested();
-        _moduleCandidate?.Dispose();
-        _moduleCandidate = null;
-        ModuleConfirmButton.Visibility = Visibility.Collapsed;
-        var sourceText = ModuleSourceInput.Text;
-        var credential = ModuleGitHubToken.Password;
-        ModuleInstallStatus.Text = "Resolving module source; no module code is executed.";
+        CancellationToken token = default;
         try
         {
+            var previous = _moduleInspection;
+            var inspection = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            _moduleInspection = inspection;
+            token = inspection.Token;
+            if (previous is not null)
+            {
+                try { await previous.CancelAsync().ConfigureAwait(true); }
+                finally { previous.Dispose(); }
+            }
+            token.ThrowIfCancellationRequested();
+            _moduleCandidate?.Dispose();
+            _moduleCandidate = null;
+            ModuleConfirmButton.Visibility = Visibility.Collapsed;
+            var sourceText = ModuleSourceInput.Text;
+            var credential = ModuleGitHubToken.Password;
+            ModuleInstallStatus.Text = "Resolving module source; no module code is executed.";
             var assets = await Actions.RunCommandAsync("client.module.resolve",
                 ct => new ValueTask<IReadOnlyList<ModulePackageSource>>(ModuleStore.ResolveAsync(
                     sourceText, credential, ct)), token).ConfigureAwait(true);

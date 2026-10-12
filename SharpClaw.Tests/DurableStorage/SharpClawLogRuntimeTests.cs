@@ -13,6 +13,26 @@ namespace SharpClaw.Tests.DurableStorage;
 [NonParallelizable]
 internal sealed class SharpClawLogRuntimeTests
 {
+    [TestCase("prompt"), TestCase("request_body"), TestCase("model_response"), TestCase("api_key")]
+    public void SensitiveStructuredValuesAreRemovedBeforeInterpolation(string property)
+    {
+        const string confidential = "first-word confidential remainder\nsecond confidential line";
+        var record = SharpClawLogNormalizer.Normalize(Event("Result {" + property + "}",
+            new LogEventProperty(property, new ScalarValue(confidential))), 8192);
+        record.Message.Should().Contain("[REDACTED]").And.NotContain("confidential");
+        record.Properties.Should().NotContainKey(property);
+    }
+
+    [TestCase("prompt=\"first-word confidential remainder\" public=false")]
+    [TestCase("body='first-word\nconfidential remainder' public=false")]
+    [TestCase("model_response=first-word\nconfidential remainder")]
+    public void LabeledSensitiveTextFailsClosedOverQuotedAndMultilineRemainders(string message)
+    {
+        var record = SharpClawLogNormalizer.Normalize(Event(message), 8192);
+        record.Message.Should().Contain("[REDACTED]").And.NotContain("confidential");
+        record.MessageTemplate.Should().NotContain("confidential");
+    }
+
     [Test]
     public void NormalizationPersistsInvariantTextAndNumericMetadata()
     {
