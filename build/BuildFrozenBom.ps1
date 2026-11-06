@@ -420,7 +420,6 @@ $outOfProcessPayload = Join-Path $rootPath "out-of-process-payload"
 New-Item -ItemType Directory -Path $outOfProcessPayload | Out-Null
 $outOfProcessOutput = Join-Path $moduleHostsArtifacts "bin\SharpClaw.SidecarHost.OutOfProcess\release"
 foreach ($payloadName in @(
-    "SharpClaw.SidecarHost.OutOfProcess.exe",
     "SharpClaw.SidecarHost.OutOfProcess.dll",
     "SharpClaw.SidecarHost.OutOfProcess.deps.json",
     "SharpClaw.SidecarHost.OutOfProcess.runtimeconfig.json",
