@@ -6,6 +6,20 @@ Gateway and Runtime with the same modules and no graphical client. Packaging is
 separate from publishing: creating either installer never installs the product,
 changes certificate trust, or starts services.
 
+## Release tooling is manual
+
+CI runs only the .NET test domains on Linux. It does not run PowerShell, so the
+release scripts in this guide are not exercised by CI. Before publishing, run
+these from PowerShell 7 on the release machine:
+
+```powershell
+./build/Test-PublishSupport.ps1
+dotnet test SharpClaw.Tests/SharpClaw.Tests.csproj -c Release --filter "TestCategory=PowerShell"
+```
+
+The first checks the publishing and provenance helpers. The second runs the test
+fixtures that start `pwsh` against `scripts/test-installed-msix.ps1`.
+
 ## Publish all deployment targets
 
 Use a clean `main` or `dev` checkout and a frozen BOM produced by

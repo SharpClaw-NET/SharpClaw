@@ -5,6 +5,7 @@ namespace SharpClaw.Tests.Publishing;
 
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812", Justification = "NUnit constructs this fixture through reflection.")]
 [TestFixture]
+[Category("PowerShell")] // Starts pwsh; CI excludes this category, run it by hand where pwsh exists.
 internal sealed class OwnedInstallerCleanupTests
 {
     [TestCase("snapshot"), TestCase("stop"), TestCase("wait"), TestCase("state"), TestCase("trust")]

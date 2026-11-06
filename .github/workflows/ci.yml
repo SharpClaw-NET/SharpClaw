@@ -18,109 +18,19 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   DOTNET_NOLOGO: "true"
   DOTNET_VERSION: 10.0.x
-  TEST_PROJECT: ".\\SharpClaw.Tests\\SharpClaw.Tests.csproj"
+  TEST_PROJECT: SharpClaw.Tests/SharpClaw.Tests.csproj
   SHARPCLAW_SOURCE_ROOT: ${{ github.workspace }}
 
 permissions:
   contents: read
 
+# CI runs only what the maintainers can reproduce on a Linux workstation with the
+# .NET SDK alone: no PowerShell, no Windows runner, no Windows-only tooling.
+# Release tooling under build/ and scripts/ stays manual; see docs/Installers.md.
 jobs:
-  frozen-bom:
-    name: Frozen package graph
-    runs-on: windows-latest
-    timeout-minutes: 90
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Build frozen package graph
-        shell: pwsh
-        run: >
-          ./build/BuildFrozenBom.ps1
-          -Root "${{ runner.temp }}\sharpclaw-frozen-bom"
-
-      - name: Upload frozen package graph
-        uses: actions/upload-artifact@v4
-        with:
-          name: sharpclaw-frozen-bom
-          path: |
-            ${{ runner.temp }}\sharpclaw-frozen-bom\feed\*.nupkg
-            ${{ runner.temp }}\sharpclaw-frozen-bom\bundle\**\*
-            ${{ runner.temp }}\sharpclaw-frozen-bom\bom-manifest.json
-          if-no-files-found: error
-          retention-days: 30
-          compression-level: 0
-
-  dependency-submission:
-    name: Dependency graph / NuGet
-    needs: frozen-bom
-    runs-on: windows-latest
-    timeout-minutes: 60
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Download frozen package graph
-        uses: actions/download-artifact@v4
-        with:
-          name: sharpclaw-frozen-bom
-          path: ${{ runner.temp }}\sharpclaw-frozen-bom
-
-      - name: Configure frozen package graph
-        shell: pwsh
-        run: |
-          $feed = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\feed"
-          $config = Join-Path $env:GITHUB_WORKSPACE "NuGet.config"
-          @"
-          <?xml version="1.0" encoding="utf-8"?>
-          <configuration>
-            <packageSources>
-              <clear />
-              <add key="sharpclaw-local" value="$feed" />
-              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
-            </packageSources>
-            <packageSourceMapping>
-              <packageSource key="sharpclaw-local">
-                <package pattern="SharpClaw.*" />
-              </packageSource>
-              <packageSource key="nuget.org">
-                <package pattern="*" />
-              </packageSource>
-            </packageSourceMapping>
-          </configuration>
-          "@ | Set-Content -LiteralPath $config -Encoding utf8
-          $bundle = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\bundle"
-          "SharpClawContributionPayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Restore dependency graph
-        shell: pwsh
-        run: dotnet restore .\SharpClaw.slnx --configfile .\NuGet.config
-
-      - name: Submit dependency graph
-        if: github.event_name != 'pull_request'
-        uses: advanced-security/component-detection-dependency-submission-action@v0.1.1
-        with:
-          filePath: .
-          detectorsCategories: NuGet
-          correlator: sharpclaw-frozen-bom
-
   correctness:
     name: Correctness / ${{ matrix.domain }}
-    needs: frozen-bom
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -165,53 +75,13 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Download frozen package graph
-        uses: actions/download-artifact@v4
-        with:
-          name: sharpclaw-frozen-bom
-          path: ${{ runner.temp }}\sharpclaw-frozen-bom
-
-      - name: Configure frozen package graph
-        shell: pwsh
-        run: |
-          $feed = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\feed"
-          $config = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\NuGet.config"
-          @"
-          <?xml version="1.0" encoding="utf-8"?>
-          <configuration>
-            <packageSources>
-              <clear />
-              <add key="sharpclaw-local" value="$feed" />
-              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
-            </packageSources>
-            <packageSourceMapping>
-              <packageSource key="sharpclaw-local">
-                <package pattern="SharpClaw.*" />
-              </packageSource>
-              <packageSource key="nuget.org">
-                <package pattern="*" />
-              </packageSource>
-            </packageSourceMapping>
-          </configuration>
-          "@ | Set-Content -LiteralPath $config -Encoding utf8
-          "SHARPCLAW_NUGET_CONFIG=$config" | Out-File -FilePath $env:GITHUB_ENV -Append
-          $bundle = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\bundle"
-          "SharpClawContributionPayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
-
       - name: Restore
-        shell: pwsh
-        run: dotnet restore $env:TEST_PROJECT --configfile $env:SHARPCLAW_NUGET_CONFIG -p:Configuration=Release
+        run: dotnet restore "$TEST_PROJECT" -p:Configuration=Release
 
       - name: Run correctness domain
-        shell: pwsh
         run: >
-          dotnet test $env:TEST_PROJECT
+          dotnet test "$TEST_PROJECT"
           --configuration Release
           --no-restore
           --logger GitHubActions
-          --filter "TestCategory!=PerformanceDiagnostic&TestCategory!=PerformanceGate&(${{ matrix.filter }})"
-
-      - name: Run publishing integrity behavior
-        if: matrix.domain == 'Publishing'
-        shell: pwsh
-        run: ./build/Test-PublishSupport.ps1
+          --filter "TestCategory!=PerformanceDiagnostic&TestCategory!=PerformanceGate&TestCategory!=PowerShell&(${{ matrix.filter }})"

@@ -28,13 +28,49 @@ internal sealed partial class CiRequiredStatusCheckTests
     }
 
     [Test]
-    public void CorrectnessRestoreUsesTheReleaseDependencyGraph()
+    public void CorrectnessRestoresTheReleaseTestProject()
     {
         var root = ResolveRepoRoot();
         var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "ci.yml"));
 
-        workflow.Should().Contain(
-            "dotnet restore $env:TEST_PROJECT --configfile $env:SHARPCLAW_NUGET_CONFIG -p:Configuration=Release");
+        workflow.Should().Contain("dotnet restore \"$TEST_PROJECT\" -p:Configuration=Release");
+    }
+
+    [Test]
+    public void CiUsesNoPowerShellOrWindowsOnlyTooling()
+    {
+        var root = ResolveRepoRoot();
+        var github = Path.Combine(root, ".github");
+        var workflow = File.ReadAllText(Path.Combine(github, "workflows", "ci.yml"));
+
+        foreach (var forbidden in new[] { "pwsh", ".ps1", "runs-on: windows", "$env:" })
+            workflow.Should().NotContainEquivalentOf(forbidden, "CI must be reproducible on Linux with the .NET SDK alone");
+        workflow.Should().Contain("runs-on: ubuntu-latest");
+        Directory.EnumerateFiles(github, "*.ps1", SearchOption.AllDirectories).Should().BeEmpty();
+        Directory.EnumerateFiles(github, "*.y*ml", SearchOption.AllDirectories)
+            .Where(path => File.ReadAllText(path).Contains("shell: pwsh", StringComparison.OrdinalIgnoreCase))
+            .Should().BeEmpty();
+    }
+
+    [Test]
+    public void TestsThatStartPowerShellAreExcludedFromCi()
+    {
+        var root = ResolveRepoRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "ci.yml"));
+        workflow.Should().Contain("TestCategory!=PowerShell&(${{ matrix.filter }})");
+
+        var thisFile = Path.Combine(root, "SharpClaw.Tests", "Ci", "CiRequiredStatusCheckTests.cs");
+        var starters = Directory.EnumerateFiles(Path.Combine(root, "SharpClaw.Tests"), "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                && !string.Equals(Path.GetFullPath(path), Path.GetFullPath(thisFile), StringComparison.Ordinal))
+            .Where(path => PowerShellStartRegex().IsMatch(File.ReadAllText(path)))
+            .ToArray();
+
+        starters.Should().NotBeEmpty("the installer cleanup fixture still exercises scripts/test-installed-msix.ps1");
+        foreach (var path in starters)
+            File.ReadAllText(path).Should().Contain("[Category(\"PowerShell\")]",
+                $"{Path.GetFileName(path)} starts PowerShell and must stay out of CI");
     }
 
     [Test]
@@ -152,9 +188,6 @@ internal sealed partial class CiRequiredStatusCheckTests
             if (jobMatch.Success)
             {
                 var name = jobMatch.Groups["name"].Value.Trim();
-                if (name.StartsWith("Dependency graph / ", StringComparison.Ordinal))
-                    contexts.Add(name);
-
                 currentJobTemplate = name.Contains("${{ matrix.domain }}", StringComparison.Ordinal)
                     ? name
                     : null;
@@ -241,4 +274,7 @@ internal sealed partial class CiRequiredStatusCheckTests
 
     [GeneratedRegex("\"(?<id>SharpClaw\\.[^\"]+)\"", RegexOptions.None, 1000)]
     private static partial Regex PackageIdentityRegex();
+
+    [GeneratedRegex(@"ProcessStartInfo\(\s*""(pwsh|powershell)(\.exe)?""", RegexOptions.IgnoreCase, 1000)]
+    private static partial Regex PowerShellStartRegex();
 }
