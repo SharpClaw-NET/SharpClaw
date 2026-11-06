@@ -358,17 +358,17 @@
       "ContributionPaths": [
         "sharpclaw_providers_llamasharp/System.Security.Cryptography.Pkcs.dll"
       ],
-      "Package": "System.Security.Cryptography.Pkcs/10.0.10",
+      "Package": "System.Security.Cryptography.Pkcs/10.0.14",
       "ArchiveEntry": "lib/net10.0/System.Security.Cryptography.Pkcs.dll",
-      "Sha256": "6a61b7aa008e00807a8d2a1b87eed604a2a55320800889242d1ce98531d8a076"
+      "Sha256": "fee526bc764c85a873764022d61247a0d68f87dc9efcb7ef0de1b5136d8fc6cc"
     },
     {
       "ContributionPaths": [
         "sharpclaw_providers_llamasharp/System.Security.Cryptography.Xml.dll"
       ],
-      "Package": "System.Security.Cryptography.Xml/10.0.10",
+      "Package": "System.Security.Cryptography.Xml/10.0.14",
       "ArchiveEntry": "lib/net10.0/System.Security.Cryptography.Xml.dll",
-      "Sha256": "5a2053d5de6bb95ebe57a11fe9b553b9913d87fa4b3744f4e4e10ec4339cb0ed"
+      "Sha256": "15f69545d550f4b65d799b9dddfeba90dc2228348d8e9105efe4bf53a8887d88"
     }
   ]
 }
