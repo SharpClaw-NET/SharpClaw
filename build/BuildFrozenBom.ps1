@@ -15,13 +15,6 @@ $artifactsPath = Join-Path $rootPath "artifacts"
 $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
-$packageVersion = "0.5.0-dev.20260920.1"
-$corePackageVersion = "0.5.0-dev.20260925.3"
-$moduleHostPackageVersion = "0.5.0-dev.20260925.3"
-$moduleTestingPackageVersion = "0.5.0-dev.20260925.3"
-$moduleDevPackageVersion = "0.5.0-dev.20260921.2"
-$persistencePackageVersion = "0.5.0-dev.20260922.1"
-
 New-Item -ItemType Directory -Force -Path @(
     $rootPath,
     $sourcesPath,
@@ -125,35 +118,37 @@ $sourceRepositories = @(
     [pscustomobject]@{
         Name = "contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
+        Commit = "a78098e4c499d3b23c03121280771fb4f38c775a"
+        PackageIds = @("SharpClaw.Contracts")
+    },
+    [pscustomobject]@{
+        Name = "gateway-contracts"
+        Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
         Commit = "b7defdd58865df33d7d274dba3c8b20accb4ba6e"
-        PackageIds = @("SharpClaw.Contracts", "SharpClaw.Gateway.Contracts")
+        PackageIds = @("SharpClaw.Gateway.Contracts")
     },
     [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
-        Commit = "62f081180a8c6465ce84a7a8bd5cc96dce23c546"
+        Commit = "0b88f3b0cd267be4d1cd735985bf38b8834469bd"
         PackageIds = @("SharpClaw.Core")
     },
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "195ba708050c72d6606b9cba86d0a45a46f7b86c"
+        Commit = "08a51f516c6f5cc0be2ee4f891035ef244580bfa"
         PackageIds = @(
             "SharpClaw.ModuleSDK",
             "SharpClaw.SidecarHost.InProcess",
-            "SharpClaw.ModuleSDK.HostOperations"
+            "SharpClaw.ModuleSDK.HostOperations",
+            "SharpClaw.ModuleSDK.Testing",
+            "SharpClaw.SidecarHost.OutOfProcess"
         )
-    },
-    [pscustomobject]@{
-        Name = "module-sdk-sidecar"
-        Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "1d36241a9e404dd7be99385dcff81ba6bd301fff"
-        PackageIds = @("SharpClaw.ModuleSDK.Testing", "SharpClaw.SidecarHost.OutOfProcess")
     },
     [pscustomobject]@{
         Name = "editor-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations.git"
-        Commit = "58987a8cb08d640a77074990161ad321d2604fed"
+        Commit = "b13c20b6444c1496a3563b85c8bc90eb4df6fde7"
         PackageIds = @(
             "SharpClaw.Modules.EditorCommon",
             "SharpClaw.Modules.VS2026Editor",
@@ -163,13 +158,13 @@ $sourceRepositories = @(
     [pscustomobject]@{
         Name = "metrics"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Metrics.git"
-        Commit = "ec17a3223e1b195afb4ad11cc799883d8dc2d2e2"
+        Commit = "fef204f8ad6e8742bafc52bcbad6147c4f7b4094"
         PackageIds = @("SharpClaw.Modules.Metrics")
     },
     [pscustomobject]@{
         Name = "provider-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ProviderIntegrations.git"
-        Commit = "ec002d49e6f132224f6b846d4bef293d586de29b"
+        Commit = "3b71f0bc1e2247eee451a1bd3e8390573812bc95"
         PackageIds = @(
             "SharpClaw.Providers.Common",
             "SharpClaw.Providers.LocalCommon",
@@ -189,7 +184,7 @@ $sourceRepositories = @(
     [pscustomobject]@{
         Name = "persistence"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Persistence"
-        Commit = "8ff0884018e292c987909685be6d5dc019a2524e"
+        Commit = "6d09ecc2ac18095494528f022cf4ac8a4dde8605"
         PackageIds = @(
             "SharpClaw.Persistence",
             "SharpClaw.Persistence.JSONColdStore",
@@ -235,6 +230,41 @@ foreach ($repository in $sourceRepositories)
     {
         throw "The $($repository.Name) checkout does not match its required commit."
     }
+}
+
+# Every package is frozen at the exact version published today. Versions are declared by the
+# source at the pinned commit and verified against the packed nuspec; only commits whose source
+# predates the published version are listed in $packageVersionOverrides and packed with it.
+$expectedPackageVersions = [ordered]@{
+    "SharpClaw.Contracts" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Gateway.Contracts" = "0.5.0-dev.20260920.1"
+    "SharpClaw.Core" = "0.5.0-dev.20260925.4"
+    "SharpClaw.ModuleSDK" = "0.5.0-dev.20260920.2"
+    "SharpClaw.ModuleSDK.HostOperations" = "0.5.0-dev.20260920.2"
+    "SharpClaw.SidecarHost.InProcess" = "0.5.0-dev.20260920.2"
+    "SharpClaw.ModuleSDK.Testing" = "0.5.0-dev.20260925.4"
+    "SharpClaw.SidecarHost.OutOfProcess" = "0.5.0-dev.20260925.4"
+    "SharpClaw.Modules.EditorCommon" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Modules.VS2026Editor" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Modules.VSCodeEditor" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Modules.Metrics" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Providers.Common" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Providers.LocalCommon" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Modules.Providers.Anthropic" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Modules.Providers.Google" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Modules.Providers.Ollama" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Modules.Providers.OpenAICompatible" = "0.5.0-dev.20260920.2"
+    "SharpClaw.Modules.Providers.LlamaSharp" = "0.5.0-dev.20260920.3"
+    "SharpClaw.Modules.ModuleDev" = "0.5.0-dev.20260921.2"
+    "SharpClaw.Persistence" = "0.5.0-dev.20260922.3"
+    "SharpClaw.Persistence.JSONColdStore" = "0.5.0-dev.20260922.3"
+    "SharpClaw.Persistence.PostgreSQL" = "0.5.0-dev.20260922.3"
+    "SharpClaw.Persistence.SQLServer" = "0.5.0-dev.20260922.3"
+    "SharpClaw.Persistence.SQLite" = "0.5.0-dev.20260922.3"
+}
+$packageVersionOverrides = @{
+    "SharpClaw.Gateway.Contracts" = $expectedPackageVersions["SharpClaw.Gateway.Contracts"]
+    "SharpClaw.Modules.ModuleDev" = $expectedPackageVersions["SharpClaw.Modules.ModuleDev"]
 }
 
 $escapedFeedPath = [System.Security.SecurityElement]::Escape($feedPath)
@@ -295,14 +325,6 @@ function Pack-Target
     )
 
     $targetArtifacts = Join-Path $artifactsPath $ArtifactGroup
-    $targetPackageVersion = if ([string]::IsNullOrWhiteSpace($PackageVersionOverride))
-    {
-        $packageVersion
-    }
-    else
-    {
-        $PackageVersionOverride
-    }
     $arguments = @(
         "pack",
         $Target,
@@ -312,15 +334,19 @@ function Pack-Target
         "-p:ArtifactsPath=$targetArtifacts",
         "-p:UseArtifactsOutput=true",
         "-p:SharpClawArtifactsRoot=$targetArtifacts",
-        "-p:PackageOutputPath=$feedPath",
-        "-p:PackageVersion=$targetPackageVersion"
+        "-p:PackageOutputPath=$feedPath"
     )
-    if (-not $PreserveAssemblyVersion)
+    # Without an override the version declared by the source at the pinned commit is used as-is.
+    if (-not [string]::IsNullOrWhiteSpace($PackageVersionOverride))
     {
-        $arguments += @(
-            "-p:Version=$targetPackageVersion",
-            "-p:InformationalVersion=$targetPackageVersion"
-        )
+        $arguments += "-p:PackageVersion=$PackageVersionOverride"
+        if (-not $PreserveAssemblyVersion)
+        {
+            $arguments += @(
+                "-p:Version=$PackageVersionOverride",
+                "-p:InformationalVersion=$PackageVersionOverride"
+            )
+        }
     }
     $arguments += "-p:ContinuousIntegrationBuild=true"
     $arguments += $ExtraArguments
@@ -344,12 +370,12 @@ function Restore-And-Pack
 }
 
 $contractsProject = Join-Path $sourcesPath "contracts\SharpClaw.Contracts\SharpClaw.Contracts.csproj"
-$gatewayProject = Join-Path $sourcesPath "contracts\SharpClaw.Gateway.Contracts\SharpClaw.Gateway.Contracts.csproj"
+$gatewayProject = Join-Path $sourcesPath "gateway-contracts\SharpClaw.Gateway.Contracts\SharpClaw.Gateway.Contracts.csproj"
 $coreProject = Join-Path $sourcesPath "core\SharpClaw.Core\SharpClaw.Core.csproj"
 $moduleSdkProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK\SharpClaw.ModuleSDK.csproj"
 $moduleInProcessProject = Join-Path $sourcesPath "module-sdk\SharpClaw.SidecarHost.InProcess\SharpClaw.SidecarHost.InProcess.csproj"
-$moduleOutOfProcessProject = Join-Path $sourcesPath "module-sdk-sidecar\SharpClaw.SidecarHost.OutOfProcess\SharpClaw.SidecarHost.OutOfProcess.csproj"
-$moduleTestingProject = Join-Path $sourcesPath "module-sdk-sidecar\SharpClaw.ModuleSDK.Testing\SharpClaw.ModuleSDK.Testing.csproj"
+$moduleOutOfProcessProject = Join-Path $sourcesPath "module-sdk\SharpClaw.SidecarHost.OutOfProcess\SharpClaw.SidecarHost.OutOfProcess.csproj"
+$moduleTestingProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.Testing\SharpClaw.ModuleSDK.Testing.csproj"
 $moduleHostOperationsProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.HostOperations\SharpClaw.ModuleSDK.HostOperations.csproj"
 $persistenceSolution = Join-Path $sourcesPath "persistence\SharpClaw.Persistence.slnx"
 $editorSolution = Join-Path $sourcesPath "editor-integrations\SharpClaw.EditorIntegrations.slnx"
@@ -358,28 +384,18 @@ $providerSolution = Join-Path $sourcesPath "provider-integrations\SharpClaw.Prov
 $moduleDevProject = Join-Path $sourcesPath "module-dev\SharpClaw.Modules.ModuleDev\SharpClaw.Modules.ModuleDev.csproj"
 
 Restore-And-Pack -Label "contracts" -Target $contractsProject -ArtifactGroup "contracts"
-Restore-And-Pack -Label "gateway-contracts" -Target $gatewayProject -ArtifactGroup "gateway-contracts"
-Restore-Target -Label "core" -Target $coreProject -ArtifactGroup "core"
+Restore-Target -Label "gateway-contracts" -Target $gatewayProject -ArtifactGroup "gateway-contracts"
 Pack-Target `
-    -Label "core" `
-    -Target $coreProject `
-    -ArtifactGroup "core" `
-    -PackageVersionOverride $corePackageVersion
+    -Label "gateway-contracts" `
+    -Target $gatewayProject `
+    -ArtifactGroup "gateway-contracts" `
+    -PackageVersionOverride $packageVersionOverrides["SharpClaw.Gateway.Contracts"]
+Restore-And-Pack -Label "core" -Target $coreProject -ArtifactGroup "core"
 Restore-And-Pack -Label "module-sdk" -Target $moduleSdkProject -ArtifactGroup "module-sdk"
-Restore-Target -Label "persistence" -Target $persistenceSolution -ArtifactGroup "persistence"
-Pack-Target `
-    -Label "persistence" `
-    -Target $persistenceSolution `
-    -ArtifactGroup "persistence" `
-    -PackageVersionOverride $persistencePackageVersion
+Restore-And-Pack -Label "persistence" -Target $persistenceSolution -ArtifactGroup "persistence"
 
 Restore-And-Pack -Label "module-in-process" -Target $moduleInProcessProject -ArtifactGroup "module-hosts"
-Restore-Target -Label "module-testing" -Target $moduleTestingProject -ArtifactGroup "module-hosts"
-Pack-Target `
-    -Label "module-testing" `
-    -Target $moduleTestingProject `
-    -ArtifactGroup "module-hosts" `
-    -PackageVersionOverride $moduleTestingPackageVersion
+Restore-And-Pack -Label "module-testing" -Target $moduleTestingProject -ArtifactGroup "module-hosts"
 Restore-And-Pack -Label "module-host-operations" -Target $moduleHostOperationsProject -ArtifactGroup "module-hosts"
 Restore-Target -Label "module-out-of-process" -Target $moduleOutOfProcessProject -ArtifactGroup "module-hosts"
 
@@ -419,7 +435,7 @@ foreach ($payloadName in @(
     Copy-Item -LiteralPath (Join-Path $outOfProcessOutput $payloadName) -Destination $outOfProcessPayload
 }
 
-$sdkArchive = Join-Path $feedPath "SharpClaw.ModuleSDK.$packageVersion.nupkg"
+$sdkArchive = Join-Path $feedPath "SharpClaw.ModuleSDK.$($expectedPackageVersions["SharpClaw.ModuleSDK"]).nupkg"
 $sdkZip = [System.IO.Compression.ZipFile]::OpenRead($sdkArchive)
 try
 {
@@ -443,8 +459,7 @@ Pack-Target `
     -Label "module-out-of-process" `
     -Target $moduleOutOfProcessProject `
     -ArtifactGroup "module-hosts" `
-    -ExtraArguments @("-p:OutOfProcessHostPayloadSource=$outOfProcessPayload") `
-    -PackageVersionOverride $moduleHostPackageVersion
+    -ExtraArguments @("-p:OutOfProcessHostPayloadSource=$outOfProcessPayload")
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"
 Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -ArtifactGroup "provider-integrations"
@@ -453,35 +468,9 @@ Pack-Target `
     -Label "module-dev" `
     -Target $moduleDevProject `
     -ArtifactGroup "module-dev" `
-    -PackageVersionOverride $moduleDevPackageVersion
+    -PackageVersionOverride $packageVersionOverrides["SharpClaw.Modules.ModuleDev"]
 
-$expectedPackages = @(
-    "SharpClaw.Contracts.$packageVersion.nupkg",
-    "SharpClaw.Core.$corePackageVersion.nupkg",
-    "SharpClaw.Gateway.Contracts.$packageVersion.nupkg",
-    "SharpClaw.SidecarHost.InProcess.$packageVersion.nupkg",
-    "SharpClaw.SidecarHost.OutOfProcess.$moduleHostPackageVersion.nupkg",
-    "SharpClaw.ModuleSDK.$packageVersion.nupkg",
-    "SharpClaw.ModuleSDK.HostOperations.$packageVersion.nupkg",
-    "SharpClaw.ModuleSDK.Testing.$moduleTestingPackageVersion.nupkg",
-    "SharpClaw.Modules.EditorCommon.$packageVersion.nupkg",
-    "SharpClaw.Modules.Metrics.$packageVersion.nupkg",
-    "SharpClaw.Modules.ModuleDev.$moduleDevPackageVersion.nupkg",
-    "SharpClaw.Modules.Providers.Anthropic.$packageVersion.nupkg",
-    "SharpClaw.Modules.Providers.Google.$packageVersion.nupkg",
-    "SharpClaw.Modules.Providers.LlamaSharp.$packageVersion.nupkg",
-    "SharpClaw.Modules.Providers.Ollama.$packageVersion.nupkg",
-    "SharpClaw.Modules.Providers.OpenAICompatible.$packageVersion.nupkg",
-    "SharpClaw.Modules.VS2026Editor.$packageVersion.nupkg",
-    "SharpClaw.Modules.VSCodeEditor.$packageVersion.nupkg",
-    "SharpClaw.Providers.Common.$packageVersion.nupkg",
-    "SharpClaw.Providers.LocalCommon.$packageVersion.nupkg",
-    "SharpClaw.Persistence.$persistencePackageVersion.nupkg",
-    "SharpClaw.Persistence.JSONColdStore.$persistencePackageVersion.nupkg",
-    "SharpClaw.Persistence.PostgreSQL.$persistencePackageVersion.nupkg",
-    "SharpClaw.Persistence.SQLServer.$persistencePackageVersion.nupkg",
-    "SharpClaw.Persistence.SQLite.$persistencePackageVersion.nupkg"
-)
+$expectedPackages = @($expectedPackageVersions.GetEnumerator() | ForEach-Object { "$($_.Key).$($_.Value).nupkg" })
 
 $actualPackages = Get-ChildItem -LiteralPath $feedPath -Filter "*.nupkg" -File |
     Where-Object { -not $_.Name.EndsWith(".snupkg", [System.StringComparison]::OrdinalIgnoreCase) } |
@@ -529,18 +518,6 @@ if ($reviewedPackageCommits.Count -ne $expectedPackages.Count)
     throw "The package provenance map has $($reviewedPackageCommits.Count) IDs for $($expectedPackages.Count) expected packages."
 }
 
-$packageVersionOverrides = @{
-    "SharpClaw.Core" = $corePackageVersion
-    "SharpClaw.ModuleSDK.Testing" = $moduleTestingPackageVersion
-    "SharpClaw.SidecarHost.OutOfProcess" = $moduleHostPackageVersion
-    "SharpClaw.Modules.ModuleDev" = $moduleDevPackageVersion
-    "SharpClaw.Persistence" = $persistencePackageVersion
-    "SharpClaw.Persistence.JSONColdStore" = $persistencePackageVersion
-    "SharpClaw.Persistence.PostgreSQL" = $persistencePackageVersion
-    "SharpClaw.Persistence.SQLServer" = $persistencePackageVersion
-    "SharpClaw.Persistence.SQLite" = $persistencePackageVersion
-}
-
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 foreach ($package in $actualPackages)
 {
@@ -573,14 +550,12 @@ foreach ($package in $actualPackages)
             throw "Package '$($package.Name)' does not match its nuspec identity."
         }
 
-        $expectedVersion = if ($packageVersionOverrides.ContainsKey($packageId))
+        if (-not $expectedPackageVersions.Contains($packageId))
         {
-            $packageVersionOverrides[$packageId]
+            throw "Package '$packageId' has no frozen version."
         }
-        else
-        {
-            $packageVersion
-        }
+
+        $expectedVersion = $expectedPackageVersions[$packageId]
         if ($resolvedVersion -ne $expectedVersion)
         {
             throw "Package '$($package.Name)' has version '$resolvedVersion' instead of '$expectedVersion'."

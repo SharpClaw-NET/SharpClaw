@@ -79,31 +79,37 @@ internal sealed partial class CiRequiredStatusCheckTests
         var root = ResolveRepoRoot();
         var script = File.ReadAllText(Path.Combine(root, "build", "BuildFrozenBom.ps1"));
 
-        script.Should().Contain("$persistencePackageVersion = \"0.5.0-dev.20260922.1\"");
-        script.Should().Contain("8ff0884018e292c987909685be6d5dc019a2524e");
-        script.Should().Contain("Restore-Target -Label \"persistence\"");
-        script.Should().Contain("-PackageVersionOverride $persistencePackageVersion");
+        script.Should().Contain("\"SharpClaw.Persistence\" = \"0.5.0-dev.20260922.3\"");
+        script.Should().Contain("\"SharpClaw.Persistence.SQLServer\" = \"0.5.0-dev.20260922.3\"");
+        script.Should().Contain("6d09ecc2ac18095494528f022cf4ac8a4dde8605");
+        script.Should().Contain("Restore-And-Pack -Label \"persistence\"");
         script.Should().Contain("SharpClaw.Persistence.SQLServer");
-        script.Should().Contain("$moduleDevPackageVersion = \"0.5.0-dev.20260921.2\"");
+        script.Should().Contain("\"SharpClaw.Modules.ModuleDev\" = \"0.5.0-dev.20260921.2\"");
         script.Should().Contain("929429f22d91832237f35f5f1fd569857321508b");
         script.Should().NotContain("SharpClaw.AgentOrchestration");
         script.Should().NotContain("agent-modules");
     }
 
     [Test]
-    public void FrozenBomKeeps_old_sdk_packages_immutable_and_packs_the_new_core_closure()
+    public void FrozenBomFreezesEachPackageAtItsPublishedVersionAndCommit()
     {
         var root = ResolveRepoRoot();
         var script = File.ReadAllText(Path.Combine(root, "build", "BuildFrozenBom.ps1"));
 
-        script.Should().Contain("$corePackageVersion = \"0.5.0-dev.20260925.3\"");
-        script.Should().Contain("62f081180a8c6465ce84a7a8bd5cc96dce23c546");
+        script.Should().Contain("\"SharpClaw.Contracts\" = \"0.5.0-dev.20260920.2\"");
+        script.Should().Contain("a78098e4c499d3b23c03121280771fb4f38c775a");
+        script.Should().Contain("Name = \"gateway-contracts\"");
+        script.Should().Contain("b7defdd58865df33d7d274dba3c8b20accb4ba6e");
+        script.Should().Contain("\"SharpClaw.Gateway.Contracts\" = \"0.5.0-dev.20260920.1\"");
+        script.Should().Contain("\"SharpClaw.Core\" = \"0.5.0-dev.20260925.4\"");
+        script.Should().Contain("0b88f3b0cd267be4d1cd735985bf38b8834469bd");
         script.Should().Contain("Name = \"module-sdk\"");
-        script.Should().Contain("195ba708050c72d6606b9cba86d0a45a46f7b86c");
-        script.Should().Contain("Name = \"module-sdk-sidecar\"");
-        script.Should().Contain("1d36241a9e404dd7be99385dcff81ba6bd301fff");
-        script.Should().Contain("-PackageVersionOverride $moduleTestingPackageVersion");
-        script.Should().Contain("-PackageVersionOverride $moduleHostPackageVersion");
+        script.Should().Contain("08a51f516c6f5cc0be2ee4f891035ef244580bfa");
+        script.Should().NotContain("module-sdk-sidecar");
+        script.Should().Contain("\"SharpClaw.ModuleSDK\" = \"0.5.0-dev.20260920.2\"");
+        script.Should().Contain("\"SharpClaw.ModuleSDK.Testing\" = \"0.5.0-dev.20260925.4\"");
+        script.Should().Contain("\"SharpClaw.SidecarHost.OutOfProcess\" = \"0.5.0-dev.20260925.4\"");
+        script.Should().Contain("-PackageVersionOverride $packageVersionOverrides[\"SharpClaw.Gateway.Contracts\"]");
         script.Should().Contain("JsonSchema.Net.dll");
         script.Should().Contain("JsonPointer.Net.dll");
         script.Should().Contain("Json.More.dll");
