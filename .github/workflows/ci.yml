@@ -26,7 +26,7 @@ permissions:
 
 # CI runs only what the maintainers can reproduce on a Linux workstation with the
 # .NET SDK alone: no PowerShell, no Windows runner, no Windows-only tooling.
-# Release tooling under build/ and scripts/ stays manual; see docs/Installers.md.
+# Release tooling under build/ and scripts/ is run by hand, outside CI.
 jobs:
   correctness:
     name: Correctness / ${{ matrix.domain }}
