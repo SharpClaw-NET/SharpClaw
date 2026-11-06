@@ -35,8 +35,20 @@ internal sealed class ModulePackageStoreTests
         {
             await gate.WaitForEntryAsync().ConfigureAwait(false);
             var scratch = Directory.GetDirectories(workspace.Path("store"), "inspection-*").Should().ContainSingle().Which;
-            sentinel = await RedirectScratchAsync(workspace, scratch).ConfigureAwait(false);
-            redirected = true;
+            if (OperatingSystem.IsWindows())
+            {
+                // The in-flight download holds its scratch archive open with FileShare.None, and Windows
+                // refuses to rename a directory with an open descendant. The redirect cannot be staged
+                // there, so prove that refusal instead of skipping the case.
+                var redirect = () => Directory.Move(workspace.Path("store"), workspace.Path("retired-store"));
+                redirect.Should().Throw<IOException>();
+                Directory.Exists(scratch).Should().BeTrue();
+            }
+            else
+            {
+                sentinel = await RedirectScratchAsync(workspace, scratch).ConfigureAwait(false);
+                redirected = true;
+            }
             preparation.IsCompleted.Should().BeFalse();
         }
         finally
@@ -316,8 +328,17 @@ internal sealed class ModulePackageStoreTests
             process.ExitCode.Should().Be(0, "directory junction creation needs no developer-mode privilege");
         }
         else File.CreateSymbolicLink(System.IO.Path.Combine(source, "linked.txt"), System.IO.Path.Combine(source, "LICENSE.md"));
-        Func<Task> inspect = async () => { using var candidate = await store.PrepareAsync(new("local", LocalPath: source), null, default).ConfigureAwait(false); };
-        await inspect.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
+        try
+        {
+            Func<Task> inspect = async () => { using var candidate = await store.PrepareAsync(new("local", LocalPath: source), null, default).ConfigureAwait(false); };
+            await inspect.Should().ThrowAsync<InvalidDataException>().ConfigureAwait(false);
+        }
+        finally
+        {
+            // Recursive deletion of the workspace rejects a nested junction on Windows, so unlink it
+            // first; the junction target is an ordinary workspace directory and is deleted afterwards.
+            if (OperatingSystem.IsWindows()) RemoveDirectoryLink(System.IO.Path.Combine(source, "linked"));
+        }
     }
 
     [TestCase(true), TestCase(false)]

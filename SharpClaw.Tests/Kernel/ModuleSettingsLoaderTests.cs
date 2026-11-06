@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -29,6 +30,14 @@ internal sealed class ModuleSettingsLoaderTests
     public async Task ImportedIndependentPackageUsesProductionLoaderAndItsOwnSettingsEndpointsAsync(string mode)
     {
         using var workspace = new Workspace();
+        // The loaded registration set and its module types stay in the helper's frame so the
+        // collectible load context can be released before the workspace deletes the module DLL.
+        await VerifyImportedIndependentPackageAsync(workspace, mode).ConfigureAwait(false);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task VerifyImportedIndependentPackageAsync(Workspace workspace, string mode)
+    {
         var archive = await CreateModuleArchiveAsync(workspace, mode).ConfigureAwait(false);
         using var sources = new ModulePackageSources();
         var store = new ModulePackageStore(workspace.Path("store"), sources);
@@ -189,6 +198,37 @@ internal sealed class ModuleSettingsLoaderTests
             }));
             return source;
         }
-        public void Dispose() => Directory.Delete(_root, recursive: true);
+        public void Dispose()
+        {
+            if (!Directory.Exists(_root))
+                return;
+
+            // Windows keeps a loaded module assembly locked until its collectible load context
+            // is collected, so deletion follows the same bounded wait as the persistence tests.
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                try
+                {
+                    Directory.Delete(_root, recursive: true);
+                    return;
+                }
+                catch (Exception exception) when (exception is UnauthorizedAccessException or IOException)
+                {
+                    if (attempt < 19)
+                    {
+                        Thread.Sleep(50);
+                        continue;
+                    }
+
+                    if (!OperatingSystem.IsWindows())
+                        throw;
+                    TestContext.Progress.WriteLine(
+                        $"Deferred cleanup of '{_root}' until the Windows test host exits: {exception.Message}");
+                }
+            }
+        }
     }
 }
