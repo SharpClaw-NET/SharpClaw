@@ -38,11 +38,11 @@
     <PackageVersion Include="SharpClaw.Modules.Providers.LlamaSharp" Version="[0.5.0-dev.20260920.3]" />
     <PackageVersion Include="SharpClaw.Modules.Providers.Ollama" Version="[0.5.0-dev.20260920.2]" />
     <PackageVersion Include="SharpClaw.Modules.Providers.OpenAICompatible" Version="[0.5.0-dev.20260920.2]" />
-    <PackageVersion Include="SharpClaw.ModuleSDK" Version="[0.5.0-dev.20260920.2]" />
-    <PackageVersion Include="SharpClaw.SidecarHost.InProcess" Version="[0.5.0-dev.20260920.2]" />
-    <PackageVersion Include="SharpClaw.SidecarHost.OutOfProcess" Version="[0.5.0-dev.20260925.4]" />
-    <PackageVersion Include="SharpClaw.ModuleSDK.Testing" Version="[0.5.0-dev.20260925.4]" />
-    <PackageVersion Include="SharpClaw.ModuleSDK.HostOperations" Version="[0.5.0-dev.20260920.2]" />
+    <PackageVersion Include="SharpClaw.ModuleSDK" Version="[0.5.0-dev.20260920.3]" />
+    <PackageVersion Include="SharpClaw.SidecarHost.InProcess" Version="[0.5.0-dev.20260920.3]" />
+    <PackageVersion Include="SharpClaw.SidecarHost.OutOfProcess" Version="[0.5.0-dev.20260925.5]" />
+    <PackageVersion Include="SharpClaw.ModuleSDK.Testing" Version="[0.5.0-dev.20260925.5]" />
+    <PackageVersion Include="SharpClaw.ModuleSDK.HostOperations" Version="[0.5.0-dev.20260920.3]" />
     <PackageVersion Include="SharpClaw.Persistence" Version="[0.5.0-dev.20260922.3]" />
     <PackageVersion Include="SharpClaw.Persistence.JSONColdStore" Version="[0.5.0-dev.20260922.3]" />
     <PackageVersion Include="SharpClaw.Persistence.PostgreSQL" Version="[0.5.0-dev.20260922.3]" />
